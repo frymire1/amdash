@@ -1,0 +1,8 @@
+<div class="doctors-view-container">
+  <div class="active-patient-section">
+    <app-active-patient [patient]="selectedPatient"></app-active-patient>
+  </div>
+  <div class="patient-list-section">
+    <app-patient-list (selected)="onPatientSelected($event)"></app-patient-list>
+  </div>
+</div>

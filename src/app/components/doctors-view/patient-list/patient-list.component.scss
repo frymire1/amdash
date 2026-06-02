@@ -1,0 +1,25 @@
+.patient-list-container {
+  padding: 24px;
+  box-sizing: border-box;
+
+  h2 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    color: #333;
+  }
+
+  .patients-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+    overflow-x: hidden;
+    width: 100%;
+  }
+
+  @media (min-width: 1200px) {
+    .patients-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+}

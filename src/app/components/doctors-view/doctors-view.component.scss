@@ -1,0 +1,56 @@
+.doctors-view-container {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 56px);
+  gap: 0;
+  background: #f5f7fa;
+
+  .active-patient-section {
+    width: 100%;
+    overflow-y: auto;
+    padding: 24px;
+    background: #f5f7fa;
+  }
+
+  .patient-list-section {
+    width: 100%;
+    overflow-y: auto;
+    border-top: 1px solid #e2e8f0;
+    background: white;
+  }
+}
+
+@media (min-width: 768px) {
+  .doctors-view-container {
+    flex-direction: row;
+
+    .patient-list-section {
+      flex: 0 0 40%;
+      width: auto;
+      border-top: none;
+      border-right: 1px solid #e2e8f0;
+      height: calc(100vh - 56px);
+      overflow-y: auto;
+      overflow-x: hidden;
+      background: white;
+      order: 0;
+    }
+
+    .active-patient-section {
+      flex: 1 1 60%;
+      padding: 24px;
+      height: calc(100vh - 56px);
+      overflow-y: auto;
+      background: #f5f7fa;
+      order: 1;
+    }
+  }
+}
+
+@media (min-width: 1200px) {
+  .doctors-view-container {
+    .active-patient-section {
+      padding: 32px;
+    }
+  }
+}

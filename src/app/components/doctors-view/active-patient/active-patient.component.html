@@ -1,0 +1,84 @@
+@if (patient) {
+  <div class="active-patient-container">
+    <div class="patient-header">
+      <h1>{{ patient.name }}</h1>
+      <span class="healthcare-number">{{ patient.healthcareNumber }}</span>
+    </div>
+
+    <div class="patient-content">
+    <mat-card class="patient-info-card">
+      <mat-card-header>
+        <mat-card-title>Patient Information</mat-card-title>
+      </mat-card-header>
+      <mat-card-content>
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="label">Gender</span>
+            <span class="value">{{ patient.gender }}</span>
+          </div>
+          <div class="info-item">
+            <span class="label">Age</span>
+            <span class="value">{{ patient.age }} years</span>
+          </div>
+        </div>
+      </mat-card-content>
+    </mat-card>
+
+    <mat-card class="vitals-card">
+      <mat-card-header>
+        <mat-card-title>Vital Signs</mat-card-title>
+      </mat-card-header>
+      <mat-card-content>
+        <div class="vitals-grid">
+          <div class="vital-item">
+            <span class="label">Heart Rate</span>
+            <span class="value">{{ patient.vitals.heartRate }} bpm</span>
+          </div>
+          <div class="vital-item">
+            <span class="label">Blood Pressure</span>
+            <span class="value">{{ patient.vitals.bloodPressure }}</span>
+          </div>
+          <div class="vital-item">
+            <span class="label">Oxygen</span>
+            <span class="value">{{ patient.vitals.oxygen }}%</span>
+          </div>
+          <div class="vital-item">
+            <span class="label">Temperature</span>
+            <span class="value">{{ patient.vitals.temperature }}°C</span>
+          </div>
+        </div>
+      </mat-card-content>
+    </mat-card>
+
+    <mat-card class="location-card">
+      <mat-card-header>
+        <mat-card-title>Current Location</mat-card-title>
+      </mat-card-header>
+      <mat-card-content>
+        @if (patient.location) {
+          <google-map
+            [options]="mapOptions"
+            class="map"
+          >
+            <map-marker
+              [position]="{ lat: patient.location.latitude, lng: patient.location.longitude }"
+              [options]="markerOptions"
+              [title]="patient.name"
+            />
+          </google-map>
+          <div class="location-info">
+            <p><strong>Address:</strong> {{ patient.location.address }}</p>
+            <p><strong>Coordinates:</strong> {{ patient.location.latitude }}, {{ patient.location.longitude }}</p>
+          </div>
+        }
+      </mat-card-content>
+    </mat-card>
+    </div>
+  </div>
+}
+
+@if (!patient) {
+  <div class="no-patient">
+    <p>Select a patient to view details</p>
+  </div>
+}

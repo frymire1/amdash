@@ -1,0 +1,9 @@
+<div class="patient-list-container">
+  <h2>Patient List</h2>
+  <div class="patients-grid">
+    @for (patient of patients; track patient.healthcareNumber) {
+      <app-patient-card (select)="onPatientSelect(patient)" [patient]="patient"></app-patient-card>
+    }
+  </div>
+</div>
+
