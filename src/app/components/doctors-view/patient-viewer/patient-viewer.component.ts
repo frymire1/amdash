@@ -5,13 +5,13 @@ import { GoogleMapsModule } from '@angular/google-maps';
 import { Patient } from '../patient-list/patient-card/patient-card.component';
 
 @Component({
-  selector: 'app-active-patient',
+  selector: 'app-patient-viewer',
   standalone: true,
   imports: [CommonModule, MatCardModule, GoogleMapsModule],
-  templateUrl: './active-patient.component.html',
-  styleUrls: ['./active-patient.component.scss']
+  templateUrl: './patient-viewer.component.html',
+  styleUrls: ['./patient-viewer.component.scss']
 })
-export class ActivePatientComponent {
+export class PatientViewerComponent {
   @Input() patient?: Patient;
 
   mapOptions: google.maps.MapOptions = {
