@@ -16,10 +16,4 @@
     overflow-x: hidden;
     width: 100%;
   }
-
-  @media (min-width: 1200px) {
-    .patients-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
 }

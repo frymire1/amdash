@@ -50,6 +50,7 @@
     }
 
     .patient-info-card {
+      margin: 10px;
       .info-grid {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
@@ -78,6 +79,7 @@
     }
 
     .vitals-card {
+      margin: 10px;
       .vitals-grid {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
@@ -111,7 +113,6 @@
 
     .location-card {
       .location-placeholder-card {
-        width: 100%;
         background: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 100%);
         border: 2px solid #0284c7;
         border-radius: 8px;
