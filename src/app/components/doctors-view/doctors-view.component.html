@@ -1,13 +1,15 @@
-<mat-sidenav-container class="doctors-view-container">
-  <mat-sidenav #patientNav mode="over" class="patient-sidenav">
-    <app-patient-list (selected)="onPatientSelected($event); patientNav.close()"></app-patient-list>
-  </mat-sidenav>
-
+<div class="doctors-view-container">
   <div class="view-content">
-    <button mat-raised-button color="primary" class="mobile-patient-list-button" (click)="patientNav.open()" aria-label="Open patient list">
+    <button mat-raised-button color="primary" class="mobile-patient-list-button" (click)="togglePatientList()" aria-label="Open patient list">
       <mat-icon>people</mat-icon>
-      <span class="mobile-button-label">Patient List</span>
+      <span class="mobile-button-label">Select Patient</span>
     </button>
+
+    @if (showPatientList) {
+      <div class="mobile-patient-list-inline">
+        <app-patient-list (selected)="onPatientSelected($event)"></app-patient-list>
+      </div>
+    }
 
     <div class="active-patient-section">
       <app-patient-viewer [patient]="selectedPatient"></app-patient-viewer>
@@ -17,4 +19,4 @@
       <app-patient-list (selected)="onPatientSelected($event)"></app-patient-list>
     </div>
   </div>
-</mat-sidenav-container>
+</div>

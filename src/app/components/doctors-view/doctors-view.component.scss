@@ -6,12 +6,6 @@
   background: #f5f7fa;
 }
 
-.patient-sidenav {
-  width: 320px;
-  min-width: 0;
-  background: #ffffff;
-}
-
 .view-content {
   display: flex;
   flex-direction: column;
@@ -50,10 +44,17 @@
   white-space: nowrap;
 }
 
+.mobile-patient-list-inline {
+  margin-top: 72px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.05);
+}
+
 .active-patient-section {
   width: 100%;
   overflow-y: auto;
-  padding-top: 72px;
+  padding-top: 75px;
   background: #f5f7fa;
 }
 

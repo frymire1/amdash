@@ -1,6 +1,5 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { MatCardModule } from '@angular/material/card';
 
 export interface PatientVitals {
   heartRate: number;
@@ -27,7 +26,7 @@ export interface Patient {
 @Component({
   selector: 'app-patient-card',
   standalone: true,
-  imports: [CommonModule, MatCardModule],
+  imports: [CommonModule],
   templateUrl: './patient-card.component.html',
   styleUrls: ['./patient-card.component.scss']
 })
