@@ -1,65 +1,51 @@
 .doctors-view-container {
-  height: calc(100vh - 56px);
-  width: 100%;
-  overflow-x: hidden;
-  overflow-y: hidden;
-  background: #f5f7fa;
-}
-
-.view-content {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  width: 100%;
-  min-width: 0;
-  overflow-y: hidden;
+  height: calc(100vh - 56px);
+  gap: 0;
   background: #f5f7fa;
-}
 
-.mobile-patient-list-button {
-  position: fixed;
-  top: 64px;
-  left: 12px;
-  z-index: 1000;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 0 16px;
-  min-height: 48px;
-  min-width: auto;
-  border-radius: 999px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-}
+  .mobile-patient-list-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin: 16px 16px 0;
+    width: fit-content;
+    padding: 10px 16px;
+    border: 1px solid #1d4ed8;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+    cursor: pointer;
+  }
 
-.mobile-patient-list-button .mat-mdc-button-touch-target {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
+  .mobile-patient-list-button:hover {
+    background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+    box-shadow: 0 6px 14px rgba(37, 99, 235, 0.25);
+  }
 
-.mobile-button-label {
-  font-size: 0.9rem;
-  font-weight: 500;
-  white-space: nowrap;
-}
+  .mobile-patient-list-inline {
+    margin-top: 16px;
+    background: #ffffff;
+  }
 
-.mobile-patient-list-inline {
-  margin-top: 72px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.05);
-}
+  .active-patient-section {
+    width: 100%;
+    overflow-y: auto;
+    padding: 24px;
+    background: #f5f7fa;
+  }
 
-.active-patient-section {
-  width: 100%;
-  overflow-y: auto;
-  padding-top: 75px;
-  background: #f5f7fa;
-}
-
-.patient-list-section {
-  display: none;
+  .patient-list-section {
+    display: none;
+    width: 100%;
+    overflow-y: auto;
+    border-top: 1px solid #e2e8f0;
+    background: white;
+  }
 }
 
 @media (min-width: 768px) {
@@ -70,17 +56,8 @@
       display: none;
     }
 
-    .view-content {
-      flex-direction: row;
-    }
-
-    .active-patient-section {
-      flex: 1 1 60%;
-      padding: 24px 0;
-      height: calc(100vh - 56px);
-      overflow-y: auto;
-      background: #f5f7fa;
-      order: 1;
+    .mobile-patient-list-inline {
+      display: none;
     }
 
     .patient-list-section {
@@ -94,6 +71,15 @@
       overflow-x: hidden;
       background: white;
       order: 0;
+    }
+
+    .active-patient-section {
+      flex: 1 1 60%;
+      padding: 24px;
+      height: calc(100vh - 56px);
+      overflow-y: auto;
+      background: #f5f7fa;
+      order: 1;
     }
   }
 }

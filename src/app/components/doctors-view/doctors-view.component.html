@@ -1,22 +1,19 @@
 <div class="doctors-view-container">
-  <div class="view-content">
-    <button mat-raised-button color="primary" class="mobile-patient-list-button" (click)="togglePatientList()" aria-label="Open patient list">
-      <mat-icon>people</mat-icon>
-      <span class="mobile-button-label">Select Patient</span>
-    </button>
+  <button mat-raised-button color="primary" class="mobile-patient-list-button" (click)="togglePatientList()" aria-label="Open patient list">
+    <mat-icon>people</mat-icon>
+    <span class="mobile-button-label">Patient List</span>
+  </button>
 
-    @if (showPatientList) {
-      <div class="mobile-patient-list-inline">
-        <app-patient-list (selected)="onPatientSelected($event)"></app-patient-list>
-      </div>
-    }
-
-    <div class="active-patient-section">
-      <app-patient-viewer [patient]="selectedPatient"></app-patient-viewer>
-    </div>
-
-    <div class="patient-list-section desktop-only">
+  @if (showPatientList) {
+    <div class="mobile-patient-list-inline">
       <app-patient-list (selected)="onPatientSelected($event)"></app-patient-list>
     </div>
+  }
+
+  <div class="active-patient-section">
+    <app-patient-viewer [patient]="selectedPatient"></app-patient-viewer>
+  </div>
+  <div class="patient-list-section">
+    <app-patient-list (selected)="onPatientSelected($event)"></app-patient-list>
   </div>
 </div>

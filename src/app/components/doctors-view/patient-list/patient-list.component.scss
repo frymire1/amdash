@@ -1,19 +1,18 @@
 .patient-list-container {
-  padding: 12px 16px 16px;
+  padding: 12px;
   box-sizing: border-box;
-  border-radius: 0;
-  background: transparent;
 
   h2 {
     font-size: 24px;
     font-weight: 600;
-    margin-bottom: 12px;
+    margin-bottom: 20px;
+    color: #333;
   }
 
   .patients-grid {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 12px;
+    gap: 20px;
     overflow-x: hidden;
     width: 100%;
   }

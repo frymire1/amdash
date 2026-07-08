@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "amdash-dev"
+  },
+  "targets": {},
+  "etags": {
+    "amdash-dev": {
+      "extensionInstances": {}
+    },
+    "second-look-ai": {
+      "extensionInstances": {}
+    }
+  }
+}
