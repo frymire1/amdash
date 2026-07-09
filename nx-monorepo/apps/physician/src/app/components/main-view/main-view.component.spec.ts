@@ -3,6 +3,7 @@ import { signal } from '@angular/core';
 
 import { MainViewComponent } from './main-view.component';
 import { PatientService } from '../../services/patient.service';
+import { EmsLocationService } from '../../services/ems-location.service';
 
 describe('MainViewComponent', () => {
   let component: MainViewComponent;
@@ -15,6 +16,10 @@ describe('MainViewComponent', () => {
         {
           provide: PatientService,
           useValue: { patients: signal([]) },
+        },
+        {
+          provide: EmsLocationService,
+          useValue: { trackedPatientIds: signal(new Set()), isTracked: () => false },
         },
       ],
     })

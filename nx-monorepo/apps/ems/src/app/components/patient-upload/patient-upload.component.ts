@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -24,7 +24,7 @@ import { PatientSessionService } from '../../services/patient-session.service';
   templateUrl: './patient-upload.component.html',
   styleUrls: ['./patient-upload.component.scss'],
 })
-export class PatientUploadComponent implements OnInit {
+export class PatientUploadComponent {
   private readonly formBuilder = inject(FormBuilder);
   private readonly patientUploadService = inject(PatientUploadService);
   private readonly patientSessionService = inject(PatientSessionService);
@@ -32,10 +32,13 @@ export class PatientUploadComponent implements OnInit {
   private readonly router = inject(Router);
 
   private editingId: string | null = null;
+  private formPrefilled = false;
 
   readonly isEditing = signal(false);
   readonly submitting = signal(false);
   readonly errorMessage = signal<string | null>(null);
+  readonly locatingDevice = signal(false);
+  readonly locationError = signal<string | null>(null);
 
   readonly patientForm = this.formBuilder.nonNullable.group({
     name: ['', Validators.required],
@@ -55,22 +58,67 @@ export class PatientUploadComponent implements OnInit {
     }),
   });
 
-  ngOnInit() {
+  constructor() {
     const id = this.route.snapshot.paramMap.get('id');
-    const uploaded = id ? this.patientSessionService.findUploadedPatient(id) : undefined;
 
-    if (id && uploaded) {
+    if (id) {
       this.editingId = id;
       this.isEditing.set(true);
-      this.patientForm.setValue({
-        name: uploaded.patient.name,
-        gender: uploaded.patient.gender,
-        age: uploaded.patient.age,
-        healthcareNumber: uploaded.patient.healthcareNumber,
-        vitals: uploaded.patient.vitals,
-        location: uploaded.patient.location,
+
+      // The patient list is loaded asynchronously from Firestore, so keep
+      // watching until the record we're editing shows up (e.g. on a direct
+      // reload of /upload/:id before the initial snapshot has arrived).
+      effect(() => {
+        if (this.formPrefilled) {
+          return;
+        }
+
+        const uploaded = this.patientSessionService.findUploadedPatient(id);
+        if (!uploaded) {
+          return;
+        }
+
+        this.formPrefilled = true;
+        this.patientForm.setValue({
+          name: uploaded.patient.name,
+          gender: uploaded.patient.gender,
+          age: uploaded.patient.age,
+          healthcareNumber: uploaded.patient.healthcareNumber,
+          vitals: uploaded.patient.vitals,
+          location: uploaded.patient.location,
+        });
       });
+    } else {
+      this.useCurrentLocation();
     }
+  }
+
+  useCurrentLocation() {
+    if (!('geolocation' in navigator)) {
+      this.locationError.set('Geolocation is not supported by this browser.');
+      return;
+    }
+
+    this.locatingDevice.set(true);
+    this.locationError.set(null);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        this.patientForm.controls.location.patchValue({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+        this.locatingDevice.set(false);
+      },
+      (error) => {
+        this.locationError.set(
+          'Could not get your current location. Please allow location access or enter it manually.',
+        );
+        console.error('Failed to get current location', error);
+        this.locatingDevice.set(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
   }
 
   async onSubmit() {
@@ -104,10 +152,8 @@ export class PatientUploadComponent implements OnInit {
     try {
       if (this.editingId) {
         await this.patientUploadService.updatePatient(this.editingId, patient);
-        this.patientSessionService.upsertUploadedPatient(this.editingId, patient);
       } else {
-        const id = await this.patientUploadService.uploadPatient(patient);
-        this.patientSessionService.upsertUploadedPatient(id, patient);
+        await this.patientUploadService.uploadPatient(patient);
       }
       this.router.navigate(['/']);
     } catch (error) {

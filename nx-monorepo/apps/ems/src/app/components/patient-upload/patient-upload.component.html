@@ -55,7 +55,22 @@
     </section>
 
     <section class="form-section" formGroupName="location">
-      <h3>Location</h3>
+      <div class="form-section__header">
+        <h3>Location</h3>
+        <button
+          type="button"
+          mat-stroked-button
+          color="primary"
+          [disabled]="locatingDevice()"
+          (click)="useCurrentLocation()"
+        >
+          {{ locatingDevice() ? 'Locating…' : 'Use Current Location' }}
+        </button>
+      </div>
+
+      @if (locationError()) {
+        <p class="form-message form-message--error">{{ locationError() }}</p>
+      }
 
       <mat-form-field appearance="outline">
         <mat-label>Address</mat-label>

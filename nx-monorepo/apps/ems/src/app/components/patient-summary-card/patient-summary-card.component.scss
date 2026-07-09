@@ -25,7 +25,20 @@
     color: #444;
   }
 
-  a[mat-stroked-button] {
+  &__error {
+    margin: 0;
+    font-size: 13px;
+    color: #dc2626;
+  }
+
+  &__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  a[mat-stroked-button],
+  button[mat-stroked-button] {
     align-self: flex-start;
     display: inline-flex;
     align-items: center;

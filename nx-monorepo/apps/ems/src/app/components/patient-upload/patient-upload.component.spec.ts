@@ -1,8 +1,10 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { signal } from '@angular/core';
 import { provideRouter } from '@angular/router';
 
 import { PatientUploadComponent } from './patient-upload.component';
 import { PatientUploadService } from '../../services/patient-upload.service';
+import { PatientSessionService } from '../../services/patient-session.service';
 
 describe('PatientUploadComponent', () => {
   let component: PatientUploadComponent;
@@ -24,6 +26,10 @@ describe('PatientUploadComponent', () => {
               return 'test-id';
             },
           },
+        },
+        {
+          provide: PatientSessionService,
+          useValue: { uploadedPatients: signal([]), findUploadedPatient: () => undefined },
         },
       ],
     }).compileComponents();

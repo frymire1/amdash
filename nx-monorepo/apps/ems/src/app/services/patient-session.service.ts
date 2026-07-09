@@ -1,4 +1,6 @@
 import { Injectable, signal } from '@angular/core';
+import { collection, getFirestore, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { getFirebaseApp } from '../firebase';
 import { Patient } from '../models/patient.model';
 
 export interface UploadedPatient {
@@ -8,17 +10,19 @@ export interface UploadedPatient {
 
 @Injectable({ providedIn: 'root' })
 export class PatientSessionService {
+  private readonly firestore = getFirestore(getFirebaseApp());
+
   readonly uploadedPatients = signal<UploadedPatient[]>([]);
 
-  upsertUploadedPatient(id: string, patient: Patient) {
-    this.uploadedPatients.update((patients) => {
-      const index = patients.findIndex((uploaded) => uploaded.id === id);
-      if (index === -1) {
-        return [...patients, { id, patient }];
-      }
-      const next = [...patients];
-      next[index] = { id, patient };
-      return next;
+  constructor() {
+    const patientsQuery = query(collection(this.firestore, 'patients'), orderBy('submittedAt', 'desc'));
+    onSnapshot(patientsQuery, (snapshot) => {
+      this.uploadedPatients.set(
+        snapshot.docs.map((docSnapshot) => ({
+          id: docSnapshot.id,
+          patient: docSnapshot.data() as Patient,
+        })),
+      );
     });
   }
 

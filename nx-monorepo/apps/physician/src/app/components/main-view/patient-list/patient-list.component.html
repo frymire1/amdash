@@ -3,7 +3,11 @@
   @if (patients().length > 0) {
     <div class="patients-grid">
       @for (patient of patients(); track patient.healthcareNumber) {
-        <app-patient-card (select)="onPatientSelect(patient)" [patient]="patient"></app-patient-card>
+        <app-patient-card
+          (select)="onPatientSelect(patient)"
+          [patient]="patient"
+          [isTracked]="isTracked(patient)"
+        ></app-patient-card>
       }
     </div>
   } @else {

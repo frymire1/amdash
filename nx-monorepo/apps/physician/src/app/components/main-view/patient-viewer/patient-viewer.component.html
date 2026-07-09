@@ -56,15 +56,18 @@
       </mat-card-header>
       <mat-card-content>
         @if (patient.location) {
-          <div class="location-placeholder-card">
-            <div class="location-icon">📍</div>
-            <h3>{{ patient.location.address }}</h3>
-            <p class="coordinates">Lat: {{ patient.location.latitude | number:'1.4-4' }}</p>
-            <p class="coordinates">Lng: {{ patient.location.longitude | number:'1.4-4' }}</p>
+          <div class="map-container">
+            <google-map [center]="markerPosition" [zoom]="mapZoom" height="240px" width="100%">
+              <map-marker [position]="markerPosition" [options]="markerOptions"></map-marker>
+            </google-map>
           </div>
           <div class="location-info">
             <p><strong>Address:</strong> {{ patient.location.address }}</p>
-            <p><strong>Coordinates:</strong> {{ patient.location.latitude }}, {{ patient.location.longitude }}</p>
+            <p>
+              <strong>Coordinates:</strong>
+              {{ patient.location.latitude | number: '1.4-4' }},
+              {{ patient.location.longitude | number: '1.4-4' }}
+            </p>
           </div>
         }
       </mat-card-content>

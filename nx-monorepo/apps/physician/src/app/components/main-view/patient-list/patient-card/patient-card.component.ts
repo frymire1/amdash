@@ -15,6 +15,7 @@ export interface PatientLocation {
 }
 
 export interface Patient {
+  id?: string;
   name: string;
   gender: string;
   age: number;
@@ -48,5 +49,6 @@ export class PatientCardComponent {
       address: 'New York, NY'
     }
   };
+  @Input() isTracked = false;
   @Output() select = new EventEmitter<Patient>();
 }

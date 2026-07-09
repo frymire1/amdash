@@ -113,37 +113,14 @@
     }
 
     .location-card {
-      .location-placeholder-card {
-        background: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 100%);
+      .map-container {
         border: 2px solid #0284c7;
         border-radius: 8px;
-        padding: 32px 24px;
-        text-align: center;
+        overflow: hidden;
         margin-bottom: 16px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 12px;
 
-        .location-icon {
-          font-size: 48px;
-          margin-bottom: 8px;
-        }
-
-        h3 {
-          font-size: 18px;
-          font-weight: 600;
-          color: #1e293b;
-          margin: 0;
-          word-break: break-word;
-        }
-
-        .coordinates {
-          font-size: 13px;
-          color: #64748b;
-          font-family: 'Courier New', monospace;
-          margin: 4px 0;
-          letter-spacing: 0.02em;
+        google-map {
+          display: block;
         }
       }
 
@@ -185,16 +162,8 @@
         grid-template-columns: 1fr;
       }
 
-      .location-card .location-placeholder-card {
-        padding: 24px 16px;
-
-        .location-icon {
-          font-size: 36px;
-        }
-
-        h3 {
-          font-size: 16px;
-        }
+      .location-card .map-container google-map {
+        height: 180px !important;
       }
     }
   }

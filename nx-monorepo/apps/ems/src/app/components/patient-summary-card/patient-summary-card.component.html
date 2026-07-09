@@ -10,8 +10,26 @@
     <span>{{ uploaded.patient.age }} yrs</span>
     <span>{{ uploaded.patient.vitals.heartRate }} bpm</span>
   </div>
-  <a mat-stroked-button color="primary" [routerLink]="['/upload', uploaded.id]">
-    <mat-icon>edit</mat-icon>
-    Edit
-  </a>
+  @if (deleteError()) {
+    <p class="patient-summary-card__error">{{ deleteError() }}</p>
+  }
+
+  <div class="patient-summary-card__actions">
+    <a mat-stroked-button color="primary" [routerLink]="['/upload', uploaded.id]">
+      <mat-icon>edit</mat-icon>
+      Edit
+    </a>
+    <button
+      mat-stroked-button
+      [color]="isTracking() ? 'warn' : 'primary'"
+      (click)="toggleTracking()"
+    >
+      <mat-icon>{{ isTracking() ? 'location_off' : 'location_on' }}</mat-icon>
+      {{ isTracking() ? 'Stop Sharing' : 'Share Location' }}
+    </button>
+    <button mat-stroked-button color="warn" [disabled]="deleting()" (click)="deletePatient()">
+      <mat-icon>delete</mat-icon>
+      {{ deleting() ? 'Deleting…' : 'Delete' }}
+    </button>
+  </div>
 </div>

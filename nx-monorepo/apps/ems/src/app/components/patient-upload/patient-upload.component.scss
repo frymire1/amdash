@@ -34,6 +34,17 @@
     margin: 0 0 12px;
   }
 
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+
+    h3 {
+      margin: 0 0 12px;
+    }
+  }
+
   mat-form-field {
     width: 100%;
   }
@@ -45,6 +56,14 @@
     column-gap: 16px;
 
     h3 {
+      grid-column: 1 / -1;
+    }
+
+    &__header {
+      grid-column: 1 / -1;
+    }
+
+    .form-message {
       grid-column: 1 / -1;
     }
   }

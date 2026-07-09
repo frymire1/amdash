@@ -12,7 +12,9 @@ export class PatientService {
   constructor() {
     const patientsQuery = query(collection(this.firestore, 'patients'), orderBy('submittedAt', 'desc'));
     onSnapshot(patientsQuery, (snapshot) => {
-      this.patients.set(snapshot.docs.map((docSnapshot) => docSnapshot.data() as Patient));
+      this.patients.set(
+        snapshot.docs.map((docSnapshot) => ({ id: docSnapshot.id, ...(docSnapshot.data() as Patient) })),
+      );
     });
   }
 }
