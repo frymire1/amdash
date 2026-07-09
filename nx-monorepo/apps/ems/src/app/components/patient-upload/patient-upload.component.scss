@@ -1,0 +1,68 @@
+.patient-upload-container {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+  box-sizing: border-box;
+
+  h2 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    color: #333;
+  }
+}
+
+.patient-upload-form {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.form-section {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+
+  h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #444;
+    margin: 0 0 12px;
+  }
+
+  mat-form-field {
+    width: 100%;
+  }
+}
+
+@media (min-width: 600px) {
+  .form-section {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 16px;
+
+    h3 {
+      grid-column: 1 / -1;
+    }
+  }
+}
+
+.form-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.form-message--error {
+  color: #dc2626;
+}
+
+button[type='submit'] {
+  align-self: flex-start;
+}

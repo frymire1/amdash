@@ -1,13 +1,14 @@
-import { Component } from '@angular/core';
-import { RouterModule } from '@angular/router';
-import { NxWelcome } from './nx-welcome';
+import { Component, signal } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { RouterOutlet } from '@angular/router';
+import { NavBarComponent } from './components/nav-bar/nav-bar.component';
 
 @Component({
-  imports: [NxWelcome, RouterModule],
   selector: 'app-root',
+  imports: [CommonModule, RouterOutlet, NavBarComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })
 export class App {
-  protected title = 'ems';
+  protected readonly providerName = signal('EMS Provider');
 }

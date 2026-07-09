@@ -1,0 +1,17 @@
+<div class="patient-summary-card">
+  <div class="patient-summary-card__header">
+    <div class="patient-summary-card__title">{{ uploaded.patient.name }}</div>
+    <div class="patient-summary-card__subtitle">
+      Healthcare #{{ uploaded.patient.healthcareNumber }}
+    </div>
+  </div>
+  <div class="patient-summary-card__details">
+    <span>{{ uploaded.patient.gender }}</span>
+    <span>{{ uploaded.patient.age }} yrs</span>
+    <span>{{ uploaded.patient.vitals.heartRate }} bpm</span>
+  </div>
+  <a mat-stroked-button color="primary" [routerLink]="['/upload', uploaded.id]">
+    <mat-icon>edit</mat-icon>
+    Edit
+  </a>
+</div>

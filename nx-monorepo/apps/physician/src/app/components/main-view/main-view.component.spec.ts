@@ -1,6 +1,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { signal } from '@angular/core';
 
 import { MainViewComponent } from './main-view.component';
+import { PatientService } from '../../services/patient.service';
 
 describe('MainViewComponent', () => {
   let component: MainViewComponent;
@@ -8,7 +10,13 @@ describe('MainViewComponent', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [MainViewComponent]
+      imports: [MainViewComponent],
+      providers: [
+        {
+          provide: PatientService,
+          useValue: { patients: signal([]) },
+        },
+      ],
     })
     .compileComponents();
 

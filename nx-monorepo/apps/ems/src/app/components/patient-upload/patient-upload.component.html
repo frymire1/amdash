@@ -1,0 +1,88 @@
+<div class="patient-upload-container">
+  <h2>{{ isEditing() ? 'Edit Patient Information' : 'Upload Patient Information' }}</h2>
+
+  <form class="patient-upload-form" [formGroup]="patientForm" (ngSubmit)="onSubmit()">
+    <section class="form-section">
+      <h3>Patient Details</h3>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Full Name</mat-label>
+        <input matInput formControlName="name" required />
+      </mat-form-field>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Gender</mat-label>
+        <mat-select formControlName="gender" required>
+          <mat-option value="Male">Male</mat-option>
+          <mat-option value="Female">Female</mat-option>
+          <mat-option value="Other">Other</mat-option>
+        </mat-select>
+      </mat-form-field>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Age</mat-label>
+        <input matInput type="number" formControlName="age" required min="0" />
+      </mat-form-field>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Healthcare Number</mat-label>
+        <input matInput formControlName="healthcareNumber" required />
+      </mat-form-field>
+    </section>
+
+    <section class="form-section" formGroupName="vitals">
+      <h3>Vitals</h3>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Heart Rate (bpm)</mat-label>
+        <input matInput type="number" formControlName="heartRate" required />
+      </mat-form-field>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Blood Pressure</mat-label>
+        <input matInput formControlName="bloodPressure" placeholder="120/80" required />
+      </mat-form-field>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Oxygen (%)</mat-label>
+        <input matInput type="number" formControlName="oxygen" required />
+      </mat-form-field>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Temperature (&deg;C)</mat-label>
+        <input matInput type="number" step="0.1" formControlName="temperature" required />
+      </mat-form-field>
+    </section>
+
+    <section class="form-section" formGroupName="location">
+      <h3>Location</h3>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Address</mat-label>
+        <input matInput formControlName="address" required />
+      </mat-form-field>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Latitude</mat-label>
+        <input matInput type="number" step="any" formControlName="latitude" required />
+      </mat-form-field>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Longitude</mat-label>
+        <input matInput type="number" step="any" formControlName="longitude" required />
+      </mat-form-field>
+    </section>
+
+    @if (errorMessage()) {
+      <p class="form-message form-message--error">{{ errorMessage() }}</p>
+    }
+
+    <button mat-raised-button color="primary" type="submit" [disabled]="submitting()">
+      @if (submitting()) {
+        {{ isEditing() ? 'Saving…' : 'Uploading…' }}
+      } @else {
+        {{ isEditing() ? 'Save Changes' : 'Upload Patient' }}
+      }
+    </button>
+  </form>
+</div>

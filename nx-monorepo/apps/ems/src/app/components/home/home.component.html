@@ -1,0 +1,17 @@
+<div class="home-container">
+  <h1>EMS Dashboard</h1>
+  <p>Upload patient information to hand off to the receiving physician.</p>
+
+  <a mat-raised-button color="primary" routerLink="/upload">
+    <mat-icon>person_add</mat-icon>
+    Add Patient
+  </a>
+
+  @if (uploadedPatients().length > 0) {
+    <div class="patient-summary-list">
+      @for (uploaded of uploadedPatients(); track uploaded.id) {
+        <app-patient-summary-card [uploaded]="uploaded" />
+      }
+    </div>
+  }
+</div>
