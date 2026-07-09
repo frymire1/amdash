@@ -2,7 +2,18 @@
   "projects": {
     "default": "amdash-dev"
   },
-  "targets": {},
+  "targets": {
+    "amdash-dev": {
+      "hosting": {
+        "physician": [
+          "amdash-physician-dev"
+        ],
+        "ems": [
+          "amdash-ems-dev"
+        ]
+      }
+    }
+  },
   "etags": {
     "amdash-dev": {
       "extensionInstances": {}
