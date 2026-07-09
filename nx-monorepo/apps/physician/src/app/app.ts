@@ -13,7 +13,6 @@ import { getFirebaseApp } from './firebase';
 })
 export class App {
   protected readonly title = signal('amdash');
-  protected readonly doctorName = signal('Dr. Alex Chan');
 
   constructor() {
     getAnalytics(getFirebaseApp());

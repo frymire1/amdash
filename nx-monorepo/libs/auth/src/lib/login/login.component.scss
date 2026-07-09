@@ -1,0 +1,65 @@
+.login-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 16px;
+  box-sizing: border-box;
+  background: #f5f7fa;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  padding: 32px 28px;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+
+  &__brand {
+    margin: 0 0 4px;
+    font-size: 24px;
+    font-weight: 700;
+    color: #1e293b;
+    text-align: center;
+  }
+
+  &__subtitle {
+    margin: 0 0 24px;
+    font-size: 14px;
+    color: #64748b;
+    text-align: center;
+  }
+
+  &__error {
+    margin: 0 0 16px;
+    font-size: 13px;
+    color: #dc2626;
+  }
+
+  &__success {
+    margin: 0 0 16px;
+    font-size: 13px;
+    color: #16a34a;
+  }
+
+  &__forgot-password {
+    align-self: flex-end;
+    margin: -8px 0 8px;
+    font-size: 13px;
+  }
+
+  form {
+    display: flex;
+    flex-direction: column;
+  }
+
+  mat-form-field {
+    width: 100%;
+  }
+
+  button[type='submit'] {
+    margin-top: 8px;
+    width: 100%;
+  }
+}

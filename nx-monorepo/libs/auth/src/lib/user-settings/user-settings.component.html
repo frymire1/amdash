@@ -1,0 +1,25 @@
+<div class="user-settings-container">
+  <div class="user-settings-card">
+    <h1 class="user-settings-card__title">User Settings</h1>
+
+    <form [formGroup]="settingsForm" (ngSubmit)="onSubmit()">
+      <mat-form-field appearance="outline">
+        <mat-label>First Name</mat-label>
+        <input matInput formControlName="firstName" required autocomplete="given-name" />
+      </mat-form-field>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Last Name</mat-label>
+        <input matInput formControlName="lastName" required autocomplete="family-name" />
+      </mat-form-field>
+
+      @if (errorMessage()) {
+        <p class="user-settings-card__error">{{ errorMessage() }}</p>
+      }
+
+      <button mat-raised-button color="primary" type="submit" [disabled]="submitting()">
+        {{ submitting() ? 'Saving…' : 'Continue' }}
+      </button>
+    </form>
+  </div>
+</div>

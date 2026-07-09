@@ -1,7 +1,24 @@
 <mat-toolbar class="nav-bar">
-  <span class="brand">AmDash</span>
+  <a class="brand" routerLink="/">AmDash</a>
   <span class="spacer"></span>
-  @if (doctorName()) {
-    <span class="doctor-name">{{ doctorName() }}</span>
+
+  @if (authService.isAuthenticated() && userProfileService.initials()) {
+    <a
+      class="user-avatar user-avatar--initials"
+      routerLink="/user-settings"
+      title="Account settings"
+    >
+      {{ userProfileService.initials() }}
+    </a>
+  } @else if (!authService.isAuthenticated()) {
+    <span class="user-avatar user-avatar--placeholder" title="Not logged in">
+      <mat-icon>account_circle</mat-icon>
+    </span>
+  }
+
+  @if (authService.isAuthenticated()) {
+    <button mat-icon-button (click)="logOut()" aria-label="Log out" title="Log out">
+      <mat-icon>logout</mat-icon>
+    </button>
   }
 </mat-toolbar>

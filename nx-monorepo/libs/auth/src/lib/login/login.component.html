@@ -1,0 +1,40 @@
+<div class="login-container">
+  <div class="login-card">
+    <h1 class="login-card__brand">AmDash</h1>
+    <p class="login-card__subtitle">Sign in to continue</p>
+
+    <form [formGroup]="loginForm" (ngSubmit)="onSubmit()">
+      <mat-form-field appearance="outline">
+        <mat-label>Email</mat-label>
+        <input matInput type="email" formControlName="email" required autocomplete="email" />
+      </mat-form-field>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Password</mat-label>
+        <input matInput type="password" formControlName="password" required autocomplete="current-password" />
+      </mat-form-field>
+
+      <button
+        type="button"
+        class="login-card__forgot-password"
+        mat-button
+        [disabled]="resetSubmitting()"
+        (click)="onForgotPassword()"
+      >
+        {{ resetSubmitting() ? 'Sending…' : 'Forgot password?' }}
+      </button>
+
+      @if (errorMessage()) {
+        <p class="login-card__error">{{ errorMessage() }}</p>
+      }
+
+      @if (resetMessage()) {
+        <p class="login-card__success">{{ resetMessage() }}</p>
+      }
+
+      <button mat-raised-button color="primary" type="submit" [disabled]="submitting()">
+        {{ submitting() ? 'Signing in…' : 'Sign In' }}
+      </button>
+    </form>
+  </div>
+</div>
