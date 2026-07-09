@@ -1,8 +1,8 @@
-@if (patient) {
+@if (patient(); as currentPatient) {
   <div class="active-patient-container">
     <div class="patient-header">
-      <h1>{{ patient.name }}</h1>
-      <span class="healthcare-number">{{ patient.healthcareNumber }}</span>
+      <h1>{{ currentPatient.name }}</h1>
+      <span class="healthcare-number">{{ currentPatient.healthcareNumber }}</span>
     </div>
 
     <div class="patient-content">
@@ -14,11 +14,11 @@
         <div class="info-grid">
           <div class="info-item">
             <span class="label">Gender</span>
-            <span class="value">{{ patient.gender }}</span>
+            <span class="value">{{ currentPatient.gender }}</span>
           </div>
           <div class="info-item">
             <span class="label">Age</span>
-            <span class="value">{{ patient.age }} years</span>
+            <span class="value">{{ currentPatient.age }} years</span>
           </div>
         </div>
       </mat-card-content>
@@ -32,19 +32,19 @@
         <div class="vitals-grid">
           <div class="vital-item">
             <span class="label">Heart Rate</span>
-            <span class="value">{{ patient.vitals.heartRate }} bpm</span>
+            <span class="value">{{ currentPatient.vitals.heartRate }} bpm</span>
           </div>
           <div class="vital-item">
             <span class="label">Blood Pressure</span>
-            <span class="value">{{ patient.vitals.bloodPressure }}</span>
+            <span class="value">{{ currentPatient.vitals.bloodPressure }}</span>
           </div>
           <div class="vital-item">
             <span class="label">Oxygen</span>
-            <span class="value">{{ patient.vitals.oxygen }}%</span>
+            <span class="value">{{ currentPatient.vitals.oxygen }}%</span>
           </div>
           <div class="vital-item">
             <span class="label">Temperature</span>
-            <span class="value">{{ patient.vitals.temperature }}°C</span>
+            <span class="value">{{ currentPatient.vitals.temperature }}°C</span>
           </div>
         </div>
       </mat-card-content>
@@ -55,18 +55,18 @@
         <mat-card-title>Current Location</mat-card-title>
       </mat-card-header>
       <mat-card-content>
-        @if (patient.location) {
+        @if (currentPatient.location) {
           <div class="map-container">
-            <google-map [center]="markerPosition" [zoom]="mapZoom" height="240px" width="100%">
-              <map-marker [position]="markerPosition" [options]="markerOptions"></map-marker>
+            <google-map [center]="markerPosition()" [zoom]="mapZoom" height="240px" width="100%">
+              <map-marker [position]="markerPosition()" [options]="markerOptions"></map-marker>
             </google-map>
           </div>
           <div class="location-info">
-            <p><strong>Address:</strong> {{ patient.location.address }}</p>
+            <p><strong>Address:</strong> {{ currentPatient.location.address }}</p>
             <p>
               <strong>Coordinates:</strong>
-              {{ patient.location.latitude | number: '1.4-4' }},
-              {{ patient.location.longitude | number: '1.4-4' }}
+              {{ currentPatient.location.latitude | number: '1.4-4' }},
+              {{ currentPatient.location.longitude | number: '1.4-4' }}
             </p>
           </div>
         }
@@ -74,9 +74,7 @@
     </mat-card>
     </div>
   </div>
-}
-
-@if (!patient) {
+} @else {
   <div class="no-patient">
     <p>Select a patient to view details</p>
   </div>

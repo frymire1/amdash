@@ -1,15 +1,15 @@
-<div class="patient-card" (click)="select.emit(patient)" role="button" tabindex="0">
-  @if (isTracked) {
+<div class="patient-card" (click)="select.emit(patient())" role="button" tabindex="0">
+  @if (isTracked()) {
     <span class="patient-card__tracking-dot" title="Location actively being tracked"></span>
   }
   <div class="patient-card__header">
-    <div class="patient-card__title">{{ patient.name }}</div>
-    <div class="patient-card__subtitle">Healthcare #{{ patient.healthcareNumber }}</div>
+    <div class="patient-card__title">{{ patient().name }}</div>
+    <div class="patient-card__subtitle">Healthcare #{{ patient().healthcareNumber }}</div>
   </div>
   <div class="patient-card__content">
     <div class="patient-info">
-      <p><strong>Gender:</strong> {{ patient.gender }}</p>
-      <p><strong>Age:</strong> {{ patient.age }}</p>
+      <p><strong>Gender:</strong> {{ patient().gender }}</p>
+      <p><strong>Age:</strong> {{ patient().age }}</p>
     </div>
   </div>
 </div>

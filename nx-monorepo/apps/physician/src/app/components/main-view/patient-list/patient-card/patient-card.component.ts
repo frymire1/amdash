@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 export interface PatientVitals {
@@ -32,7 +32,7 @@ export interface Patient {
   styleUrls: ['./patient-card.component.scss']
 })
 export class PatientCardComponent {
-  @Input() patient: Patient = {
+  readonly patient = input<Patient>({
     name: 'John Doe',
     gender: 'Male',
     age: 45,
@@ -48,7 +48,7 @@ export class PatientCardComponent {
       longitude: -74.0060,
       address: 'New York, NY'
     }
-  };
-  @Input() isTracked = false;
-  @Output() select = new EventEmitter<Patient>();
+  });
+  readonly isTracked = input(false);
+  readonly select = output<Patient>();
 }

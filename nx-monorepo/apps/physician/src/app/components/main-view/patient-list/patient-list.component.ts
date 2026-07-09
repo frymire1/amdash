@@ -1,4 +1,4 @@
-import { Component, Output, EventEmitter, inject } from '@angular/core';
+import { Component, inject, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { PatientCardComponent } from './patient-card/patient-card.component';
 import { Patient } from './patient-card/patient-card.component';
@@ -18,7 +18,7 @@ export class PatientListComponent {
 
   readonly patients = this.patientService.patients;
 
-  @Output() selected = new EventEmitter<Patient>();
+  readonly selected = output<Patient>();
 
   onPatientSelect(patient: Patient) {
     this.selected.emit(patient);

@@ -1,8 +1,10 @@
-import { Component, Input, OnChanges } from '@angular/core';
+import { Component, computed, input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
 import { GoogleMapsModule } from '@angular/google-maps';
 import { Patient } from '../patient-list/patient-card/patient-card.component';
+
+const DEFAULT_MARKER_POSITION: google.maps.LatLngLiteral = { lat: 40.7128, lng: -74.006 };
 
 @Component({
   selector: 'app-patient-viewer',
@@ -11,23 +13,17 @@ import { Patient } from '../patient-list/patient-card/patient-card.component';
   templateUrl: './patient-viewer.component.html',
   styleUrls: ['./patient-viewer.component.scss']
 })
-export class PatientViewerComponent implements OnChanges {
-  @Input() patient?: Patient;
+export class PatientViewerComponent {
+  readonly patient = input<Patient>();
 
-  mapZoom = 15;
+  readonly mapZoom = 15;
 
-  markerPosition: google.maps.LatLngLiteral = { lat: 40.7128, lng: -74.0060 };
-
-  markerOptions: google.maps.MarkerOptions = {
+  readonly markerOptions: google.maps.MarkerOptions = {
     draggable: false
   };
 
-  ngOnChanges() {
-    if (this.patient?.location) {
-      this.markerPosition = {
-        lat: this.patient.location.latitude,
-        lng: this.patient.location.longitude
-      };
-    }
-  }
+  readonly markerPosition = computed<google.maps.LatLngLiteral>(() => {
+    const location = this.patient()?.location;
+    return location ? { lat: location.latitude, lng: location.longitude } : DEFAULT_MARKER_POSITION;
+  });
 }
