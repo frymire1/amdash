@@ -54,38 +54,34 @@
       </mat-form-field>
     </section>
 
-    <section class="form-section" formGroupName="location">
-      <div class="form-section__header">
-        <h3>Location</h3>
-        <button
-          type="button"
-          mat-stroked-button
-          color="primary"
-          [disabled]="locatingDevice()"
-          (click)="useCurrentLocation()"
-        >
-          {{ locatingDevice() ? 'Locating…' : 'Use Current Location' }}
-        </button>
-      </div>
+    <section class="form-section location-section">
+      <h3>Location</h3>
 
       @if (locationError()) {
         <p class="form-message form-message--error">{{ locationError() }}</p>
+      } @else if (!liveTrackingEnabled()) {
+        <p class="location-status">
+          <mat-icon>location_off</mat-icon>
+          Location sharing is off
+        </p>
+      } @else if (locationShared()) {
+        <p class="location-status location-status--shared">
+          <mat-icon>check_circle</mat-icon>
+          Location is being shared
+        </p>
+      } @else {
+        <p class="location-status">
+          <mat-icon>location_searching</mat-icon>
+          Locating…
+        </p>
       }
 
-      <mat-form-field appearance="outline">
-        <mat-label>Address</mat-label>
-        <input matInput formControlName="address" required />
-      </mat-form-field>
-
-      <mat-form-field appearance="outline">
-        <mat-label>Latitude</mat-label>
-        <input matInput type="number" step="any" formControlName="latitude" required />
-      </mat-form-field>
-
-      <mat-form-field appearance="outline">
-        <mat-label>Longitude</mat-label>
-        <input matInput type="number" step="any" formControlName="longitude" required />
-      </mat-form-field>
+      <mat-slide-toggle
+        [checked]="liveTrackingEnabled()"
+        (change)="liveTrackingEnabled.set($event.checked)"
+      >
+        Live-track this patient
+      </mat-slide-toggle>
     </section>
 
     @if (errorMessage()) {

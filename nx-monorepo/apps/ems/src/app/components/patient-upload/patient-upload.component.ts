@@ -4,11 +4,14 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
+import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { Patient } from '../../models/patient.model';
 import { PatientUploadService } from '../../services/patient-upload.service';
 import { PatientSessionService } from '../../services/patient-session.service';
+import { EmsTrackingService } from '../../services/ems-tracking.service';
 
 @Component({
   selector: 'app-patient-upload',
@@ -18,8 +21,10 @@ import { PatientSessionService } from '../../services/patient-session.service';
     ReactiveFormsModule,
     MatButtonModule,
     MatFormFieldModule,
+    MatIconModule,
     MatInputModule,
     MatSelectModule,
+    MatSlideToggleModule,
   ],
   templateUrl: './patient-upload.component.html',
   styleUrls: ['./patient-upload.component.scss'],
@@ -28,6 +33,7 @@ export class PatientUploadComponent {
   private readonly formBuilder = inject(FormBuilder);
   private readonly patientUploadService = inject(PatientUploadService);
   private readonly patientSessionService = inject(PatientSessionService);
+  private readonly trackingService = inject(EmsTrackingService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
 
@@ -39,6 +45,8 @@ export class PatientUploadComponent {
   readonly errorMessage = signal<string | null>(null);
   readonly locatingDevice = signal(false);
   readonly locationError = signal<string | null>(null);
+  readonly locationShared = signal(false);
+  readonly liveTrackingEnabled = signal(true);
 
   readonly patientForm = this.formBuilder.nonNullable.group({
     name: ['', Validators.required],
@@ -54,7 +62,6 @@ export class PatientUploadComponent {
     location: this.formBuilder.nonNullable.group({
       latitude: [null as number | null, Validators.required],
       longitude: [null as number | null, Validators.required],
-      address: ['', Validators.required],
     }),
   });
 
@@ -64,6 +71,7 @@ export class PatientUploadComponent {
     if (id) {
       this.editingId = id;
       this.isEditing.set(true);
+      this.liveTrackingEnabled.set(this.trackingService.isTracking(id));
 
       // The patient list is loaded asynchronously from Firestore, so keep
       // watching until the record we're editing shows up (e.g. on a direct
@@ -85,15 +93,19 @@ export class PatientUploadComponent {
           age: uploaded.patient.age,
           healthcareNumber: uploaded.patient.healthcareNumber,
           vitals: uploaded.patient.vitals,
-          location: uploaded.patient.location,
+          location: {
+            latitude: uploaded.patient.location.latitude,
+            longitude: uploaded.patient.location.longitude,
+          },
         });
+        this.locationShared.set(true);
       });
     } else {
       this.useCurrentLocation();
     }
   }
 
-  useCurrentLocation() {
+  private useCurrentLocation() {
     if (!('geolocation' in navigator)) {
       this.locationError.set('Geolocation is not supported by this browser.');
       return;
@@ -108,11 +120,13 @@ export class PatientUploadComponent {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         });
+        this.locationShared.set(true);
         this.locatingDevice.set(false);
       },
       (error) => {
+        this.locationShared.set(false);
         this.locationError.set(
-          'Could not get your current location. Please allow location access or enter it manually.',
+          'Could not get your current location. Please allow location access and try again.',
         );
         console.error('Failed to get current location', error);
         this.locatingDevice.set(false);
@@ -142,7 +156,7 @@ export class PatientUploadComponent {
       location: {
         latitude: value.location.latitude!,
         longitude: value.location.longitude!,
-        address: value.location.address,
+        address: '',
       },
     };
 
@@ -150,11 +164,20 @@ export class PatientUploadComponent {
     this.errorMessage.set(null);
 
     try {
+      let id: string;
       if (this.editingId) {
-        await this.patientUploadService.updatePatient(this.editingId, patient);
+        id = this.editingId;
+        await this.patientUploadService.updatePatient(id, patient);
       } else {
-        await this.patientUploadService.uploadPatient(patient);
+        id = await this.patientUploadService.uploadPatient(patient);
       }
+
+      if (this.liveTrackingEnabled()) {
+        this.trackingService.startTracking(id);
+      } else {
+        this.trackingService.stopTracking(id);
+      }
+
       this.router.navigate(['/']);
     } catch (error) {
       this.errorMessage.set('Failed to upload patient. Please try again.');

@@ -1,4 +1,9 @@
 <div class="patient-summary-card">
+  <span
+    class="patient-summary-card__tracking-dot"
+    [class.patient-summary-card__tracking-dot--active]="isTracking()"
+    [title]="isTracking() ? 'Location is being shared' : 'Location is not being shared'"
+  ></span>
   <div class="patient-summary-card__header">
     <div class="patient-summary-card__title">{{ uploaded.patient.name }}</div>
     <div class="patient-summary-card__subtitle">
@@ -19,14 +24,6 @@
       <mat-icon>edit</mat-icon>
       Edit
     </a>
-    <button
-      mat-stroked-button
-      [color]="isTracking() ? 'warn' : 'primary'"
-      (click)="toggleTracking()"
-    >
-      <mat-icon>{{ isTracking() ? 'location_off' : 'location_on' }}</mat-icon>
-      {{ isTracking() ? 'Stop Sharing' : 'Share Location' }}
-    </button>
     <button mat-stroked-button color="warn" [disabled]="deleting()" (click)="deletePatient()">
       <mat-icon>delete</mat-icon>
       {{ deleting() ? 'Deleting…' : 'Delete' }}

@@ -31,14 +31,6 @@ export class PatientSummaryCardComponent {
     return this.trackingService.isTracking(this.uploaded.id);
   }
 
-  toggleTracking() {
-    if (this.isTracking()) {
-      this.trackingService.stopTracking(this.uploaded.id);
-    } else {
-      this.trackingService.startTracking(this.uploaded.id);
-    }
-  }
-
   async deletePatient() {
     const dialogRef = this.dialog.open(ConfirmDialogComponent, {
       data: {
@@ -53,9 +45,7 @@ export class PatientSummaryCardComponent {
       return;
     }
 
-    if (this.isTracking()) {
-      this.trackingService.stopTracking(this.uploaded.id);
-    }
+    this.trackingService.stopTracking(this.uploaded.id);
 
     this.deleting.set(true);
     this.deleteError.set(null);
