@@ -1,11 +1,14 @@
 import { Component, Input, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { MatDialog } from '@angular/material/dialog';
 import { UploadedPatient } from '../../services/patient-session.service';
 import { EmsTrackingService } from '../../services/ems-tracking.service';
 import { PatientUploadService } from '../../services/patient-upload.service';
+import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.component';
 
 @Component({
   selector: 'app-patient-summary-card',
@@ -19,6 +22,7 @@ export class PatientSummaryCardComponent {
 
   private readonly trackingService = inject(EmsTrackingService);
   private readonly patientUploadService = inject(PatientUploadService);
+  private readonly dialog = inject(MatDialog);
 
   readonly deleting = signal(false);
   readonly deleteError = signal<string | null>(null);
@@ -36,7 +40,15 @@ export class PatientSummaryCardComponent {
   }
 
   async deletePatient() {
-    const confirmed = window.confirm(`Delete ${this.uploaded.patient.name}? This cannot be undone.`);
+    const dialogRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Delete patient?',
+        message: `Delete ${this.uploaded.patient.name}? This cannot be undone.`,
+        confirmLabel: 'Delete',
+      },
+    });
+
+    const confirmed = await firstValueFrom(dialogRef.afterClosed());
     if (!confirmed) {
       return;
     }
