@@ -6,7 +6,7 @@
     "indexes": "firestore.indexes.json"
   },
   "hosting": {
-    "public": "dist/amdash/browser",
+    "public": "nx-monorepo/dist/apps/physician/browser",
     "ignore": [
       "firebase.json",
       "**/.*",
