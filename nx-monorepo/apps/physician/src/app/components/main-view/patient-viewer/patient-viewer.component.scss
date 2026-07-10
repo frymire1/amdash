@@ -8,9 +8,9 @@
 
   .patient-header {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 16px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
 
     h1 {
       font-size: 28px;
@@ -27,6 +27,7 @@
       padding: 6px 12px;
       border-radius: 6px;
       white-space: nowrap;
+      margin-left: 16px;
     }
   }
 
@@ -160,11 +161,6 @@
 
 @media (max-width: 768px) {
   .active-patient-container {
-    .patient-header {
-      flex-direction: column;
-      align-items: flex-start;
-    }
-
     .patient-content {
       .patient-info-card .info-grid,
       .vitals-card .vitals-grid {

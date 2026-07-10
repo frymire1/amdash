@@ -38,7 +38,7 @@
 
   @if (filteredPatients().length > 0) {
     <div class="patients-grid">
-      @for (patient of filteredPatients(); track patient.healthcareNumber) {
+      @for (patient of filteredPatients(); track patient.id) {
         <app-patient-card
           (select)="onPatientSelect(patient)"
           [patient]="patient"

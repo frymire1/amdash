@@ -14,7 +14,7 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow create: if request.auth.uid == userId && !('role' in request.resource.data);
       allow update: if request.auth.uid == userId
-        && request.resource.data.role == resource.data.role;
+        && request.resource.data.get('role', null) == resource.data.get('role', null);
     }
 
     match /patients/{patientId} {

@@ -58,7 +58,10 @@ export const stopEmsLocation = onCall<StopLocationRequest>({ region: REGION }, a
 });
 
 export const onEmsLocationEvent = onMessagePublished(
-  { topic: LOCATION_TOPIC, region: REGION },
+  // retry: true — without it, Pub/Sub does not retry a failed delivery (a
+  // cold-start timeout, a transient blip) at all; it just drops the message,
+  // silently losing that location update.
+  { topic: LOCATION_TOPIC, region: REGION, retry: true },
   async (event) => {
     const data = event.data.message.json as EmsLocationEvent | undefined;
 
