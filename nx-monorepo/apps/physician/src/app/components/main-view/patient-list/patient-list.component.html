@@ -1,8 +1,44 @@
 <div class="patient-list-container">
-  <h2>Patient List</h2>
-  @if (patients().length > 0) {
+  <div class="patient-list-header">
+    <h2>Patient List</h2>
+    <button
+      mat-icon-button
+      type="button"
+      [class.filter-toggle--active]="selectedDestination() !== 'All destinations'"
+      [attr.aria-pressed]="filterOpen()"
+      aria-label="Toggle destination filter"
+      (click)="toggleFilter()"
+    >
+      <mat-icon>filter_list</mat-icon>
+    </button>
+  </div>
+
+  @if (filterOpen()) {
+    <mat-form-field appearance="outline" class="destination-filter">
+      <mat-label>Filter by destination</mat-label>
+      <mat-select [value]="selectedDestination()" (valueChange)="selectedDestination.set($event)">
+        @for (destination of destinationOptions; track destination) {
+          <mat-option [value]="destination">{{ destination }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+
+    <mat-checkbox
+      class="distance-sort-toggle"
+      [checked]="sortByDistance()"
+      (change)="onSortByDistanceChange($event.checked)"
+    >
+      Sort by distance from me
+    </mat-checkbox>
+
+    @if (locationError()) {
+      <p class="location-error">{{ locationError() }}</p>
+    }
+  }
+
+  @if (filteredPatients().length > 0) {
     <div class="patients-grid">
-      @for (patient of patients(); track patient.healthcareNumber) {
+      @for (patient of filteredPatients(); track patient.healthcareNumber) {
         <app-patient-card
           (select)="onPatientSelect(patient)"
           [patient]="patient"
@@ -10,8 +46,9 @@
         ></app-patient-card>
       }
     </div>
+  } @else if (patients().length > 0) {
+    <p class="empty-state">No patients match this filter.</p>
   } @else {
     <p class="empty-state">No patients uploaded yet.</p>
   }
 </div>
-

@@ -53,6 +53,10 @@
     mat-slide-toggle {
       grid-column: 1 / -1;
     }
+
+    &.notes-section mat-form-field {
+      grid-column: 1 / -1;
+    }
   }
 }
 

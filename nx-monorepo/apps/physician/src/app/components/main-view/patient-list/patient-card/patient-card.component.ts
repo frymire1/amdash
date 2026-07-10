@@ -2,10 +2,10 @@ import { Component, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 export interface PatientVitals {
-  heartRate: number;
+  heartRate: number | string;
   bloodPressure: string;
-  oxygen: number;
-  temperature: number;
+  oxygen: number | string;
+  temperature: number | string;
 }
 
 export interface PatientLocation {
@@ -18,11 +18,21 @@ export interface Patient {
   id?: string;
   name: string;
   gender: string;
-  age: number;
+  age: number | string;
   healthcareNumber: string;
   vitals: PatientVitals;
   location: PatientLocation;
+  notes?: string;
+  destination?: string;
 }
+
+export const DESTINATION_HOSPITALS: readonly string[] = [
+  'General Hospital',
+  "St. Mary's Medical Center",
+  'Riverside Trauma Center',
+  'University Medical Center',
+  'Mercy Regional Hospital',
+];
 
 @Component({
   selector: 'app-patient-card',
@@ -32,23 +42,7 @@ export interface Patient {
   styleUrls: ['./patient-card.component.scss']
 })
 export class PatientCardComponent {
-  readonly patient = input<Patient>({
-    name: 'John Doe',
-    gender: 'Male',
-    age: 45,
-    healthcareNumber: 'HC-123456789',
-    vitals: {
-      heartRate: 72,
-      bloodPressure: '120/80',
-      oxygen: 98,
-      temperature: 36.7
-    },
-    location: {
-      latitude: 40.7128,
-      longitude: -74.0060,
-      address: 'New York, NY'
-    }
-  });
+  readonly patient = input.required<Patient>();
   readonly isTracked = input(false);
   readonly select = output<Patient>();
 }

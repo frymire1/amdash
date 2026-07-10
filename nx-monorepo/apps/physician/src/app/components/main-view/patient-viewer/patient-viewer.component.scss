@@ -136,6 +136,15 @@
         }
       }
     }
+
+    .notes-card {
+      .notes-text {
+        margin: 0;
+        font-size: 14px;
+        color: #334155;
+        white-space: pre-wrap;
+      }
+    }
   }
 }
 

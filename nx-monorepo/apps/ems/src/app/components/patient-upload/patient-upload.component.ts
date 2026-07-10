@@ -8,10 +8,14 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
-import { Patient } from '../../models/patient.model';
+import { DESTINATION_HOSPITALS, Patient } from '../../models/patient.model';
 import { PatientUploadService } from '../../services/patient-upload.service';
 import { PatientSessionService } from '../../services/patient-session.service';
 import { EmsTrackingService } from '../../services/ems-tracking.service';
+
+function toNumberOrNull(value: number | string | undefined): number | null {
+  return typeof value === 'number' ? value : null;
+}
 
 @Component({
   selector: 'app-patient-upload',
@@ -40,6 +44,8 @@ export class PatientUploadComponent {
   private editingId: string | null = null;
   private formPrefilled = false;
 
+  readonly destinationHospitals = DESTINATION_HOSPITALS;
+
   readonly isEditing = signal(false);
   readonly submitting = signal(false);
   readonly errorMessage = signal<string | null>(null);
@@ -49,20 +55,22 @@ export class PatientUploadComponent {
   readonly liveTrackingEnabled = signal(true);
 
   readonly patientForm = this.formBuilder.nonNullable.group({
-    name: ['', Validators.required],
-    gender: ['', Validators.required],
-    age: [null as number | null, [Validators.required, Validators.min(0)]],
-    healthcareNumber: ['', Validators.required],
+    name: [''],
+    gender: [''],
+    age: [null as number | null, Validators.min(0)],
+    healthcareNumber: [''],
+    destination: [''],
     vitals: this.formBuilder.nonNullable.group({
-      heartRate: [null as number | null, Validators.required],
-      bloodPressure: ['', Validators.required],
-      oxygen: [null as number | null, Validators.required],
-      temperature: [null as number | null, Validators.required],
+      heartRate: [null as number | null],
+      bloodPressure: [''],
+      oxygen: [null as number | null],
+      temperature: [null as number | null],
     }),
     location: this.formBuilder.nonNullable.group({
       latitude: [null as number | null, Validators.required],
       longitude: [null as number | null, Validators.required],
     }),
+    notes: [''],
   });
 
   constructor() {
@@ -90,13 +98,20 @@ export class PatientUploadComponent {
         this.patientForm.setValue({
           name: uploaded.patient.name,
           gender: uploaded.patient.gender,
-          age: uploaded.patient.age,
+          age: toNumberOrNull(uploaded.patient.age),
           healthcareNumber: uploaded.patient.healthcareNumber,
-          vitals: uploaded.patient.vitals,
+          destination: uploaded.patient.destination ?? '',
+          vitals: {
+            heartRate: toNumberOrNull(uploaded.patient.vitals.heartRate),
+            bloodPressure: uploaded.patient.vitals.bloodPressure,
+            oxygen: toNumberOrNull(uploaded.patient.vitals.oxygen),
+            temperature: toNumberOrNull(uploaded.patient.vitals.temperature),
+          },
           location: {
             latitude: uploaded.patient.location.latitude,
             longitude: uploaded.patient.location.longitude,
           },
+          notes: uploaded.patient.notes ?? '',
         });
         this.locationShared.set(true);
       });
@@ -143,21 +158,23 @@ export class PatientUploadComponent {
 
     const value = this.patientForm.getRawValue();
     const patient: Patient = {
-      name: value.name,
-      gender: value.gender,
-      age: value.age!,
-      healthcareNumber: value.healthcareNumber,
+      name: value.name || 'Unknown',
+      gender: value.gender || 'Unknown',
+      age: value.age ?? 'Unknown',
+      healthcareNumber: value.healthcareNumber || 'Unknown',
+      destination: value.destination || 'Unknown',
       vitals: {
-        heartRate: value.vitals.heartRate!,
-        bloodPressure: value.vitals.bloodPressure,
-        oxygen: value.vitals.oxygen!,
-        temperature: value.vitals.temperature!,
+        heartRate: value.vitals.heartRate ?? 'Unknown',
+        bloodPressure: value.vitals.bloodPressure || 'Unknown',
+        oxygen: value.vitals.oxygen ?? 'Unknown',
+        temperature: value.vitals.temperature ?? 'Unknown',
       },
       location: {
         latitude: value.location.latitude!,
         longitude: value.location.longitude!,
         address: '',
       },
+      notes: value.notes,
     };
 
     this.submitting.set(true);

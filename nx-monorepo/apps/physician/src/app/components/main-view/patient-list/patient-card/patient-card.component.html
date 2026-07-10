@@ -10,6 +10,9 @@
     <div class="patient-info">
       <p><strong>Gender:</strong> {{ patient().gender }}</p>
       <p><strong>Age:</strong> {{ patient().age }}</p>
+      @if (patient().destination) {
+        <p><strong>Destination:</strong> {{ patient().destination }}</p>
+      }
     </div>
   </div>
 </div>

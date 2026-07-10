@@ -20,6 +20,12 @@
             <span class="label">Age</span>
             <span class="value">{{ currentPatient.age }} years</span>
           </div>
+          @if (currentPatient.destination) {
+            <div class="info-item">
+              <span class="label">Destination</span>
+              <span class="value">{{ currentPatient.destination }}</span>
+            </div>
+          }
         </div>
       </mat-card-content>
     </mat-card>
@@ -72,6 +78,17 @@
         }
       </mat-card-content>
     </mat-card>
+
+    @if (currentPatient.notes) {
+      <mat-card class="notes-card">
+        <mat-card-header>
+          <mat-card-title>Patient Notes</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p class="notes-text">{{ currentPatient.notes }}</p>
+        </mat-card-content>
+      </mat-card>
+    }
     </div>
   </div>
 } @else {
