@@ -2,6 +2,7 @@ import { Injectable, signal } from '@angular/core';
 import {
   Auth,
   User,
+  createUserWithEmailAndPassword,
   getAuth,
   onAuthStateChanged,
   sendPasswordResetEmail,
@@ -30,6 +31,11 @@ export class AuthService {
 
   async signIn(email: string, password: string): Promise<void> {
     await signInWithEmailAndPassword(this.auth, email, password);
+  }
+
+  async signUp(email: string, password: string): Promise<User> {
+    const credential = await createUserWithEmailAndPassword(this.auth, email, password);
+    return credential.user;
   }
 
   async signOut(): Promise<void> {

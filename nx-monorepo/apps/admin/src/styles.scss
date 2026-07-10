@@ -1,0 +1,29 @@
+/* You can add global styles to this file, and also import other style files */
+
+@use '@angular/material' as mat;
+
+html {
+  @include mat.theme(
+    (
+      color: mat.$blue-palette,
+      typography: Roboto,
+      density: 0,
+    )
+  );
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+app-root {
+  display: block;
+  height: 100%;
+  overflow: hidden;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}

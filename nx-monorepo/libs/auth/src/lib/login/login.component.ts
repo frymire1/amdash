@@ -6,6 +6,9 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { AuthService } from '../services/auth.service';
+import { UserProfileService } from '../services/user-profile.service';
+
+type LoginMode = 'signin' | 'signup';
 
 @Component({
   selector: 'lib-login',
@@ -17,8 +20,10 @@ import { AuthService } from '../services/auth.service';
 export class LoginComponent {
   private readonly formBuilder = inject(FormBuilder);
   private readonly authService = inject(AuthService);
+  private readonly userProfileService = inject(UserProfileService);
   private readonly router = inject(Router);
 
+  readonly mode = signal<LoginMode>('signin');
   readonly submitting = signal(false);
   readonly errorMessage = signal<string | null>(null);
   readonly resetSubmitting = signal(false);
@@ -28,6 +33,12 @@ export class LoginComponent {
     email: ['', [Validators.required, Validators.email]],
     password: ['', Validators.required],
   });
+
+  toggleMode() {
+    this.mode.update((mode) => (mode === 'signin' ? 'signup' : 'signin'));
+    this.errorMessage.set(null);
+    this.resetMessage.set(null);
+  }
 
   async onSubmit() {
     if (this.loginForm.invalid) {
@@ -42,11 +53,18 @@ export class LoginComponent {
     this.resetMessage.set(null);
 
     try {
-      await this.authService.signIn(email, password);
+      if (this.mode() === 'signup') {
+        const user = await this.authService.signUp(email, password);
+        await this.userProfileService.initializeProfile(user.uid, email);
+      } else {
+        await this.authService.signIn(email, password);
+      }
       this.router.navigateByUrl('/');
     } catch (error) {
-      this.errorMessage.set('Invalid email or password.');
-      console.error('Failed to sign in', error);
+      this.errorMessage.set(
+        this.mode() === 'signup' ? 'Could not create an account with that email.' : 'Invalid email or password.',
+      );
+      console.error(this.mode() === 'signup' ? 'Failed to sign up' : 'Failed to sign in', error);
     } finally {
       this.submitting.set(false);
     }

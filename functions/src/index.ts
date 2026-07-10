@@ -1,6 +1,7 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onMessagePublished } from 'firebase-functions/v2/pubsub';
 import { initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { PubSub } from '@google-cloud/pubsub';
 
@@ -9,6 +10,9 @@ initializeApp();
 const LOCATION_TOPIC = 'ems-location-updates';
 const REGION = 'northamerica-northeast2';
 const pubsub = new PubSub();
+
+const ASSIGNABLE_ROLES = ['ems', 'physician', 'nurse'] as const;
+type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
 
 interface EmsLocationEvent {
   patientId: string;
@@ -77,3 +81,59 @@ export const onEmsLocationEvent = onMessagePublished(
     await getFirestore().collection('emsLocations').doc(data.patientId).set(update, { merge: true });
   },
 );
+
+interface SetUserRoleRequest {
+  email: string;
+  role: AssignableRole;
+}
+
+async function callerIsAdmin(uid: string): Promise<boolean> {
+  const snapshot = await getFirestore().collection('users').doc(uid).get();
+  return snapshot.exists && snapshot.data()?.['role'] === 'admin';
+}
+
+export const setUserRole = onCall<SetUserRoleRequest>({ region: REGION }, async (request) => {
+  if (!request.auth || !(await callerIsAdmin(request.auth.uid))) {
+    throw new HttpsError('permission-denied', 'Only admins can assign roles.');
+  }
+
+  const { email, role } = request.data;
+  if (!email || !ASSIGNABLE_ROLES.includes(role)) {
+    throw new HttpsError('invalid-argument', 'A valid email and role (ems, physician, or nurse) are required.');
+  }
+
+  let targetUser;
+  try {
+    targetUser = await getAuth().getUserByEmail(email);
+  } catch {
+    throw new HttpsError('not-found', `No account found for ${email}.`);
+  }
+
+  await getFirestore().collection('users').doc(targetUser.uid).set({ role }, { merge: true });
+
+  return { uid: targetUser.uid, email: targetUser.email, role };
+});
+
+export const listUsersWithRoles = onCall({ region: REGION }, async (request) => {
+  if (!request.auth || !(await callerIsAdmin(request.auth.uid))) {
+    throw new HttpsError('permission-denied', 'Only admins can list users.');
+  }
+
+  const [authUsers, profileDocs] = await Promise.all([
+    getAuth().listUsers(1000),
+    getFirestore().collection('users').get(),
+  ]);
+
+  const profilesByUid = new Map(profileDocs.docs.map((docSnapshot) => [docSnapshot.id, docSnapshot.data()]));
+
+  return authUsers.users.map((user) => {
+    const profile = profilesByUid.get(user.uid);
+    return {
+      uid: user.uid,
+      email: user.email ?? '',
+      firstName: profile?.['firstName'] ?? '',
+      lastName: profile?.['lastName'] ?? '',
+      role: profile?.['role'] ?? null,
+    };
+  });
+});

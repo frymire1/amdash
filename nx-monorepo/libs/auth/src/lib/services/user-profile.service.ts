@@ -3,9 +3,14 @@ import { doc, getDoc, getFirestore, setDoc } from 'firebase/firestore';
 import { getFirebaseApp } from '../firebase-app';
 import { AuthService } from './auth.service';
 
+export type UserRole = 'ems' | 'physician' | 'nurse' | 'admin';
+
 export interface UserProfile {
-  firstName: string;
-  lastName: string;
+  // Optional: a freshly signed-up account has a Firestore reference (just an
+  // email) before it has completed the mandatory name onboarding step.
+  firstName?: string;
+  lastName?: string;
+  role?: UserRole;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -18,7 +23,7 @@ export class UserProfileService {
 
   readonly initials = computed(() => {
     const profile = this.profile();
-    if (!profile) {
+    if (!profile?.firstName || !profile?.lastName) {
       return '';
     }
     return `${profile.firstName.charAt(0)}${profile.lastName.charAt(0)}`.toUpperCase();
@@ -56,14 +61,21 @@ export class UserProfileService {
     });
   }
 
+  // Called right after sign-up so a Firestore record exists for the new
+  // account before the mandatory name onboarding step runs.
+  async initializeProfile(uid: string, email: string): Promise<void> {
+    await setDoc(doc(this.firestore, 'users', uid), { email }, { merge: true });
+  }
+
   async saveProfile(firstName: string, lastName: string): Promise<void> {
     const user = this.authService.user();
     if (!user) {
       throw new Error('Cannot save a profile without an authenticated user.');
     }
 
-    const profile: UserProfile = { firstName, lastName };
-    await setDoc(doc(this.firestore, 'users', user.uid), profile);
-    this.profile.set(profile);
+    // Merge rather than overwrite so this never clobbers a `role` assigned
+    // separately by an admin via the admin app / Cloud Function.
+    await setDoc(doc(this.firestore, 'users', user.uid), { firstName, lastName }, { merge: true });
+    this.profile.update((existing) => ({ ...existing, firstName, lastName }));
   }
 }

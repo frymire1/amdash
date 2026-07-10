@@ -10,6 +10,9 @@
         ],
         "ems": [
           "amdash-ems-dev"
+        ],
+        "admin": [
+          "amdash-admin-dev"
         ]
       }
     }

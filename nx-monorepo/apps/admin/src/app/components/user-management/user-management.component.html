@@ -1,0 +1,80 @@
+<div class="user-management-container">
+  <h2>User Management</h2>
+
+  <form class="role-form" [formGroup]="roleForm" (ngSubmit)="onSubmit()">
+    <mat-form-field appearance="outline">
+      <mat-label>User email</mat-label>
+      <input matInput type="email" formControlName="email" placeholder="user@example.com" />
+    </mat-form-field>
+
+    <mat-form-field appearance="outline">
+      <mat-label>Role</mat-label>
+      <mat-select formControlName="role">
+        @for (option of roleOptions; track option.value) {
+          <mat-option [value]="option.value">{{ option.label }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+
+    <button mat-raised-button color="primary" type="submit" [disabled]="submitting()">
+      @if (submitting()) {
+        Assigning…
+      } @else {
+        Assign Role
+      }
+    </button>
+  </form>
+
+  @if (successMessage()) {
+    <p class="form-message form-message--success">{{ successMessage() }}</p>
+  }
+  @if (errorMessage()) {
+    <p class="form-message form-message--error">{{ errorMessage() }}</p>
+  }
+
+  <div class="users-section">
+    <div class="users-header">
+      <h3>Users</h3>
+      <button
+        mat-icon-button
+        type="button"
+        (click)="refreshUsers()"
+        aria-label="Refresh users"
+        title="Refresh"
+      >
+        <mat-icon>refresh</mat-icon>
+      </button>
+    </div>
+
+    @if (loadingUsers()) {
+      <p class="empty-state">Loading users…</p>
+    } @else if (users().length > 0) {
+      <div class="users-table-wrapper">
+        <table class="users-table">
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Name</th>
+              <th>Role</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (user of users(); track user.uid) {
+              <tr>
+                <td>{{ user.email }}</td>
+                <td>{{ user.firstName || user.lastName ? (user.firstName + ' ' + user.lastName).trim() : '—' }}</td>
+                <td>
+                  <span class="role-badge" [class.role-badge--unassigned]="!user.role">
+                    {{ user.role || 'Unassigned' }}
+                  </span>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <p class="empty-state">No users found.</p>
+    }
+  </div>
+</div>

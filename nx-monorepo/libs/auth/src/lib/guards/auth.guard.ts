@@ -34,6 +34,17 @@ export const profileCompleteGuard: CanActivateFn = () => {
   return toObservable(userProfileService.loading).pipe(
     filter((loading) => !loading),
     take(1),
-    map(() => userProfileService.profile() !== null || router.parseUrl('/user-settings')),
+    map(() => !!userProfileService.profile()?.firstName || router.parseUrl('/user-settings')),
+  );
+};
+
+export const adminGuard: CanActivateFn = () => {
+  const userProfileService = inject(UserProfileService);
+  const router = inject(Router);
+
+  return toObservable(userProfileService.loading).pipe(
+    filter((loading) => !loading),
+    take(1),
+    map(() => userProfileService.profile()?.role === 'admin' || router.parseUrl('/access-denied')),
   );
 };

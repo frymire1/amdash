@@ -1,7 +1,7 @@
 <div class="login-container">
   <div class="login-card">
     <h1 class="login-card__brand">AmDash</h1>
-    <p class="login-card__subtitle">Sign in to continue</p>
+    <p class="login-card__subtitle">{{ mode() === 'signup' ? 'Create an account' : 'Sign in to continue' }}</p>
 
     <form [formGroup]="loginForm" (ngSubmit)="onSubmit()">
       <mat-form-field appearance="outline">
@@ -11,18 +11,26 @@
 
       <mat-form-field appearance="outline">
         <mat-label>Password</mat-label>
-        <input matInput type="password" formControlName="password" required autocomplete="current-password" />
+        <input
+          matInput
+          type="password"
+          formControlName="password"
+          required
+          [autocomplete]="mode() === 'signup' ? 'new-password' : 'current-password'"
+        />
       </mat-form-field>
 
-      <button
-        type="button"
-        class="login-card__forgot-password"
-        mat-button
-        [disabled]="resetSubmitting()"
-        (click)="onForgotPassword()"
-      >
-        {{ resetSubmitting() ? 'Sending…' : 'Forgot password?' }}
-      </button>
+      @if (mode() === 'signin') {
+        <button
+          type="button"
+          class="login-card__forgot-password"
+          mat-button
+          [disabled]="resetSubmitting()"
+          (click)="onForgotPassword()"
+        >
+          {{ resetSubmitting() ? 'Sending…' : 'Forgot password?' }}
+        </button>
+      }
 
       @if (errorMessage()) {
         <p class="login-card__error">{{ errorMessage() }}</p>
@@ -33,7 +41,15 @@
       }
 
       <button mat-raised-button color="primary" type="submit" [disabled]="submitting()">
-        {{ submitting() ? 'Signing in…' : 'Sign In' }}
+        @if (submitting()) {
+          {{ mode() === 'signup' ? 'Creating account…' : 'Signing in…' }}
+        } @else {
+          {{ mode() === 'signup' ? 'Create Account' : 'Sign In' }}
+        }
+      </button>
+
+      <button type="button" class="login-card__toggle-mode" mat-button (click)="toggleMode()">
+        {{ mode() === 'signup' ? 'Already have an account? Sign in' : "Don't have an account? Create one" }}
       </button>
     </form>
   </div>
