@@ -5,6 +5,7 @@ import { Router } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
+import { FirebaseError } from 'firebase/app';
 import { AuthService } from '../services/auth.service';
 import { UserProfileService } from '../services/user-profile.service';
 
@@ -61,9 +62,13 @@ export class LoginComponent {
       }
       this.router.navigateByUrl('/');
     } catch (error) {
-      this.errorMessage.set(
-        this.mode() === 'signup' ? 'Could not create an account with that email.' : 'Invalid email or password.',
-      );
+      if (this.mode() === 'signup' && error instanceof FirebaseError && error.code === 'auth/email-already-in-use') {
+        this.errorMessage.set('An account with this email already exists. Try signing in instead.');
+      } else {
+        this.errorMessage.set(
+          this.mode() === 'signup' ? 'Could not create an account with that email.' : 'Invalid email or password.',
+        );
+      }
       console.error(this.mode() === 'signup' ? 'Failed to sign up' : 'Failed to sign in', error);
     } finally {
       this.submitting.set(false);
