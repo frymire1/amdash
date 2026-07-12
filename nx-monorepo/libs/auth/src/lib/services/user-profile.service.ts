@@ -11,6 +11,10 @@ export interface UserProfile {
   firstName?: string;
   lastName?: string;
   role?: UserRole;
+  // Hospital name (see @amdash/auth's HOSPITALS) a physician/nurse works
+  // out of — mandatory for those roles (see workLocationGuard), unused by
+  // ems/admin accounts.
+  workLocation?: string;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -83,6 +87,20 @@ export class UserProfileService {
     // getDoc hasn't resolved yet by the time this runs, which would silently
     // drop fields like `role` from the cached profile for the rest of the
     // session.
+    const freshSnapshot = await getDoc(doc(this.firestore, 'users', user.uid));
+    this.profile.set(freshSnapshot.exists() ? (freshSnapshot.data() as UserProfile) : null);
+  }
+
+  async saveWorkLocation(workLocation: string): Promise<void> {
+    const user = this.authService.user();
+    if (!user) {
+      throw new Error('Cannot save a work location without an authenticated user.');
+    }
+
+    await setDoc(doc(this.firestore, 'users', user.uid), { workLocation }, { merge: true });
+
+    // See saveProfile() above for why this re-reads rather than locally
+    // splicing the new field into the signal.
     const freshSnapshot = await getDoc(doc(this.firestore, 'users', user.uid));
     this.profile.set(freshSnapshot.exists() ? (freshSnapshot.data() as UserProfile) : null);
   }

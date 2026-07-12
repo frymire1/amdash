@@ -4,3 +4,5 @@ export * from './lib/login/login.component';
 export * from './lib/user-settings/user-settings.component';
 export * from './lib/guards/auth.guard';
 export * from './lib/firebase-app';
+export * from './lib/hospitals';
+export * from './lib/work-location/work-location.component';

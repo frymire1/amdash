@@ -60,3 +60,16 @@ function roleGuard(...allowedRoles: UserRole[]): CanActivateFn {
 export const adminGuard: CanActivateFn = roleGuard('admin');
 export const physicianAppGuard: CanActivateFn = roleGuard('physician', 'nurse');
 export const emsAppGuard: CanActivateFn = roleGuard('ems');
+
+// Only meaningful once physicianAppGuard has already confirmed the role —
+// this only checks whether a work location has been chosen yet.
+export const workLocationGuard: CanActivateFn = () => {
+  const userProfileService = inject(UserProfileService);
+  const router = inject(Router);
+
+  return toObservable(userProfileService.loading).pipe(
+    filter((loading) => !loading),
+    take(1),
+    map(() => !!userProfileService.profile()?.workLocation || router.parseUrl('/work-location')),
+  );
+};

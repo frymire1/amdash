@@ -40,14 +40,19 @@ export async function logOut(page: Page) {
 // support/admin.ts) before completing onboarding — physicianAppGuard /
 // emsAppGuard / adminGuard all block access to their app for accounts with
 // no role, and nothing client-side can ever set that field on its own.
+// `options.hospital` additionally drives the mandatory /work-location step
+// (workLocationGuard) that a physician/nurse role hits right after — pass it
+// whenever role is 'physician' or 'nurse', since nothing will land past that
+// guard otherwise.
 export async function signUpAndOnboard(
   page: Page,
   prefix: string,
   name: { firstName: string; lastName: string } = { firstName: 'E2E', lastName: 'Tester' },
-  options?: { origin?: string; role?: UserRole },
+  options?: { origin?: string; role?: UserRole; hospital?: string },
 ): Promise<E2eAccount> {
   const account = generateE2eAccount(prefix);
   const origin = options?.origin ?? '';
+  const originPattern = origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   await page.goto(`${origin}/login`);
   await page.getByRole('button', { name: "Don't have an account? Create one" }).click();
@@ -55,7 +60,7 @@ export async function signUpAndOnboard(
   await page.getByLabel('Password').fill(account.password);
   await page.getByRole('button', { name: 'Create Account' }).click();
 
-  await expect(page).toHaveURL(new RegExp(`${origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/user-settings$`));
+  await expect(page).toHaveURL(new RegExp(`${originPattern}/user-settings$`));
 
   if (options?.role) {
     // Must land before the "Continue" click below, since that's what
@@ -69,6 +74,17 @@ export async function signUpAndOnboard(
   await page.getByLabel('First Name').fill(name.firstName);
   await page.getByLabel('Last Name').fill(name.lastName);
   await page.getByRole('button', { name: 'Continue' }).click();
+
+  if (options?.hospital) {
+    await expect(page).toHaveURL(new RegExp(`${originPattern}/work-location$`));
+    // getByLabel('Hospital') is ambiguous here: Material links the open
+    // autocomplete panel's aria-labelledby to the same form-field label, so
+    // it also resolves to the listbox. getByRole('combobox', ...) targets
+    // only the input.
+    await page.getByRole('combobox', { name: 'Hospital' }).fill(options.hospital);
+    await page.getByRole('option', { name: options.hospital, exact: true }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+  }
 
   return account;
 }

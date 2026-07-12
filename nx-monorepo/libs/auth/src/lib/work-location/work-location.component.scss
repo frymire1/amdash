@@ -1,0 +1,53 @@
+.work-location-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 16px;
+  box-sizing: border-box;
+  background: #f5f7fa;
+}
+
+.work-location-card {
+  width: 100%;
+  max-width: 360px;
+  padding: 32px 28px;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+
+  &__title {
+    margin: 0 0 8px;
+    font-size: 22px;
+    font-weight: 700;
+    color: #1e293b;
+    text-align: center;
+  }
+
+  &__subtitle {
+    margin: 0 0 24px;
+    font-size: 13px;
+    color: #475569;
+    text-align: center;
+  }
+
+  &__error {
+    margin: 0 0 16px;
+    font-size: 13px;
+    color: #dc2626;
+  }
+
+  form {
+    display: flex;
+    flex-direction: column;
+  }
+
+  mat-form-field {
+    width: 100%;
+  }
+
+  button[type='submit'] {
+    margin-top: 8px;
+    width: 100%;
+  }
+}

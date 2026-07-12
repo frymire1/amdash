@@ -1,0 +1,31 @@
+<div class="work-location-container">
+  <div class="work-location-card">
+    <h1 class="work-location-card__title">Select Your Hospital</h1>
+    <p class="work-location-card__subtitle">
+      Choose the hospital where you work, so we can show you nearby patients.
+    </p>
+
+    <form (ngSubmit)="onSubmit()">
+      <mat-form-field appearance="outline">
+        <mat-label>Hospital</mat-label>
+        <input matInput [formControl]="hospitalControl" [matAutocomplete]="hospitalAuto" />
+        <mat-autocomplete #hospitalAuto="matAutocomplete">
+          @for (hospital of filteredHospitals(); track hospital) {
+            <mat-option [value]="hospital">{{ hospital }}</mat-option>
+          }
+        </mat-autocomplete>
+        @if (hospitalControl.touched && hospitalControl.invalid) {
+          <mat-error>Select a hospital from the list.</mat-error>
+        }
+      </mat-form-field>
+
+      @if (errorMessage()) {
+        <p class="work-location-card__error">{{ errorMessage() }}</p>
+      }
+
+      <button mat-raised-button color="primary" type="button" [disabled]="submitting()" (click)="onSubmit()">
+        {{ submitting() ? 'Saving…' : 'Continue' }}
+      </button>
+    </form>
+  </div>
+</div>

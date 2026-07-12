@@ -6,6 +6,8 @@ import {
   physicianAppGuard,
   profileCompleteGuard,
   UserSettingsComponent,
+  WorkLocationComponent,
+  workLocationGuard,
 } from '@amdash/auth';
 import { AccessDeniedComponent } from './components/access-denied/access-denied.component';
 import { MainViewComponent } from './components/main-view/main-view.component';
@@ -22,13 +24,18 @@ export const appRoutes: Route[] = [
     canActivate: [authGuard],
   },
   {
+    path: 'work-location',
+    component: WorkLocationComponent,
+    canActivate: [authGuard, profileCompleteGuard, physicianAppGuard],
+  },
+  {
     path: 'access-denied',
     component: AccessDeniedComponent,
     canActivate: [authGuard],
   },
   {
     path: '',
-    canActivateChild: [authGuard, profileCompleteGuard, physicianAppGuard],
+    canActivateChild: [authGuard, profileCompleteGuard, physicianAppGuard, workLocationGuard],
     children: [
       {
         path: '',

@@ -28,12 +28,8 @@
       [checked]="sortByDistance()"
       (change)="onSortByDistanceChange($event.checked)"
     >
-      Sort by distance from me
+      Sort by distance from my hospital
     </mat-checkbox>
-
-    @if (locationError()) {
-      <p class="location-error">{{ locationError() }}</p>
-    }
   }
 
   @if (filteredPatients().length > 0) {

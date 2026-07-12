@@ -5,6 +5,7 @@ import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatSelectModule } from '@angular/material/select';
+import { findHospital, UserProfileService } from '@amdash/auth';
 import { PatientCardComponent } from './patient-card/patient-card.component';
 import { DESTINATION_HOSPITALS, Patient } from './patient-card/patient-card.component';
 import { PatientService } from '../../../services/patient.service';
@@ -51,15 +52,23 @@ function distanceKm(from: Coordinates, to: Coordinates): number {
 export class PatientListComponent {
   private readonly patientService = inject(PatientService);
   private readonly emsLocationService = inject(EmsLocationService);
+  private readonly userProfileService = inject(UserProfileService);
 
   readonly destinationOptions = [ALL_DESTINATIONS, ...DESTINATION_HOSPITALS];
   readonly selectedDestination = signal(ALL_DESTINATIONS);
   readonly filterOpen = signal(false);
   readonly sortByDistance = signal(false);
-  readonly locationError = signal<string | null>(null);
-  private readonly physicianLocation = signal<Coordinates | null>(null);
 
   readonly patients = this.patientService.patients;
+
+  // physicianAppGuard + workLocationGuard together guarantee a physician/
+  // nurse always has a workLocation by the time they can reach this
+  // component, so this is a fixed hospital lookup rather than a live,
+  // permission-gated navigator.geolocation request.
+  private readonly hospitalLocation = computed<Coordinates | null>(() => {
+    const hospital = findHospital(this.userProfileService.profile()?.workLocation);
+    return hospital ? { latitude: hospital.latitude, longitude: hospital.longitude } : null;
+  });
 
   readonly filteredPatients = computed(() => {
     const destination = this.selectedDestination();
@@ -68,7 +77,7 @@ export class PatientListComponent {
         ? this.patients()
         : this.patients().filter((patient) => patient.destination === destination);
 
-    const origin = this.sortByDistance() ? this.physicianLocation() : null;
+    const origin = this.sortByDistance() ? this.hospitalLocation() : null;
     if (!origin) {
       return matching;
     }
@@ -83,9 +92,6 @@ export class PatientListComponent {
 
   onSortByDistanceChange(enabled: boolean) {
     this.sortByDistance.set(enabled);
-    if (enabled && !this.physicianLocation()) {
-      this.requestPhysicianLocation();
-    }
   }
 
   onPatientSelect(patient: Patient) {
@@ -94,28 +100,6 @@ export class PatientListComponent {
 
   isTracked(patient: Patient): boolean {
     return this.emsLocationService.isTracked(patient.id);
-  }
-
-  private requestPhysicianLocation() {
-    if (!('geolocation' in navigator)) {
-      this.locationError.set('Geolocation is not supported by this browser.');
-      return;
-    }
-
-    this.locationError.set(null);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        this.physicianLocation.set({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        });
-      },
-      (error) => {
-        this.locationError.set('Could not get your location. Please allow location access and try again.');
-        console.error('Failed to get physician location', error);
-      },
-      { enableHighAccuracy: true, timeout: 10000 },
-    );
   }
 
   private distanceTo(origin: Coordinates, patient: Patient): number {

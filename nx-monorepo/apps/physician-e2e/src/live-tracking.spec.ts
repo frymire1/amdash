@@ -160,7 +160,7 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
     page,
     'physician-tracker',
     { firstName: 'E2E', lastName: 'Doctor' },
-    { origin: PHYSICIAN_ORIGIN, role: 'physician' },
+    { origin: PHYSICIAN_ORIGIN, role: 'physician', hospital: 'General Hospital' },
   );
   await expect(page).toHaveURL(`${PHYSICIAN_ORIGIN}/physician`);
 
