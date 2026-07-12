@@ -33,7 +33,7 @@ test.describe('EMS patient card live update', () => {
       pageA,
       'ems-live-update',
       { firstName: 'E2E', lastName: 'Medic' },
-      { origin: EMS_ORIGIN },
+      { origin: EMS_ORIGIN, role: 'ems' },
     );
     createdAccount = account;
     await expect(pageA).toHaveURL(`${EMS_ORIGIN}/`);

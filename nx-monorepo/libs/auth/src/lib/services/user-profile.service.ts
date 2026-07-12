@@ -76,6 +76,14 @@ export class UserProfileService {
     // Merge rather than overwrite so this never clobbers a `role` assigned
     // separately by an admin via the admin app / Cloud Function.
     await setDoc(doc(this.firestore, 'users', user.uid), { firstName, lastName }, { merge: true });
-    this.profile.update((existing) => ({ ...existing, firstName, lastName }));
+
+    // Re-read rather than locally splicing {...existing, firstName, lastName}
+    // into the signal: `existing` can still be the constructor effect's
+    // unset initial value (or a stale pre-role snapshot) if that effect's own
+    // getDoc hasn't resolved yet by the time this runs, which would silently
+    // drop fields like `role` from the cached profile for the rest of the
+    // session.
+    const freshSnapshot = await getDoc(doc(this.firestore, 'users', user.uid));
+    this.profile.set(freshSnapshot.exists() ? (freshSnapshot.data() as UserProfile) : null);
   }
 }

@@ -23,7 +23,7 @@ test.describe('physician auth', () => {
   });
 
   test('a freshly signed-up account completes onboarding and reaches the patient list', async ({ page }) => {
-    createdAccount = await signUpAndOnboard(page, 'physician');
+    createdAccount = await signUpAndOnboard(page, 'physician', undefined, { role: 'physician' });
 
     await expect(page).toHaveURL(/\/physician$/);
     await expect(page.getByRole('heading', { name: 'Patient List' })).toBeVisible();

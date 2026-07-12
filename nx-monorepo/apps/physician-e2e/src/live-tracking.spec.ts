@@ -92,7 +92,12 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
   await context.grantPermissions(['geolocation'], { origin: EMS_ORIGIN });
 
   // --- EMS side: upload a patient with live-tracking enabled ---
-  emsAccount = await signUpAndOnboard(page, 'ems-tracker', { firstName: 'E2E', lastName: 'Medic' }, { origin: EMS_ORIGIN });
+  emsAccount = await signUpAndOnboard(
+    page,
+    'ems-tracker',
+    { firstName: 'E2E', lastName: 'Medic' },
+    { origin: EMS_ORIGIN, role: 'ems' },
+  );
   await expect(page).toHaveURL(`${EMS_ORIGIN}/`);
 
   await page.getByRole('link', { name: 'Add Patient' }).click();
@@ -155,7 +160,7 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
     page,
     'physician-tracker',
     { firstName: 'E2E', lastName: 'Doctor' },
-    { origin: PHYSICIAN_ORIGIN },
+    { origin: PHYSICIAN_ORIGIN, role: 'physician' },
   );
   await expect(page).toHaveURL(`${PHYSICIAN_ORIGIN}/physician`);
 

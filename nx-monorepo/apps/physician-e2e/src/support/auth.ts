@@ -1,4 +1,5 @@
 import { APIRequestContext, Page, expect } from '@playwright/test';
+import { UserRole, grantRole } from './admin';
 
 export interface E2eAccount {
   email: string;
@@ -35,11 +36,15 @@ export async function logOut(page: Page) {
 // gets its own account so tests stay independent and can run in parallel.
 // `options.origin` lets a single page drive a *different* app (e.g. EMS on
 // its own port) while it's mainly navigating a different one via `baseURL`.
+// `options.role` grants a Firestore role via the Admin SDK (see
+// support/admin.ts) before completing onboarding — physicianAppGuard /
+// emsAppGuard / adminGuard all block access to their app for accounts with
+// no role, and nothing client-side can ever set that field on its own.
 export async function signUpAndOnboard(
   page: Page,
   prefix: string,
   name: { firstName: string; lastName: string } = { firstName: 'E2E', lastName: 'Tester' },
-  options?: { origin?: string },
+  options?: { origin?: string; role?: UserRole },
 ): Promise<E2eAccount> {
   const account = generateE2eAccount(prefix);
   const origin = options?.origin ?? '';
@@ -51,6 +56,16 @@ export async function signUpAndOnboard(
   await page.getByRole('button', { name: 'Create Account' }).click();
 
   await expect(page).toHaveURL(new RegExp(`${origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/user-settings$`));
+
+  if (options?.role) {
+    // Must land before the "Continue" click below, since that's what
+    // navigates into the role-guarded app routes. saveProfile() (called by
+    // that click) re-reads the Firestore doc after its own write, so it
+    // picks up this role regardless of exactly when it lands relative to
+    // the profile service's own initial fetch.
+    await grantRole(account.email, options.role);
+  }
+
   await page.getByLabel('First Name').fill(name.firstName);
   await page.getByLabel('Last Name').fill(name.lastName);
   await page.getByRole('button', { name: 'Continue' }).click();
@@ -70,11 +85,22 @@ export async function deleteAccount(request: APIRequestContext, account: E2eAcco
     `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${API_KEY}`,
     { data: { email: account.email, password: account.password, returnSecureToken: true } },
   );
+  if (!signInResponse.ok()) {
+    throw new Error(`deleteAccount: sign-in for ${account.email} failed (${signInResponse.status()}): ${await signInResponse.text()}`);
+  }
   const { idToken, localId: uid } = await signInResponse.json();
 
-  await request.delete(`${FIRESTORE_BASE}/users/${uid}`, { headers: { Authorization: `Bearer ${idToken}` } });
+  const docDeleteResponse = await request.delete(`${FIRESTORE_BASE}/users/${uid}`, {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  if (!docDeleteResponse.ok()) {
+    throw new Error(`deleteAccount: Firestore doc delete for ${uid} failed (${docDeleteResponse.status()}): ${await docDeleteResponse.text()}`);
+  }
 
-  await request.post(`https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${API_KEY}`, {
+  const accountDeleteResponse = await request.post(`https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${API_KEY}`, {
     data: { idToken },
   });
+  if (!accountDeleteResponse.ok()) {
+    throw new Error(`deleteAccount: Auth account delete for ${uid} failed (${accountDeleteResponse.status()}): ${await accountDeleteResponse.text()}`);
+  }
 }
