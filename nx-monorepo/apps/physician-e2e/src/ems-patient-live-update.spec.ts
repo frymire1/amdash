@@ -1,8 +1,20 @@
 import { test, expect } from '@playwright/test';
-import { signUpAndOnboard, signIn, E2eAccount } from './support/auth';
+import { deleteAccount, signUpAndOnboard, signIn, E2eAccount } from './support/auth';
 
 // Same real deployed EMS hosting site used by live-tracking.spec.ts.
 const EMS_ORIGIN = 'https://amdash-ems-dev.web.app';
+
+// Otherwise the account and its Firestore users/ doc are left behind
+// permanently, since nothing in the app itself ever deletes a user.
+let createdAccount: E2eAccount | undefined;
+
+test.afterEach(async ({ request }) => {
+  if (!createdAccount) {
+    return;
+  }
+  await deleteAccount(request, createdAccount);
+  createdAccount = undefined;
+});
 
 test.describe('EMS patient card live update', () => {
   test('editing a patient updates the home list without a manual reload, for the editor and for another session', async ({
@@ -23,6 +35,7 @@ test.describe('EMS patient card live update', () => {
       { firstName: 'E2E', lastName: 'Medic' },
       { origin: EMS_ORIGIN },
     );
+    createdAccount = account;
     await expect(pageA).toHaveURL(`${EMS_ORIGIN}/`);
 
     // Session A uploads a patient.

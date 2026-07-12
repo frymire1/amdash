@@ -1,5 +1,5 @@
 import { APIRequestContext, test, expect } from '@playwright/test';
-import { E2eAccount, signUpAndOnboard } from './support/auth';
+import { E2eAccount, deleteAccount, signUpAndOnboard } from './support/auth';
 
 // This is a genuine cross-app flow: EMS uploads + live-tracks a patient
 // through the real deployed Cloud Functions / Pub/Sub pipeline, and the
@@ -27,6 +27,7 @@ test.use({
 // emsLocations doc, so without this they'd accumulate on every run.
 let createdPatientId: string | undefined;
 let emsAccount: E2eAccount | undefined;
+let physicianAccount: E2eAccount | undefined;
 
 async function signInForIdToken(request: APIRequestContext, account: E2eAccount): Promise<string> {
   const response = await request.post(
@@ -37,22 +38,31 @@ async function signInForIdToken(request: APIRequestContext, account: E2eAccount)
   return body.idToken;
 }
 
+// This deletes the patient and emsLocations docs created by the test, then
+// the two throwaway accounts themselves (Firebase Auth + their Firestore
+// users/ doc) — otherwise both accounts and the profile docs are left behind
+// permanently, since nothing in the app itself ever deletes a user.
 test.afterEach(async ({ request }) => {
-  if (!emsAccount || !createdPatientId) {
-    return;
+  if (emsAccount && createdPatientId) {
+    const idToken = await signInForIdToken(request, emsAccount);
+    const headers = { Authorization: `Bearer ${idToken}` };
+    // Firestore's REST delete is idempotent — safe to call even if the earlier
+    // steps failed and one or both docs were never created.
+    await Promise.all([
+      request.delete(`${FIRESTORE_BASE}/patients/${createdPatientId}`, { headers }),
+      request.delete(`${FIRESTORE_BASE}/emsLocations/${createdPatientId}`, { headers }),
+    ]);
+    createdPatientId = undefined;
   }
 
-  const idToken = await signInForIdToken(request, emsAccount);
-  const headers = { Authorization: `Bearer ${idToken}` };
-  // Firestore's REST delete is idempotent — safe to call even if the earlier
-  // steps failed and one or both docs were never created.
-  await Promise.all([
-    request.delete(`${FIRESTORE_BASE}/patients/${createdPatientId}`, { headers }),
-    request.delete(`${FIRESTORE_BASE}/emsLocations/${createdPatientId}`, { headers }),
-  ]);
-
-  createdPatientId = undefined;
-  emsAccount = undefined;
+  if (emsAccount) {
+    await deleteAccount(request, emsAccount);
+    emsAccount = undefined;
+  }
+  if (physicianAccount) {
+    await deleteAccount(request, physicianAccount);
+    physicianAccount = undefined;
+  }
 });
 
 // Overrides Date.now() to read as `publishedAtMs + elapsedMs`, then reloads
@@ -141,7 +151,7 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
   await page.waitForTimeout(3000);
 
   // --- Physician side: the same patient should show up as actively tracked ---
-  await signUpAndOnboard(
+  physicianAccount = await signUpAndOnboard(
     page,
     'physician-tracker',
     { firstName: 'E2E', lastName: 'Doctor' },

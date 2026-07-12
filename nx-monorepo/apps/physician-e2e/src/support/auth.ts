@@ -1,9 +1,14 @@
-import { Page, expect } from '@playwright/test';
+import { APIRequestContext, Page, expect } from '@playwright/test';
 
 export interface E2eAccount {
   email: string;
   password: string;
 }
+
+// Same public Web API key embedded in every app's firebase.ts — used for the
+// REST calls below, mirroring how the app's own client SDK authenticates.
+const API_KEY = 'AIzaSyDHOpM_Mi9NcMeZS8sD42olEMyN_MjVl5k';
+const FIRESTORE_BASE = 'https://firestore.googleapis.com/v1/projects/amdash-dev/databases/(default)/documents';
 
 export function generateE2eAccount(prefix: string): E2eAccount {
   const unique = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
@@ -51,4 +56,25 @@ export async function signUpAndOnboard(
   await page.getByRole('button', { name: 'Continue' }).click();
 
   return account;
+}
+
+// Deletes a throwaway e2e account entirely: its `users/{uid}` Firestore doc
+// and the Firebase Auth account itself. Every test that calls
+// signUpAndOnboard should call this in an `afterEach` — otherwise the
+// account (and its Firestore profile doc) is left behind permanently, since
+// nothing in the app itself ever deletes a user. Uses `request` rather than
+// the test's `page` so it still works even if the test failed partway
+// through and the page is in a broken state.
+export async function deleteAccount(request: APIRequestContext, account: E2eAccount) {
+  const signInResponse = await request.post(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${API_KEY}`,
+    { data: { email: account.email, password: account.password, returnSecureToken: true } },
+  );
+  const { idToken, localId: uid } = await signInResponse.json();
+
+  await request.delete(`${FIRESTORE_BASE}/users/${uid}`, { headers: { Authorization: `Bearer ${idToken}` } });
+
+  await request.post(`https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${API_KEY}`, {
+    data: { idToken },
+  });
 }
