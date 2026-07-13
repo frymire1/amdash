@@ -3,15 +3,18 @@ import { CommonModule } from '@angular/common';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
+import { MatDialog } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { DESTINATION_HOSPITALS, Patient } from '../../models/patient.model';
 import { PatientUploadService } from '../../services/patient-upload.service';
 import { PatientSessionService } from '../../services/patient-session.service';
 import { EmsTrackingService } from '../../services/ems-tracking.service';
+import { ErrorDialogComponent } from '../error-dialog/error-dialog.component';
 
 function toNumberOrNull(value: number | string | undefined): number | null {
   return typeof value === 'number' ? value : null;
@@ -27,6 +30,7 @@ function toNumberOrNull(value: number | string | undefined): number | null {
     MatFormFieldModule,
     MatIconModule,
     MatInputModule,
+    MatProgressSpinnerModule,
     MatSelectModule,
     MatSlideToggleModule,
   ],
@@ -40,6 +44,7 @@ export class PatientUploadComponent {
   private readonly trackingService = inject(EmsTrackingService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  private readonly dialog = inject(MatDialog);
 
   private editingId: string | null = null;
   private formPrefilled = false;
@@ -180,25 +185,46 @@ export class PatientUploadComponent {
     this.submitting.set(true);
     this.errorMessage.set(null);
 
+    let id: string;
     try {
-      let id: string;
       if (this.editingId) {
         id = this.editingId;
         await this.patientUploadService.updatePatient(id, patient);
       } else {
         id = await this.patientUploadService.uploadPatient(patient);
+        // If live tracking below fails, the user stays on this page to
+        // retry rather than being navigated away — treat the patient as
+        // already-created from here on so a retry updates it instead of
+        // creating a duplicate.
+        this.editingId = id;
+        this.isEditing.set(true);
       }
+    } catch (error) {
+      this.errorMessage.set('Failed to upload patient. Please try again.');
+      console.error('Failed to upload patient', error);
+      this.submitting.set(false);
+      return;
+    }
 
+    try {
       if (this.liveTrackingEnabled()) {
-        this.trackingService.startTracking(id);
+        // Awaited so the button's spinner stays up until live tracking is
+        // actually confirmed started, not just requested.
+        await this.trackingService.startTracking(id);
       } else {
         this.trackingService.stopTracking(id);
       }
 
       this.router.navigate(['/']);
     } catch (error) {
-      this.errorMessage.set('Failed to upload patient. Please try again.');
-      console.error('Failed to upload patient', error);
+      console.error('Failed to start live tracking', error);
+      this.dialog.open(ErrorDialogComponent, {
+        data: {
+          title: 'Live tracking failed',
+          message:
+            'The patient was saved, but live tracking could not be started. Please check that location permission is enabled for this site, then try again from this page.',
+        },
+      });
     } finally {
       this.submitting.set(false);
     }

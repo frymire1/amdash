@@ -111,8 +111,9 @@
       <p class="form-message form-message--error">{{ errorMessage() }}</p>
     }
 
-    <button mat-raised-button color="primary" type="submit" [disabled]="submitting()">
+    <button mat-raised-button color="primary" type="submit" class="submit-button" [disabled]="submitting()">
       @if (submitting()) {
+        <mat-spinner diameter="18" class="submit-button__spinner"></mat-spinner>
         {{ isEditing() ? 'Saving…' : 'Uploading…' }}
       } @else {
         {{ isEditing() ? 'Save Changes' : 'Upload Patient' }}
