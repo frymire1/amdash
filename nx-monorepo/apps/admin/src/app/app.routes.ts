@@ -1,5 +1,5 @@
 import { Route } from '@angular/router';
-import { adminGuard, authGuard, guestGuard, LoginComponent, profileCompleteGuard, UserSettingsComponent } from '@amdash/auth';
+import { adminGuard, authGuard, guestGuard, LoginComponent, UserSettingsComponent } from '@amdash/auth';
 import { AccessDeniedComponent } from './components/access-denied/access-denied.component';
 import { UserManagementComponent } from './components/user-management/user-management.component';
 
@@ -21,7 +21,7 @@ export const appRoutes: Route[] = [
   },
   {
     path: '',
-    canActivateChild: [authGuard, profileCompleteGuard, adminGuard],
+    canActivateChild: [authGuard, adminGuard],
     children: [
       {
         path: '',

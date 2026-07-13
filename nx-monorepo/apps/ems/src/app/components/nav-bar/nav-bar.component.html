@@ -2,15 +2,22 @@
   <a class="brand" routerLink="/">AmDash</a>
   <span class="spacer"></span>
 
-  @if (authService.isAuthenticated() && userProfileService.initials()) {
+  @if (authService.isAuthenticated()) {
     <a
-      class="user-avatar user-avatar--initials"
+      class="user-avatar"
+      [class.user-avatar--initials]="userProfileService.initials()"
+      [class.user-avatar--placeholder]="!userProfileService.initials()"
       routerLink="/user-settings"
+      aria-label="Account settings"
       title="Account settings"
     >
-      {{ userProfileService.initials() }}
+      @if (userProfileService.initials()) {
+        {{ userProfileService.initials() }}
+      } @else {
+        <mat-icon>account_circle</mat-icon>
+      }
     </a>
-  } @else if (!authService.isAuthenticated()) {
+  } @else {
     <span class="user-avatar user-avatar--placeholder" title="Not logged in">
       <mat-icon>account_circle</mat-icon>
     </span>

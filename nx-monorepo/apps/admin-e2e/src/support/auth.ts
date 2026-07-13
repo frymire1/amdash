@@ -25,8 +25,8 @@ export async function logOut(page: Page) {
 }
 
 // Creates a brand-new throwaway account via the shared login component's
-// sign-up mode and completes the mandatory name-onboarding step. Every test
-// gets its own account so tests stay independent and can run in parallel.
+// sign-up mode and completes the name-onboarding step. Every test gets its
+// own account so tests stay independent and can run in parallel.
 export async function signUpAndOnboard(
   page: Page,
   prefix: string,
@@ -40,6 +40,17 @@ export async function signUpAndOnboard(
   await page.getByLabel('Password').fill(account.password);
   await page.getByRole('button', { name: 'Create Account' }).click();
 
+  // Sign-up itself triggers an in-flight navigation to '/' that resolves
+  // (through authGuard, then adminGuard) only once the profile has
+  // loaded — clicking the avatar link before that settles races it and can
+  // get superseded by it, landing somewhere unexpected. Wait for the app to
+  // navigate away from /login on its own first.
+  await page.waitForURL((url) => !url.pathname.endsWith('/login'), { timeout: 15000 });
+
+  // There's no forced redirect to /user-settings after sign-up — the nav
+  // bar's avatar circle is always clickable (even before a name is set) and
+  // is the only way there now.
+  await page.getByRole('link', { name: 'Account settings' }).click();
   await expect(page).toHaveURL(/\/user-settings$/);
   await page.getByLabel('First Name').fill(name.firstName);
   await page.getByLabel('Last Name').fill(name.lastName);

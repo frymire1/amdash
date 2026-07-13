@@ -2,7 +2,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
+  // 100vh would push this below the fold by the nav bar's own height, since
+  // it's rendered above <router-outlet> even on this pre-auth page — see
+  // nav-bar.component.scss's matching 56px min-height.
+  min-height: calc(100vh - 56px);
   padding: 16px;
   box-sizing: border-box;
   background: #f5f7fa;

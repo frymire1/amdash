@@ -27,17 +27,6 @@ export const guestGuard: CanActivateFn = () => {
   );
 };
 
-export const profileCompleteGuard: CanActivateFn = () => {
-  const userProfileService = inject(UserProfileService);
-  const router = inject(Router);
-
-  return toObservable(userProfileService.loading).pipe(
-    filter((loading) => !loading),
-    take(1),
-    map(() => !!userProfileService.profile()?.firstName || router.parseUrl('/user-settings')),
-  );
-};
-
 // Builds a guard that only allows through users who hold at least one of
 // `allowedRoles` (a user can have more than one role at once), redirecting
 // everyone else (including users with no roles assigned yet) to

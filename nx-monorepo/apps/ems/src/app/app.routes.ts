@@ -1,12 +1,5 @@
 import { Route } from '@angular/router';
-import {
-  authGuard,
-  emsAppGuard,
-  guestGuard,
-  LoginComponent,
-  profileCompleteGuard,
-  UserSettingsComponent,
-} from '@amdash/auth';
+import { authGuard, emsAppGuard, guestGuard, LoginComponent, UserSettingsComponent } from '@amdash/auth';
 import { AccessDeniedComponent } from './components/access-denied/access-denied.component';
 import { HomeComponent } from './components/home/home.component';
 import { PatientUploadComponent } from './components/patient-upload/patient-upload.component';
@@ -29,7 +22,7 @@ export const appRoutes: Route[] = [
   },
   {
     path: '',
-    canActivateChild: [authGuard, profileCompleteGuard, emsAppGuard],
+    canActivateChild: [authGuard, emsAppGuard],
     children: [
       {
         path: '',

@@ -4,7 +4,6 @@ import {
   guestGuard,
   LoginComponent,
   physicianAppGuard,
-  profileCompleteGuard,
   UserSettingsComponent,
   WorkLocationComponent,
   workLocationGuard,
@@ -26,7 +25,7 @@ export const appRoutes: Route[] = [
   {
     path: 'work-location',
     component: WorkLocationComponent,
-    canActivate: [authGuard, profileCompleteGuard, physicianAppGuard],
+    canActivate: [authGuard, physicianAppGuard],
   },
   {
     path: 'access-denied',
@@ -35,7 +34,7 @@ export const appRoutes: Route[] = [
   },
   {
     path: '',
-    canActivateChild: [authGuard, profileCompleteGuard, physicianAppGuard, workLocationGuard],
+    canActivateChild: [authGuard, physicianAppGuard, workLocationGuard],
     children: [
       {
         path: '',
