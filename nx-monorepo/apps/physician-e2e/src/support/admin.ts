@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
+import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 
 export type UserRole = 'ems' | 'physician' | 'nurse' | 'admin';
 
@@ -43,11 +43,15 @@ function ensureInitialized() {
   initialized = true;
 }
 
-// Sets the role Firestore rules otherwise forbid clients from setting on
+// Adds a role Firestore rules otherwise forbid clients from setting on
 // themselves, so an e2e-created account can pass the app's role guards
-// (physicianAppGuard / emsAppGuard / adminGuard).
+// (physicianAppGuard / emsAppGuard / adminGuard). `role` is an array — a
+// user can hold more than one — so this unions in rather than overwrites,
+// matching setUserRole's semantics in functions/src/index.ts.
 export async function grantRole(email: string, role: UserRole): Promise<void> {
   ensureInitialized();
   const user = await getAuth().getUserByEmail(email);
-  await getFirestore().doc(`users/${user.uid}`).set({ role }, { merge: true });
+  await getFirestore()
+    .doc(`users/${user.uid}`)
+    .set({ role: FieldValue.arrayUnion(role) }, { merge: true });
 }

@@ -19,6 +19,7 @@ describe('UserManagementComponent', () => {
             loadingUsers: signal(false),
             refreshUsers: async () => undefined,
             setUserRole: async () => ({ uid: '1', email: 'a@b.com', role: 'ems' }),
+            removeUserRole: async () => ({ uid: '1', email: 'a@b.com', role: 'ems' }),
           },
         },
       ],

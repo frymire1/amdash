@@ -95,15 +95,38 @@
   }
 }
 
+.role-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .role-badge {
-  display: inline-block;
-  padding: 2px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px 2px 10px;
   border-radius: 999px;
   background: #dbeafe;
   color: #1d4ed8;
   font-size: 12px;
   font-weight: 600;
   text-transform: capitalize;
+  white-space: nowrap;
+
+  &__remove {
+    width: 20px;
+    height: 20px;
+    line-height: 20px;
+    padding: 0;
+
+    mat-icon {
+      font-size: 14px;
+      width: 14px;
+      height: 14px;
+      line-height: 14px;
+    }
+  }
 }
 
 .role-badge--unassigned {

@@ -38,9 +38,10 @@ export const profileCompleteGuard: CanActivateFn = () => {
   );
 };
 
-// Builds a guard that only allows through users whose Firestore `role` is
-// one of `allowedRoles`, redirecting everyone else (including users with no
-// role assigned yet) to /access-denied.
+// Builds a guard that only allows through users who hold at least one of
+// `allowedRoles` (a user can have more than one role at once), redirecting
+// everyone else (including users with no roles assigned yet) to
+// /access-denied.
 function roleGuard(...allowedRoles: UserRole[]): CanActivateFn {
   return () => {
     const userProfileService = inject(UserProfileService);
@@ -50,8 +51,8 @@ function roleGuard(...allowedRoles: UserRole[]): CanActivateFn {
       filter((loading) => !loading),
       take(1),
       map(() => {
-        const role = userProfileService.profile()?.role;
-        return (!!role && allowedRoles.includes(role)) || router.parseUrl('/access-denied');
+        const roles = userProfileService.profile()?.role ?? [];
+        return roles.some((role) => allowedRoles.includes(role)) || router.parseUrl('/access-denied');
       }),
     );
   };

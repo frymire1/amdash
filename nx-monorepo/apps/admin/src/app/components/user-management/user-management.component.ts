@@ -6,7 +6,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
-import { AdminService, AssignableRole } from '../../services/admin.service';
+import { AdminService, AssignableRole, ManagedUser } from '../../services/admin.service';
 
 interface RoleOption {
   value: AssignableRole;
@@ -40,6 +40,7 @@ export class UserManagementComponent implements OnInit {
 
   readonly roleOptions = ROLE_OPTIONS;
   readonly submitting = signal(false);
+  readonly removingRole = signal<string | null>(null);
   readonly errorMessage = signal<string | null>(null);
   readonly successMessage = signal<string | null>(null);
 
@@ -83,6 +84,27 @@ export class UserManagementComponent implements OnInit {
       console.error('Failed to assign role', error);
     } finally {
       this.submitting.set(false);
+    }
+  }
+
+  removingRoleKey(user: ManagedUser, role: AssignableRole): string {
+    return `${user.uid}:${role}`;
+  }
+
+  async removeRole(user: ManagedUser, role: AssignableRole) {
+    this.removingRole.set(this.removingRoleKey(user, role));
+    this.errorMessage.set(null);
+    this.successMessage.set(null);
+
+    try {
+      await this.adminService.removeUserRole(user.email, role);
+      this.successMessage.set(`Removed the ${role} role from ${user.email}.`);
+      await this.adminService.refreshUsers();
+    } catch (error) {
+      this.errorMessage.set(this.toErrorMessage(error));
+      console.error('Failed to remove role', error);
+    } finally {
+      this.removingRole.set(null);
     }
   }
 

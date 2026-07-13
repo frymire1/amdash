@@ -10,7 +10,10 @@ export interface UserProfile {
   // email) before it has completed the mandatory name onboarding step.
   firstName?: string;
   lastName?: string;
-  role?: UserRole;
+  // A user can hold more than one role at once (e.g. physician + admin).
+  // Only ever set server-side (see setUserRole/removeUserRole in
+  // functions/src/index.ts) — clients are blocked from touching this field.
+  role?: UserRole[];
   // Hospital name (see @amdash/auth's HOSPITALS) a physician/nurse works
   // out of — mandatory for those roles (see workLocationGuard), unused by
   // ems/admin accounts.

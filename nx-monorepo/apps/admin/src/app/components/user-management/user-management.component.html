@@ -64,9 +64,27 @@
                 <td>{{ user.email }}</td>
                 <td>{{ user.firstName || user.lastName ? (user.firstName + ' ' + user.lastName).trim() : '—' }}</td>
                 <td>
-                  <span class="role-badge" [class.role-badge--unassigned]="!user.role">
-                    {{ user.role || 'Unassigned' }}
-                  </span>
+                  @if (user.role.length > 0) {
+                    <div class="role-chips">
+                      @for (role of user.role; track role) {
+                        <span class="role-badge">
+                          {{ role }}
+                          <button
+                            mat-icon-button
+                            type="button"
+                            class="role-badge__remove"
+                            [disabled]="removingRole() === removingRoleKey(user, role)"
+                            (click)="removeRole(user, role)"
+                            [attr.aria-label]="'Remove ' + role + ' role from ' + user.email"
+                          >
+                            <mat-icon>close</mat-icon>
+                          </button>
+                        </span>
+                      }
+                    </div>
+                  } @else {
+                    <span class="role-badge role-badge--unassigned">Unassigned</span>
+                  }
                 </td>
               </tr>
             }

@@ -11,10 +11,15 @@ export interface ManagedUser {
   email: string;
   firstName: string;
   lastName: string;
-  role: string | null;
+  role: AssignableRole[];
 }
 
 interface SetUserRoleRequest {
+  email: string;
+  role: AssignableRole;
+}
+
+interface RemoveUserRoleRequest {
   email: string;
   role: AssignableRole;
 }
@@ -32,6 +37,10 @@ export class AdminService {
     this.functions,
     'setUserRole',
   );
+  private readonly removeUserRoleFn = httpsCallable<RemoveUserRoleRequest, SetUserRoleResponse>(
+    this.functions,
+    'removeUserRole',
+  );
   private readonly listUsersWithRolesFn = httpsCallable<void, ManagedUser[]>(
     this.functions,
     'listUsersWithRoles',
@@ -40,8 +49,15 @@ export class AdminService {
   readonly users = signal<ManagedUser[]>([]);
   readonly loadingUsers = signal(false);
 
+  // Adds a role — a user can hold more than one at once. See removeUserRole
+  // for the inverse.
   async setUserRole(email: string, role: AssignableRole): Promise<SetUserRoleResponse> {
     const result = await this.setUserRoleFn({ email, role });
+    return result.data;
+  }
+
+  async removeUserRole(email: string, role: AssignableRole): Promise<SetUserRoleResponse> {
+    const result = await this.removeUserRoleFn({ email, role });
     return result.data;
   }
 

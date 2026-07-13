@@ -90,11 +90,29 @@ interface SetUserRoleRequest {
   role: AssignableRole;
 }
 
-async function callerIsAdmin(uid: string): Promise<boolean> {
-  const snapshot = await getFirestore().collection('users').doc(uid).get();
-  return snapshot.exists && snapshot.data()?.['role'] === 'admin';
+interface RemoveUserRoleRequest {
+  email: string;
+  role: AssignableRole;
 }
 
+async function callerIsAdmin(uid: string): Promise<boolean> {
+  const snapshot = await getFirestore().collection('users').doc(uid).get();
+  const roles = snapshot.data()?.['role'];
+  return Array.isArray(roles) && roles.includes('admin');
+}
+
+async function findUserByEmail(email: string) {
+  try {
+    return await getAuth().getUserByEmail(email);
+  } catch {
+    throw new HttpsError('not-found', `No account found for ${email}.`);
+  }
+}
+
+// Adds a role to the user's existing roles (a user can hold more than one at
+// once) rather than replacing them — see removeUserRole below for the
+// inverse. Only ever called by an admin; clients can never write `role`
+// themselves (see firestore.rules).
 export const setUserRole = onCall<SetUserRoleRequest>({ region: REGION }, async (request) => {
   if (!request.auth || !(await callerIsAdmin(request.auth.uid))) {
     throw new HttpsError('permission-denied', 'Only admins can assign roles.');
@@ -105,14 +123,30 @@ export const setUserRole = onCall<SetUserRoleRequest>({ region: REGION }, async 
     throw new HttpsError('invalid-argument', 'A valid email and role (ems, physician, or nurse) are required.');
   }
 
-  let targetUser;
-  try {
-    targetUser = await getAuth().getUserByEmail(email);
-  } catch {
-    throw new HttpsError('not-found', `No account found for ${email}.`);
+  const targetUser = await findUserByEmail(email);
+  await getFirestore()
+    .collection('users')
+    .doc(targetUser.uid)
+    .set({ role: FieldValue.arrayUnion(role) }, { merge: true });
+
+  return { uid: targetUser.uid, email: targetUser.email, role };
+});
+
+export const removeUserRole = onCall<RemoveUserRoleRequest>({ region: REGION }, async (request) => {
+  if (!request.auth || !(await callerIsAdmin(request.auth.uid))) {
+    throw new HttpsError('permission-denied', 'Only admins can remove roles.');
   }
 
-  await getFirestore().collection('users').doc(targetUser.uid).set({ role }, { merge: true });
+  const { email, role } = request.data;
+  if (!email || !ASSIGNABLE_ROLES.includes(role)) {
+    throw new HttpsError('invalid-argument', 'A valid email and role (ems, physician, or nurse) are required.');
+  }
+
+  const targetUser = await findUserByEmail(email);
+  await getFirestore()
+    .collection('users')
+    .doc(targetUser.uid)
+    .update({ role: FieldValue.arrayRemove(role) });
 
   return { uid: targetUser.uid, email: targetUser.email, role };
 });
@@ -131,12 +165,13 @@ export const listUsersWithRoles = onCall({ region: REGION }, async (request) => 
 
   return authUsers.users.map((user) => {
     const profile = profilesByUid.get(user.uid);
+    const roles = profile?.['role'];
     return {
       uid: user.uid,
       email: user.email ?? '',
       firstName: profile?.['firstName'] ?? '',
       lastName: profile?.['lastName'] ?? '',
-      role: profile?.['role'] ?? null,
+      role: Array.isArray(roles) ? roles : [],
     };
   });
 });

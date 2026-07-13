@@ -32,8 +32,8 @@ export class UserSettingsComponent {
 
   // Only physician/nurse accounts have a work location (see workLocationGuard).
   readonly showHospitalField = computed(() => {
-    const role = this.userProfileService.profile()?.role;
-    return role === 'physician' || role === 'nurse';
+    const roles = this.userProfileService.profile()?.role ?? [];
+    return roles.includes('physician') || roles.includes('nurse');
   });
 
   readonly settingsForm = this.formBuilder.nonNullable.group({
