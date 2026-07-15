@@ -12,6 +12,17 @@
     margin-bottom: 20px;
     color: #333;
   }
+
+  h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #333;
+    margin: 24px 0 12px;
+
+    &:first-of-type {
+      margin-top: 0;
+    }
+  }
 }
 
 .role-form {

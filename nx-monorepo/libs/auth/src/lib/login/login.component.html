@@ -1,26 +1,100 @@
 <div class="login-container">
   <div class="login-card">
     <h1 class="login-card__brand">AmDash</h1>
-    <p class="login-card__subtitle">{{ mode() === 'signup' ? 'Create an account' : 'Sign in to continue' }}</p>
 
-    <form [formGroup]="loginForm" (ngSubmit)="onSubmit()">
-      <mat-form-field appearance="outline">
-        <mat-label>Email</mat-label>
-        <input matInput type="email" formControlName="email" required autocomplete="email" />
-      </mat-form-field>
+    @if (step() === 'email') {
+      <p class="login-card__subtitle">Sign in to continue</p>
 
-      <mat-form-field appearance="outline">
-        <mat-label>Password</mat-label>
-        <input
-          matInput
-          type="password"
-          formControlName="password"
-          required
-          [autocomplete]="mode() === 'signup' ? 'new-password' : 'current-password'"
-        />
-      </mat-form-field>
+      <form [formGroup]="emailForm" (ngSubmit)="onSubmitEmail()">
+        <mat-form-field appearance="outline">
+          <mat-label>Email</mat-label>
+          <input matInput type="email" formControlName="email" required autocomplete="email" />
+        </mat-form-field>
 
-      @if (mode() === 'signin') {
+        @if (errorMessage()) {
+          <p class="login-card__error">{{ errorMessage() }}</p>
+        }
+
+        <button mat-raised-button color="primary" type="submit" [disabled]="submitting()">
+          {{ submitting() ? 'Checking…' : 'Continue' }}
+        </button>
+      </form>
+    }
+
+    @if (step() === 'set-password') {
+      <p class="login-card__subtitle">
+        @if (accountExists()) {
+          Your admin team has set up your account, now just create a password.
+        } @else {
+          Create your account
+        }
+      </p>
+
+      <form [formGroup]="setPasswordForm" (ngSubmit)="onSubmitSetPassword()">
+        <mat-form-field appearance="outline">
+          <mat-label>Password</mat-label>
+          <input matInput type="password" formControlName="password" required autocomplete="new-password" />
+        </mat-form-field>
+
+        @if (!meetsPasswordStrength() && setPasswordForm.controls.password.value) {
+          <ul class="password-hints">
+            @if (!hasMinLength()) {
+              <li>At least 8 characters</li>
+            }
+            @if (!hasUppercase()) {
+              <li>One uppercase letter</li>
+            }
+            @if (!hasNumber()) {
+              <li>One number</li>
+            }
+            @if (!hasSpecialChar()) {
+              <li>One special character</li>
+            }
+          </ul>
+        }
+
+        <mat-form-field appearance="outline">
+          <mat-label>Confirm Password</mat-label>
+          <input
+            matInput
+            type="password"
+            formControlName="confirmPassword"
+            required
+            autocomplete="new-password"
+          />
+        </mat-form-field>
+
+        @if (setPasswordForm.controls.confirmPassword.value) {
+          @if (passwordsMatch()) {
+            <p class="login-card__success">Passwords match!</p>
+          } @else {
+            <p class="login-card__error">Passwords do not match</p>
+          }
+        }
+
+        @if (errorMessage()) {
+          <p class="login-card__error">{{ errorMessage() }}</p>
+        }
+
+        <button mat-raised-button color="primary" type="submit" [disabled]="submitting() || !allRequirementsMet()">
+          {{ submitting() ? 'Setting password…' : 'Set Password' }}
+        </button>
+
+        <button type="button" class="login-card__toggle-mode" mat-button (click)="useAnotherEmail()">
+          Use a different email
+        </button>
+      </form>
+    }
+
+    @if (step() === 'sign-in') {
+      <p class="login-card__subtitle">Sign in as {{ email() }}</p>
+
+      <form [formGroup]="signInForm" (ngSubmit)="onSubmitSignIn()">
+        <mat-form-field appearance="outline">
+          <mat-label>Password</mat-label>
+          <input matInput type="password" formControlName="password" required autocomplete="current-password" />
+        </mat-form-field>
+
         <button
           type="button"
           class="login-card__forgot-password"
@@ -30,27 +104,23 @@
         >
           {{ resetSubmitting() ? 'Sending…' : 'Forgot password?' }}
         </button>
-      }
 
-      @if (errorMessage()) {
-        <p class="login-card__error">{{ errorMessage() }}</p>
-      }
-
-      @if (resetMessage()) {
-        <p class="login-card__success">{{ resetMessage() }}</p>
-      }
-
-      <button mat-raised-button color="primary" type="submit" [disabled]="submitting()">
-        @if (submitting()) {
-          {{ mode() === 'signup' ? 'Creating account…' : 'Signing in…' }}
-        } @else {
-          {{ mode() === 'signup' ? 'Create Account' : 'Sign In' }}
+        @if (errorMessage()) {
+          <p class="login-card__error">{{ errorMessage() }}</p>
         }
-      </button>
 
-      <button type="button" class="login-card__toggle-mode" mat-button (click)="toggleMode()">
-        {{ mode() === 'signup' ? 'Already have an account? Sign in' : "Don't have an account? Create one" }}
-      </button>
-    </form>
+        @if (resetMessage()) {
+          <p class="login-card__success">{{ resetMessage() }}</p>
+        }
+
+        <button mat-raised-button color="primary" type="submit" [disabled]="submitting()">
+          {{ submitting() ? 'Signing in…' : 'Sign In' }}
+        </button>
+
+        <button type="button" class="login-card__toggle-mode" mat-button (click)="useAnotherEmail()">
+          Use a different email
+        </button>
+      </form>
+    }
   </div>
 </div>

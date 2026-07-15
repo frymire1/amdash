@@ -19,11 +19,18 @@ export function generateE2eAccount(prefix: string): E2eAccount {
   };
 }
 
+// The login page is email-first: submitting the email decides server-side
+// (checkAccountStatus) whether to show a single-password sign-in screen (an
+// existing account) or a set-your-password screen (no account yet, or an
+// admin-created one with no password) — see signUpAndOnboard below for that
+// second path.
 export async function signIn(page: Page, account: E2eAccount, options?: { origin?: string }) {
   const origin = options?.origin ?? '';
   await page.goto(`${origin}/login`);
   await page.getByLabel('Email').fill(account.email);
-  await page.getByLabel('Password').fill(account.password);
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByRole('button', { name: 'Sign In' }).waitFor();
+  await page.getByLabel('Password', { exact: true }).fill(account.password);
   await page.getByRole('button', { name: 'Sign In' }).click();
 }
 
@@ -55,10 +62,17 @@ export async function signUpAndOnboard(
   const originPattern = origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   await page.goto(`${origin}/login`);
-  await page.getByRole('button', { name: "Don't have an account? Create one" }).click();
   await page.getByLabel('Email').fill(account.email);
-  await page.getByLabel('Password').fill(account.password);
-  await page.getByRole('button', { name: 'Create Account' }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
+
+  // No account exists yet for a freshly generated e2e email, so this lands
+  // on the set-your-password step (worded as "Create your account" for a
+  // brand-new email, vs. "Your admin team has set up your account" for an
+  // admin-created one — either way, same two fields).
+  await page.getByRole('button', { name: 'Set Password' }).waitFor();
+  await page.getByLabel('Password', { exact: true }).fill(account.password);
+  await page.getByLabel('Confirm Password').fill(account.password);
+  await page.getByRole('button', { name: 'Set Password' }).click();
 
   // Sign-up itself triggers an in-flight navigation to '/' that resolves
   // (through authGuard, then the app's role guard) only once the profile

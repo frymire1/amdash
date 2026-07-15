@@ -85,6 +85,22 @@ export const onEmsLocationEvent = onMessagePublished(
   },
 );
 
+interface CreateUserRequest {
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: AssignableRole;
+}
+
+interface SetInitialPasswordRequest {
+  email: string;
+  password: string;
+}
+
+interface CheckAccountStatusRequest {
+  email: string;
+}
+
 interface SetUserRoleRequest {
   email: string;
   role: AssignableRole;
@@ -108,6 +124,86 @@ async function findUserByEmail(email: string) {
     throw new HttpsError('not-found', `No account found for ${email}.`);
   }
 }
+
+// Creates a brand-new account with no password set — the admin never
+// chooses or sees a credential. The new user sets their own password the
+// first time they enter this email on the login page (it checks
+// checkAccountStatus, sees hasPassword: false, and routes to the
+// set-password screen, which calls setInitialPassword below), or via
+// "Forgot password?".
+export const createUser = onCall<CreateUserRequest>({ region: REGION }, async (request) => {
+  if (!request.auth || !(await callerIsAdmin(request.auth.uid))) {
+    throw new HttpsError('permission-denied', 'Only admins can create users.');
+  }
+
+  const { email, firstName, lastName, role } = request.data;
+  if (!email || !firstName || !lastName || !ASSIGNABLE_ROLES.includes(role)) {
+    throw new HttpsError(
+      'invalid-argument',
+      'A valid email, first name, last name, and role (ems, physician, or nurse) are required.',
+    );
+  }
+
+  let newUser;
+  try {
+    newUser = await getAuth().createUser({ email });
+  } catch (error) {
+    if ((error as { code?: string }).code === 'auth/email-already-exists') {
+      throw new HttpsError('already-exists', `An account with ${email} already exists.`);
+    }
+    throw new HttpsError('internal', 'Failed to create the account.');
+  }
+
+  await getFirestore().collection('users').doc(newUser.uid).set({ email, firstName, lastName, role: [role] });
+
+  return { uid: newUser.uid, email, firstName, lastName, role };
+});
+
+// Deliberately callable without being signed in — the login page uses this
+// to decide, from just an email, whether to show a "set your password"
+// screen (no account yet, or an admin-created account with no password) or
+// a normal single-password sign-in screen. Returning `hasPassword` (rather
+// than making the client guess from a failed sign-in attempt) is what lets
+// the email-only-first flow work at all.
+export const checkAccountStatus = onCall<CheckAccountStatusRequest>({ region: REGION }, async (request) => {
+  const { email } = request.data;
+  if (!email) {
+    throw new HttpsError('invalid-argument', 'A valid email is required.');
+  }
+
+  try {
+    const user = await getAuth().getUserByEmail(email);
+    const hasPassword = user.providerData.some((provider) => provider.providerId === 'password');
+    return { exists: true, hasPassword };
+  } catch {
+    return { exists: false, hasPassword: false };
+  }
+});
+
+// Deliberately callable without being signed in — the whole point is to let
+// someone set their FIRST password before they've ever authenticated. This
+// is safe only because of the check below: it flatly refuses to touch any
+// account that already has a password credential, so it can never be used
+// to take over an existing account just by knowing its email. An account
+// that already has a password must go through "Forgot password?" instead,
+// same as if this function didn't exist.
+export const setInitialPassword = onCall<SetInitialPasswordRequest>({ region: REGION }, async (request) => {
+  const { email, password } = request.data;
+  if (!email || !password || password.length < 6) {
+    throw new HttpsError('invalid-argument', 'A valid email and a password of at least 6 characters are required.');
+  }
+
+  const user = await findUserByEmail(email);
+
+  const hasPassword = user.providerData.some((provider) => provider.providerId === 'password');
+  if (hasPassword) {
+    throw new HttpsError('already-exists', 'This account already has a password.');
+  }
+
+  await getAuth().updateUser(user.uid, { password });
+
+  return { email: user.email };
+});
 
 // Adds a role to the user's existing roles (a user can hold more than one at
 // once) rather than replacing them — see removeUserRole below for the

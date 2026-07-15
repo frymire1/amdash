@@ -9,11 +9,41 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from 'firebase/auth';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getFirebaseApp } from '../firebase-app';
+
+const FUNCTIONS_REGION = 'northamerica-northeast2';
+
+interface SetInitialPasswordRequest {
+  email: string;
+  password: string;
+}
+
+interface SetInitialPasswordResponse {
+  email: string;
+}
+
+interface CheckAccountStatusRequest {
+  email: string;
+}
+
+export interface AccountStatus {
+  exists: boolean;
+  hasPassword: boolean;
+}
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly auth: Auth = getAuth(getFirebaseApp());
+  private readonly functions = getFunctions(getFirebaseApp(), FUNCTIONS_REGION);
+  private readonly setInitialPasswordFn = httpsCallable<SetInitialPasswordRequest, SetInitialPasswordResponse>(
+    this.functions,
+    'setInitialPassword',
+  );
+  private readonly checkAccountStatusFn = httpsCallable<CheckAccountStatusRequest, AccountStatus>(
+    this.functions,
+    'checkAccountStatus',
+  );
 
   readonly user = signal<User | null>(null);
   readonly initializing = signal(true);
@@ -27,6 +57,14 @@ export class AuthService {
 
   isAuthenticated(): boolean {
     return this.user() !== null;
+  }
+
+  // Drives the login page's email-first flow: whether to show a
+  // set-your-password screen (no account, or an admin-created account with
+  // no password yet) or a normal single-password sign-in screen.
+  async checkAccountStatus(email: string): Promise<AccountStatus> {
+    const result = await this.checkAccountStatusFn({ email });
+    return result.data;
   }
 
   async signIn(email: string, password: string): Promise<void> {
@@ -44,5 +82,15 @@ export class AuthService {
 
   async resetPassword(email: string): Promise<void> {
     await sendPasswordResetEmail(this.auth, email);
+  }
+
+  // For an account an admin created (email only, no password) — sets that
+  // password server-side (see setInitialPassword in functions/src/index.ts,
+  // which refuses to touch an account that already has one) and signs in
+  // with it. Callers should only reach for this after a normal signUp()
+  // fails with auth/email-already-in-use.
+  async claimPasswordlessAccount(email: string, password: string): Promise<void> {
+    await this.setInitialPasswordFn({ email, password });
+    await this.signIn(email, password);
   }
 }
