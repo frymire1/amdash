@@ -3,9 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { FieldValue, getFirestore } from 'firebase-admin/firestore';
-
-export type UserRole = 'ems' | 'physician' | 'nurse' | 'admin';
+import { getFirestore } from 'firebase-admin/firestore';
 
 let initialized = false;
 
@@ -13,11 +11,8 @@ let initialized = false;
 // into the Firebase CLI on this machine (`firebase login`), converting its
 // cached OAuth refresh token into an Application Default Credentials file —
 // the same technique `firebase functions:shell`/emulators use to give local
-// code real project access. Roles can only ever be set server-side (see
-// firestore.rules and the setUserRole Cloud Function), so there's no
-// client-only way for a test to grant itself a role; this is what lets the
-// e2e suite do it without real user credentials. Requires the machine
-// running these tests to have an authenticated `firebase login` session.
+// code real project access. Requires the machine running these tests to
+// have an authenticated `firebase login` session.
 function ensureInitialized() {
   if (initialized) {
     return;
@@ -46,26 +41,11 @@ function ensureInitialized() {
 // Accounts are admin-created only now — the login page has no
 // self-registration path (an email with no account shows an error instead).
 // This mirrors createUser in functions/src/index.ts closely enough for e2e
-// purposes (a real admin also sets firstName/lastName/role at creation, but
-// signUpAndOnboard's own subsequent steps already cover filling those in
-// through the app itself), without needing an authenticated admin session
-// to call the real callable.
+// purposes, without needing an authenticated admin session to call the real
+// callable.
 export async function createPasswordlessAccount(email: string): Promise<string> {
   ensureInitialized();
   const user = await getAuth().createUser({ email });
   await getFirestore().doc(`users/${user.uid}`).set({ email }, { merge: true });
   return user.uid;
-}
-
-// Adds a role Firestore rules otherwise forbid clients from setting on
-// themselves, so an e2e-created account can pass the app's role guards
-// (physicianAppGuard / emsAppGuard / adminGuard). `role` is an array — a
-// user can hold more than one — so this unions in rather than overwrites,
-// matching setUserRole's semantics in functions/src/index.ts.
-export async function grantRole(email: string, role: UserRole): Promise<void> {
-  ensureInitialized();
-  const user = await getAuth().getUserByEmail(email);
-  await getFirestore()
-    .doc(`users/${user.uid}`)
-    .set({ role: FieldValue.arrayUnion(role) }, { merge: true });
 }

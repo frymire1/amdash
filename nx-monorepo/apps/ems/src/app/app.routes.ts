@@ -1,6 +1,5 @@
 import { Route } from '@angular/router';
-import { authGuard, emsAppGuard, guestGuard, LoginComponent, UserSettingsComponent } from '@amdash/auth';
-import { AccessDeniedComponent } from './components/access-denied/access-denied.component';
+import { AccessDeniedComponent, authGuard, emsAppGuard, guestGuard, LoginComponent, UserSettingsComponent } from '@amdash/auth';
 import { HomeComponent } from './components/home/home.component';
 import { PatientUploadComponent } from './components/patient-upload/patient-upload.component';
 

@@ -1,6 +1,5 @@
 import { Route } from '@angular/router';
-import { adminGuard, authGuard, guestGuard, LoginComponent, UserSettingsComponent } from '@amdash/auth';
-import { AccessDeniedComponent } from './components/access-denied/access-denied.component';
+import { AccessDeniedComponent, adminGuard, authGuard, guestGuard, LoginComponent, UserSettingsComponent } from '@amdash/auth';
 import { UserManagementComponent } from './components/user-management/user-management.component';
 
 export const appRoutes: Route[] = [

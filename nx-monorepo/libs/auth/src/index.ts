@@ -6,3 +6,5 @@ export * from './lib/guards/auth.guard';
 export * from './lib/firebase-app';
 export * from './lib/hospitals';
 export * from './lib/work-location/work-location.component';
+export * from './lib/access-denied/access-denied.component';
+export * from './lib/app-urls';

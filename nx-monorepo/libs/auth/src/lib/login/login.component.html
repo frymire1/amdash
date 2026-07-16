@@ -21,14 +21,19 @@
       </form>
     }
 
-    @if (step() === 'set-password') {
-      <p class="login-card__subtitle">
-        @if (accountExists()) {
-          Your admin team has set up your account, now just create a password.
-        } @else {
-          Create your account
-        }
+    @if (step() === 'not-activated') {
+      <p class="login-card__subtitle">Account not activated</p>
+      <p class="login-card__error">
+        Your email, {{ email() }}, has not been activated by your admin. Contact your admin for further help.
       </p>
+
+      <button type="button" class="login-card__toggle-mode" mat-button (click)="useAnotherEmail()">
+        Use a different email
+      </button>
+    }
+
+    @if (step() === 'set-password') {
+      <p class="login-card__subtitle">Your admin team has set up your account, now just create a password.</p>
 
       <form [formGroup]="setPasswordForm" (ngSubmit)="onSubmitSetPassword()">
         <mat-form-field appearance="outline">

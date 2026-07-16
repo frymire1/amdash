@@ -5,11 +5,9 @@ import { Router } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
-import { FirebaseError } from 'firebase/app';
 import { AuthService } from '../services/auth.service';
-import { UserProfileService } from '../services/user-profile.service';
 
-type LoginStep = 'email' | 'set-password' | 'sign-in';
+type LoginStep = 'email' | 'not-activated' | 'set-password' | 'sign-in';
 
 @Component({
   selector: 'lib-login',
@@ -21,15 +19,10 @@ type LoginStep = 'email' | 'set-password' | 'sign-in';
 export class LoginComponent {
   private readonly formBuilder = inject(FormBuilder);
   private readonly authService = inject(AuthService);
-  private readonly userProfileService = inject(UserProfileService);
   private readonly router = inject(Router);
 
   readonly step = signal<LoginStep>('email');
   readonly email = signal('');
-  // Whether the email step found an existing (passwordless) account, vs. no
-  // account at all — only changes the wording shown on the set-password
-  // step, not its behavior.
-  readonly accountExists = signal(false);
 
   readonly submitting = signal(false);
   readonly errorMessage = signal<string | null>(null);
@@ -73,6 +66,10 @@ export class LoginComponent {
     this.setPasswordForm.controls.confirmPassword.valueChanges.subscribe((value) => this.confirmPassword.set(value));
   }
 
+  // Accounts are admin-created only — there's no self-registration. An
+  // email with no account at all means an admin hasn't set the person up
+  // yet, so this routes to an explanatory error rather than letting them
+  // create one themselves.
   async onSubmitEmail() {
     if (this.emailForm.invalid) {
       this.emailForm.markAllAsTouched();
@@ -88,10 +85,11 @@ export class LoginComponent {
       const status = await this.authService.checkAccountStatus(email);
       this.email.set(email);
 
-      if (status.exists && status.hasPassword) {
+      if (!status.exists) {
+        this.step.set('not-activated');
+      } else if (status.hasPassword) {
         this.step.set('sign-in');
       } else {
-        this.accountExists.set(status.exists);
         this.step.set('set-password');
       }
     } catch (error) {
@@ -102,6 +100,9 @@ export class LoginComponent {
     }
   }
 
+  // Only ever reached for an admin-created account with no password yet
+  // (see onSubmitEmail above) — claimPasswordlessAccount refuses to touch
+  // an account that already has one.
   async onSubmitSetPassword() {
     if (!this.allRequirementsMet()) {
       this.setPasswordForm.markAllAsTouched();
@@ -115,27 +116,9 @@ export class LoginComponent {
     this.errorMessage.set(null);
 
     try {
-      if (this.accountExists()) {
-        await this.authService.claimPasswordlessAccount(email, password);
-      } else {
-        const user = await this.authService.signUp(email, password);
-        await this.userProfileService.initializeProfile(user.uid, email);
-      }
+      await this.authService.claimPasswordlessAccount(email, password);
       this.router.navigateByUrl('/');
     } catch (error) {
-      // Rare race: checkAccountStatus said no account existed, but one was
-      // created (e.g. by an admin) in the moment before this submit. Fall
-      // back to claiming it with the password they just chose rather than
-      // just failing.
-      if (!this.accountExists() && error instanceof FirebaseError && error.code === 'auth/email-already-in-use') {
-        try {
-          await this.authService.claimPasswordlessAccount(email, password);
-          this.router.navigateByUrl('/');
-          return;
-        } catch (claimError) {
-          console.error('Failed to claim account after race', claimError);
-        }
-      }
       this.errorMessage.set('Could not set your password. Please try again.');
       console.error('Failed to set password', error);
     } finally {

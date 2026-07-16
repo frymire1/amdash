@@ -1,5 +1,5 @@
 import { APIRequestContext, Page, expect } from '@playwright/test';
-import { UserRole, grantRole } from './admin';
+import { UserRole, createPasswordlessAccount, grantRole } from './admin';
 
 export interface E2eAccount {
   email: string;
@@ -38,15 +38,18 @@ export async function logOut(page: Page) {
   await page.getByRole('button', { name: 'Log out' }).click();
 }
 
-// Creates a brand-new throwaway account via the shared login component's
-// sign-up mode and completes the name-onboarding step. Every test gets its
-// own account so tests stay independent and can run in parallel.
+// Creates a brand-new throwaway account and completes the name-onboarding
+// step. Every test gets its own account so tests stay independent and can
+// run in parallel. Accounts are admin-created only — the login page has no
+// self-registration path — so this first creates a passwordless account via
+// the Admin SDK (support/admin.ts), then drives the same "set your
+// password" flow a real invited user would use on first login.
 // `options.origin` lets a single page drive a *different* app (e.g. EMS on
 // its own port) while it's mainly navigating a different one via `baseURL`.
-// `options.role` grants a Firestore role via the Admin SDK (see
-// support/admin.ts) before completing onboarding — physicianAppGuard /
-// emsAppGuard / adminGuard all block access to their app for accounts with
-// no role, and nothing client-side can ever set that field on its own.
+// `options.role` grants a Firestore role via the Admin SDK before completing
+// onboarding — physicianAppGuard / emsAppGuard / adminGuard all block access
+// to their app for accounts with no role, and nothing client-side can ever
+// set that field on its own.
 // `options.hospital` additionally drives the mandatory /work-location step
 // (workLocationGuard) that a physician/nurse role hits right after — pass it
 // whenever role is 'physician' or 'nurse', since nothing will land past that
@@ -61,29 +64,29 @@ export async function signUpAndOnboard(
   const origin = options?.origin ?? '';
   const originPattern = origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+  await createPasswordlessAccount(account.email);
+
   await page.goto(`${origin}/login`);
   await page.getByLabel('Email').fill(account.email);
   await page.getByRole('button', { name: 'Continue' }).click();
 
-  // No account exists yet for a freshly generated e2e email, so this lands
-  // on the set-your-password step (worded as "Create your account" for a
-  // brand-new email, vs. "Your admin team has set up your account" for an
-  // admin-created one — either way, same two fields).
+  // The account exists (just created above) but has no password yet, so
+  // this lands on the set-your-password step.
   await page.getByRole('button', { name: 'Set Password' }).waitFor();
   await page.getByLabel('Password', { exact: true }).fill(account.password);
   await page.getByLabel('Confirm Password').fill(account.password);
   await page.getByRole('button', { name: 'Set Password' }).click();
 
-  // Sign-up itself triggers an in-flight navigation to '/' that resolves
-  // (through authGuard, then the app's role guard) only once the profile
-  // has loaded — clicking the avatar link before that settles races it and
-  // can get superseded by it, landing somewhere unexpected. Wait for the
-  // app to navigate away from /login on its own first.
+  // Setting the password itself triggers an in-flight navigation to '/'
+  // that resolves (through authGuard, then the app's role guard) only once
+  // the profile has loaded — clicking the avatar link before that settles
+  // races it and can get superseded by it, landing somewhere unexpected.
+  // Wait for the app to navigate away from /login on its own first.
   await page.waitForURL((url) => !url.pathname.endsWith('/login'), { timeout: 15000 });
 
-  // There's no forced redirect to /user-settings after sign-up — the nav
-  // bar's avatar circle is always clickable (even before a name is set) and
-  // is the only way there now, so this drives that click rather than
+  // There's no forced redirect to /user-settings — the nav bar's avatar
+  // circle is always clickable (even before a name is set) and is the only
+  // way there, so this drives that click rather than
   // waiting on a URL the app no longer navigates to on its own.
   await page.getByRole('link', { name: 'Account settings' }).click();
   await expect(page).toHaveURL(new RegExp(`${originPattern}/user-settings$`));
