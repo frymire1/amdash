@@ -1,34 +1,24 @@
-import { APIRequestContext, test, expect } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { E2eAccount, deleteAccount, signUpAndOnboard } from './support/auth';
+import { deletePatientData } from './support/admin';
 
 // Same real deployed EMS hosting site used by live-tracking.spec.ts.
 const EMS_ORIGIN = 'https://amdash-ems-dev.web.app';
 
-const API_KEY = 'AIzaSyDHOpM_Mi9NcMeZS8sD42olEMyN_MjVl5k';
-const FIRESTORE_BASE = 'https://firestore.googleapis.com/v1/projects/amdash-dev/databases/(default)/documents';
-
 let createdAccount: E2eAccount | undefined;
 let createdPatientId: string | undefined;
 
-async function signInForIdToken(request: APIRequestContext, account: E2eAccount): Promise<string> {
-  const response = await request.post(
-    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${API_KEY}`,
-    { data: { email: account.email, password: account.password, returnSecureToken: true } },
-  );
-  const body = await response.json();
-  return body.idToken;
-}
-
-test.afterEach(async ({ request }) => {
-  if (createdAccount && createdPatientId) {
-    const idToken = await signInForIdToken(request, createdAccount);
-    await request.delete(`${FIRESTORE_BASE}/patients/${createdPatientId}`, {
-      headers: { Authorization: `Bearer ${idToken}` },
-    });
+test.afterEach(async () => {
+  if (createdPatientId) {
+    // The test's own tracking call is aborted, so this shouldn't have
+    // created an emsLocations doc — but the delete is idempotent, so this
+    // stays defensive against the flow changing later rather than assuming
+    // that holds forever.
+    await deletePatientData(createdPatientId);
     createdPatientId = undefined;
   }
   if (createdAccount) {
-    await deleteAccount(request, createdAccount);
+    await deleteAccount(createdAccount);
     createdAccount = undefined;
   }
 });
@@ -50,7 +40,7 @@ test.describe('EMS live-tracking failure', () => {
       page,
       'ems-tracking-failure',
       { firstName: 'E2E', lastName: 'Medic' },
-      { origin: EMS_ORIGIN, role: 'ems' },
+      { origin: EMS_ORIGIN, role: 'ems', onAccountCreated: (a) => (createdAccount = a) },
     );
     await expect(page).toHaveURL(`${EMS_ORIGIN}/`);
 

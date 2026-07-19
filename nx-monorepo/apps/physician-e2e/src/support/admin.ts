@@ -69,3 +69,28 @@ export async function grantRole(email: string, role: UserRole): Promise<void> {
     .doc(`users/${user.uid}`)
     .set({ role: FieldValue.arrayUnion(role) }, { merge: true });
 }
+
+// Deletes a throwaway e2e account's `users/{uid}` Firestore doc and its
+// Firebase Auth record via the Admin SDK, rather than signing in as the
+// account (as a client would) to do it through the client SDK/REST API.
+// Signing in requires a password, which won't exist yet if a test failed
+// before its onboarding flow reached the "Set Password" step — the Admin SDK
+// route works regardless of how far onboarding got.
+export async function deleteAccountByEmail(email: string): Promise<void> {
+  ensureInitialized();
+  const user = await getAuth().getUserByEmail(email);
+  await getFirestore().doc(`users/${user.uid}`).delete();
+  await getAuth().deleteUser(user.uid);
+}
+
+// Deletes the `patients/{patientId}` and `emsLocations/{patientId}` docs an
+// e2e test created, via the Admin SDK. Firestore deletes are idempotent, so
+// this is safe to call even if one or both docs were never created, or were
+// already removed through the app's own UI during the test.
+export async function deletePatientData(patientId: string): Promise<void> {
+  ensureInitialized();
+  await Promise.all([
+    getFirestore().doc(`patients/${patientId}`).delete(),
+    getFirestore().doc(`emsLocations/${patientId}`).delete(),
+  ]);
+}

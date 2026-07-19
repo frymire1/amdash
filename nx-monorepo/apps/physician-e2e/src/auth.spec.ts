@@ -3,11 +3,11 @@ import { E2eAccount, deleteAccount, logOut, signUpAndOnboard } from './support/a
 
 let createdAccount: E2eAccount | undefined;
 
-test.afterEach(async ({ request }) => {
+test.afterEach(async () => {
   if (!createdAccount) {
     return;
   }
-  await deleteAccount(request, createdAccount);
+  await deleteAccount(createdAccount);
   createdAccount = undefined;
 });
 
@@ -21,7 +21,9 @@ test.describe('physician auth', () => {
   // the test below), not "invalid credentials" — that specifically needs a
   // *real* account and a wrong password on its sign-in step.
   test('shows an error for invalid credentials', async ({ page }) => {
-    createdAccount = await signUpAndOnboard(page, 'invalid-creds');
+    createdAccount = await signUpAndOnboard(page, 'invalid-creds', undefined, {
+      onAccountCreated: (account) => (createdAccount = account),
+    });
     await logOut(page);
 
     await page.goto('/login');
@@ -48,6 +50,7 @@ test.describe('physician auth', () => {
     createdAccount = await signUpAndOnboard(page, 'physician', undefined, {
       role: 'physician',
       hospital: 'General Hospital',
+      onAccountCreated: (account) => (createdAccount = account),
     });
 
     await expect(page).toHaveURL(/\/physician$/);
@@ -59,7 +62,10 @@ test.describe('physician auth', () => {
   // access-denied with a link to the app its actual role does grant it —
   // not a dead end.
   test('access-denied links to the app matching the account\'s actual role', async ({ page }) => {
-    createdAccount = await signUpAndOnboard(page, 'ems-on-physician', undefined, { role: 'ems' });
+    createdAccount = await signUpAndOnboard(page, 'ems-on-physician', undefined, {
+      role: 'ems',
+      onAccountCreated: (account) => (createdAccount = account),
+    });
 
     await expect(page).toHaveURL(/\/access-denied$/);
     await expect(page.getByRole('heading', { name: 'Access denied' })).toBeVisible();

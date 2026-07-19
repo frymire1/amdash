@@ -1,18 +1,28 @@
 import { test, expect } from '@playwright/test';
 import { deleteAccount, signUpAndOnboard, signIn, E2eAccount } from './support/auth';
+import { deletePatientData } from './support/admin';
 
 // Same real deployed EMS hosting site used by live-tracking.spec.ts.
 const EMS_ORIGIN = 'https://amdash-ems-dev.web.app';
 
 // Otherwise the account and its Firestore users/ doc are left behind
-// permanently, since nothing in the app itself ever deletes a user.
+// permanently, since nothing in the app itself ever deletes a user. The
+// patient is also deleted via the UI at the end of the test, but live-track
+// defaults on for every upload in this flow, which writes a real
+// emsLocations doc that the UI's own delete button never touches — that has
+// to be cleaned up separately here, the same way live-tracking.spec.ts does.
 let createdAccount: E2eAccount | undefined;
+let createdPatientId: string | undefined;
 
-test.afterEach(async ({ request }) => {
+test.afterEach(async () => {
+  if (createdPatientId) {
+    await deletePatientData(createdPatientId);
+    createdPatientId = undefined;
+  }
   if (!createdAccount) {
     return;
   }
-  await deleteAccount(request, createdAccount);
+  await deleteAccount(createdAccount);
   createdAccount = undefined;
 });
 
@@ -33,9 +43,8 @@ test.describe('EMS patient card live update', () => {
       pageA,
       'ems-live-update',
       { firstName: 'E2E', lastName: 'Medic' },
-      { origin: EMS_ORIGIN, role: 'ems' },
+      { origin: EMS_ORIGIN, role: 'ems', onAccountCreated: (a) => (createdAccount = a) },
     );
-    createdAccount = account;
     await expect(pageA).toHaveURL(`${EMS_ORIGIN}/`);
 
     // Session A uploads a patient.
@@ -53,6 +62,16 @@ test.describe('EMS patient card live update', () => {
 
     const cardA = pageA.locator('.patient-summary-card', { hasText: originalName });
     await expect(cardA).toBeVisible({ timeout: 15000 });
+
+    // Capture the patient id from the Edit link's href as soon as the
+    // patient exists, rather than after the session-B interactions below —
+    // it's the same id emsLocations is keyed by, and if something below
+    // throws before it's captured, this patient (and its live-tracked
+    // emsLocations doc) would otherwise leak, since afterEach can only
+    // clean up an id it was actually given.
+    const editHref = await cardA.getByRole('link', { name: 'Edit' }).getAttribute('href');
+    createdPatientId = editHref?.split('/').filter(Boolean).pop();
+    expect(createdPatientId, 'expected the Edit link to contain the patient id').toBeTruthy();
 
     // Session B signs in separately with the same account and lands on the
     // home list, then just stays there — no reload, no re-navigation.

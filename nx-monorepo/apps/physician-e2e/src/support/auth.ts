@@ -1,15 +1,10 @@
-import { APIRequestContext, Page, expect } from '@playwright/test';
-import { UserRole, createPasswordlessAccount, grantRole } from './admin';
+import { Page, expect } from '@playwright/test';
+import { UserRole, createPasswordlessAccount, deleteAccountByEmail, grantRole } from './admin';
 
 export interface E2eAccount {
   email: string;
   password: string;
 }
-
-// Same public Web API key embedded in every app's firebase.ts — used for the
-// REST calls below, mirroring how the app's own client SDK authenticates.
-const API_KEY = 'AIzaSyDHOpM_Mi9NcMeZS8sD42olEMyN_MjVl5k';
-const FIRESTORE_BASE = 'https://firestore.googleapis.com/v1/projects/amdash-dev/databases/(default)/documents';
 
 export function generateE2eAccount(prefix: string): E2eAccount {
   const unique = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
@@ -54,17 +49,24 @@ export async function logOut(page: Page) {
 // (workLocationGuard) that a physician/nurse role hits right after — pass it
 // whenever role is 'physician' or 'nurse', since nothing will land past that
 // guard otherwise.
+// `options.onAccountCreated` fires as soon as the account exists in Firebase
+// Auth, before the rest of this function drives the onboarding UI — register
+// the account for cleanup here rather than off this function's return value,
+// since a failure anywhere below (a UI step timing out, a role grant
+// failing) would otherwise leave the just-created account untracked and
+// permanently orphaned.
 export async function signUpAndOnboard(
   page: Page,
   prefix: string,
   name: { firstName: string; lastName: string } = { firstName: 'E2E', lastName: 'Tester' },
-  options?: { origin?: string; role?: UserRole; hospital?: string },
+  options?: { origin?: string; role?: UserRole; hospital?: string; onAccountCreated?: (account: E2eAccount) => void },
 ): Promise<E2eAccount> {
   const account = generateE2eAccount(prefix);
   const origin = options?.origin ?? '';
   const originPattern = origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   await createPasswordlessAccount(account.email);
+  options?.onAccountCreated?.(account);
 
   await page.goto(`${origin}/login`);
   await page.getByLabel('Email').fill(account.email);
@@ -119,33 +121,13 @@ export async function signUpAndOnboard(
 }
 
 // Deletes a throwaway e2e account entirely: its `users/{uid}` Firestore doc
-// and the Firebase Auth account itself. Every test that calls
+// and the Firebase Auth account itself, via the Admin SDK (see
+// deleteAccountByEmail in support/admin.ts). Every test that calls
 // signUpAndOnboard should call this in an `afterEach` — otherwise the
 // account (and its Firestore profile doc) is left behind permanently, since
-// nothing in the app itself ever deletes a user. Uses `request` rather than
-// the test's `page` so it still works even if the test failed partway
-// through and the page is in a broken state.
-export async function deleteAccount(request: APIRequestContext, account: E2eAccount) {
-  const signInResponse = await request.post(
-    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${API_KEY}`,
-    { data: { email: account.email, password: account.password, returnSecureToken: true } },
-  );
-  if (!signInResponse.ok()) {
-    throw new Error(`deleteAccount: sign-in for ${account.email} failed (${signInResponse.status()}): ${await signInResponse.text()}`);
-  }
-  const { idToken, localId: uid } = await signInResponse.json();
-
-  const docDeleteResponse = await request.delete(`${FIRESTORE_BASE}/users/${uid}`, {
-    headers: { Authorization: `Bearer ${idToken}` },
-  });
-  if (!docDeleteResponse.ok()) {
-    throw new Error(`deleteAccount: Firestore doc delete for ${uid} failed (${docDeleteResponse.status()}): ${await docDeleteResponse.text()}`);
-  }
-
-  const accountDeleteResponse = await request.post(`https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${API_KEY}`, {
-    data: { idToken },
-  });
-  if (!accountDeleteResponse.ok()) {
-    throw new Error(`deleteAccount: Auth account delete for ${uid} failed (${accountDeleteResponse.status()}): ${await accountDeleteResponse.text()}`);
-  }
+// nothing in the app itself ever deletes a user. Unlike a client-credential
+// approach, this doesn't need the account to have a password set yet, so it
+// still works even if the test failed before onboarding got that far.
+export async function deleteAccount(account: E2eAccount): Promise<void> {
+  await deleteAccountByEmail(account.email);
 }

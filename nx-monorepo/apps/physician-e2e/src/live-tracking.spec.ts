@@ -1,5 +1,6 @@
-import { APIRequestContext, test, expect } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { E2eAccount, deleteAccount, signUpAndOnboard } from './support/auth';
+import { deletePatientData } from './support/admin';
 
 // This is a genuine cross-app flow: EMS uploads + live-tracks a patient
 // through the real deployed Cloud Functions / Pub/Sub pipeline, and the
@@ -13,10 +14,6 @@ const EMS_ORIGIN = 'https://amdash-ems-dev.web.app';
 // makes that explicit at the call site below instead of leaving it implicit.
 const PHYSICIAN_ORIGIN = 'https://amdash-physician-dev.web.app';
 
-// Same public Web API key already embedded in every app's firebase.ts.
-const API_KEY = 'AIzaSyDHOpM_Mi9NcMeZS8sD42olEMyN_MjVl5k';
-const FIRESTORE_BASE = 'https://firestore.googleapis.com/v1/projects/amdash-dev/databases/(default)/documents';
-
 test.use({
   geolocation: { latitude: 43.6532, longitude: -79.3832 },
 });
@@ -29,38 +26,24 @@ let createdPatientId: string | undefined;
 let emsAccount: E2eAccount | undefined;
 let physicianAccount: E2eAccount | undefined;
 
-async function signInForIdToken(request: APIRequestContext, account: E2eAccount): Promise<string> {
-  const response = await request.post(
-    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${API_KEY}`,
-    { data: { email: account.email, password: account.password, returnSecureToken: true } },
-  );
-  const body = await response.json();
-  return body.idToken;
-}
-
 // This deletes the patient and emsLocations docs created by the test, then
 // the two throwaway accounts themselves (Firebase Auth + their Firestore
 // users/ doc) — otherwise both accounts and the profile docs are left behind
 // permanently, since nothing in the app itself ever deletes a user.
-test.afterEach(async ({ request }) => {
-  if (emsAccount && createdPatientId) {
-    const idToken = await signInForIdToken(request, emsAccount);
-    const headers = { Authorization: `Bearer ${idToken}` };
-    // Firestore's REST delete is idempotent — safe to call even if the earlier
+test.afterEach(async () => {
+  if (createdPatientId) {
+    // Firestore deletes are idempotent — safe to call even if the earlier
     // steps failed and one or both docs were never created.
-    await Promise.all([
-      request.delete(`${FIRESTORE_BASE}/patients/${createdPatientId}`, { headers }),
-      request.delete(`${FIRESTORE_BASE}/emsLocations/${createdPatientId}`, { headers }),
-    ]);
+    await deletePatientData(createdPatientId);
     createdPatientId = undefined;
   }
 
   if (emsAccount) {
-    await deleteAccount(request, emsAccount);
+    await deleteAccount(emsAccount);
     emsAccount = undefined;
   }
   if (physicianAccount) {
-    await deleteAccount(request, physicianAccount);
+    await deleteAccount(physicianAccount);
     physicianAccount = undefined;
   }
 });
@@ -96,7 +79,7 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
     page,
     'ems-tracker',
     { firstName: 'E2E', lastName: 'Medic' },
-    { origin: EMS_ORIGIN, role: 'ems' },
+    { origin: EMS_ORIGIN, role: 'ems', onAccountCreated: (a) => (emsAccount = a) },
   );
   await expect(page).toHaveURL(`${EMS_ORIGIN}/`);
 
@@ -160,7 +143,12 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
     page,
     'physician-tracker',
     { firstName: 'E2E', lastName: 'Doctor' },
-    { origin: PHYSICIAN_ORIGIN, role: 'physician', hospital: 'General Hospital' },
+    {
+      origin: PHYSICIAN_ORIGIN,
+      role: 'physician',
+      hospital: 'General Hospital',
+      onAccountCreated: (a) => (physicianAccount = a),
+    },
   );
   await expect(page).toHaveURL(`${PHYSICIAN_ORIGIN}/physician`);
 
