@@ -1,5 +1,6 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onMessagePublished } from 'firebase-functions/v2/pubsub';
+import { defineSecret } from 'firebase-functions/params';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
@@ -10,6 +11,7 @@ initializeApp();
 const LOCATION_TOPIC = 'ems-location-updates';
 const REGION = 'northamerica-northeast2';
 const pubsub = new PubSub();
+const GEOCODING_API_KEY = defineSecret('GEOCODING_API_KEY');
 
 const ASSIGNABLE_ROLES = ['ems', 'physician', 'nurse'] as const;
 type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
@@ -270,4 +272,75 @@ export const listUsersWithRoles = onCall({ region: REGION }, async (request) => 
       role: Array.isArray(roles) ? roles : [],
     };
   });
+});
+
+interface CreateHospitalRequest {
+  name: string;
+  address: string;
+}
+
+interface DeleteHospitalRequest {
+  hospitalId: string;
+}
+
+interface GeocodeResult {
+  status: string;
+  results: Array<{ geometry: { location: { lat: number; lng: number } } }>;
+}
+
+// Looks up lat/long for a street address via the Google Maps Geocoding API,
+// so an admin only has to type an address rather than coordinates — the
+// physician app's distance-sort feature needs real coordinates, not just a
+// display string. Requires the GEOCODING_API_KEY secret to be provisioned
+// (`firebase functions:secrets:set GEOCODING_API_KEY`) with a key that has
+// the Geocoding API enabled.
+async function geocodeAddress(address: string): Promise<{ latitude: number; longitude: number }> {
+  const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GEOCODING_API_KEY.value()}`;
+  const response = await fetch(url);
+  const data = (await response.json()) as GeocodeResult;
+
+  const location = data.results?.[0]?.geometry?.location;
+  if (data.status !== 'OK' || !location) {
+    throw new HttpsError('not-found', `Could not find coordinates for "${address}". Check the address and try again.`);
+  }
+
+  return { latitude: location.lat, longitude: location.lng };
+}
+
+// Hospitals are only ever written here (see firestore.rules) — clients,
+// including the admin app, can't write to the hospitals collection
+// directly, since geocoding the address has to happen server-side.
+export const createHospital = onCall<CreateHospitalRequest>(
+  { region: REGION, secrets: [GEOCODING_API_KEY] },
+  async (request) => {
+    if (!request.auth || !(await callerIsAdmin(request.auth.uid))) {
+      throw new HttpsError('permission-denied', 'Only admins can create hospitals.');
+    }
+
+    const { name, address } = request.data;
+    if (!name || !address) {
+      throw new HttpsError('invalid-argument', 'A hospital name and address are required.');
+    }
+
+    const { latitude, longitude } = await geocodeAddress(address);
+
+    const docRef = await getFirestore().collection('hospitals').add({ name, address, latitude, longitude });
+
+    return { id: docRef.id, name, address, latitude, longitude };
+  },
+);
+
+export const deleteHospital = onCall<DeleteHospitalRequest>({ region: REGION }, async (request) => {
+  if (!request.auth || !(await callerIsAdmin(request.auth.uid))) {
+    throw new HttpsError('permission-denied', 'Only admins can delete hospitals.');
+  }
+
+  const { hospitalId } = request.data;
+  if (!hospitalId) {
+    throw new HttpsError('invalid-argument', 'A hospitalId is required.');
+  }
+
+  await getFirestore().collection('hospitals').doc(hospitalId).delete();
+
+  return { hospitalId };
 });

@@ -1,6 +1,5 @@
 import { Component, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { HOSPITAL_NAMES } from '@amdash/auth';
 
 export interface PatientVitals {
   heartRate: number | string;
@@ -26,11 +25,6 @@ export interface Patient {
   notes?: string;
   destination?: string;
 }
-
-// Same hospitals as @amdash/auth's HOSPITALS (the physician work-location
-// picker), so a patient's destination and a physician's work location
-// always refer to the same physical place.
-export const DESTINATION_HOSPITALS: readonly string[] = HOSPITAL_NAMES;
 
 @Component({
   selector: 'app-patient-card',

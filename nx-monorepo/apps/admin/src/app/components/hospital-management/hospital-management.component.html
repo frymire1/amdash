@@ -1,0 +1,80 @@
+<div class="hospital-management-container">
+  <h2>Hospital Management</h2>
+
+  <h3>Add Hospital</h3>
+  <form
+    class="hospital-form"
+    [formGroup]="hospitalForm"
+    #hospitalFormDirective="ngForm"
+    (ngSubmit)="onCreateHospital()"
+  >
+    <mat-form-field appearance="outline">
+      <mat-label>Name</mat-label>
+      <input matInput formControlName="name" placeholder="General Hospital" />
+    </mat-form-field>
+
+    <mat-form-field appearance="outline">
+      <mat-label>Address</mat-label>
+      <input matInput formControlName="address" placeholder="123 Main St, Toronto, ON" />
+    </mat-form-field>
+
+    <button mat-raised-button color="primary" type="submit" [disabled]="creating()">
+      @if (creating()) {
+        Adding…
+      } @else {
+        Add Hospital
+      }
+    </button>
+  </form>
+
+  @if (createSuccess()) {
+    <p class="form-message form-message--success">{{ createSuccess() }}</p>
+  }
+  @if (createError()) {
+    <p class="form-message form-message--error">{{ createError() }}</p>
+  }
+
+  <div class="hospitals-section">
+    <h3>Hospitals</h3>
+
+    @if (deleteError()) {
+      <p class="form-message form-message--error">{{ deleteError() }}</p>
+    }
+
+    @if (hospitals().length > 0) {
+      <div class="hospitals-table-wrapper">
+        <table class="hospitals-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Address</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (hospital of hospitals(); track hospital.id) {
+              <tr>
+                <td>{{ hospital.name }}</td>
+                <td>{{ hospital.address }}</td>
+                <td class="hospitals-table__actions">
+                  <button
+                    mat-icon-button
+                    type="button"
+                    [disabled]="deletingId() === hospital.id"
+                    (click)="deleteHospital(hospital)"
+                    [attr.aria-label]="'Delete ' + hospital.name"
+                    title="Delete"
+                  >
+                    <mat-icon>delete</mat-icon>
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <p class="empty-state">No hospitals added yet.</p>
+    }
+  </div>
+</div>

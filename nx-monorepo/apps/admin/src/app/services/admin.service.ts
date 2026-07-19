@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { getFirebaseApp } from '@amdash/auth';
+import { getFirebaseApp, Hospital } from '@amdash/auth';
 
 const FUNCTIONS_REGION = 'northamerica-northeast2';
 
@@ -45,6 +45,15 @@ interface SetUserRoleResponse {
   role: string;
 }
 
+interface CreateHospitalRequest {
+  name: string;
+  address: string;
+}
+
+interface DeleteHospitalRequest {
+  hospitalId: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class AdminService {
   private readonly functions = getFunctions(getFirebaseApp(), FUNCTIONS_REGION);
@@ -63,6 +72,14 @@ export class AdminService {
   private readonly listUsersWithRolesFn = httpsCallable<void, ManagedUser[]>(
     this.functions,
     'listUsersWithRoles',
+  );
+  private readonly createHospitalFn = httpsCallable<CreateHospitalRequest, Hospital>(
+    this.functions,
+    'createHospital',
+  );
+  private readonly deleteHospitalFn = httpsCallable<DeleteHospitalRequest, { hospitalId: string }>(
+    this.functions,
+    'deleteHospital',
   );
 
   readonly users = signal<ManagedUser[]>([]);
@@ -101,5 +118,18 @@ export class AdminService {
     } finally {
       this.loadingUsers.set(false);
     }
+  }
+
+  // Geocodes the address server-side and writes the hospitals/ doc — see
+  // createHospital in functions/src/index.ts. No refreshHospitals() needed
+  // afterward: HospitalService (@amdash/auth) already has a live Firestore
+  // listener on the same collection, so the new hospital appears on its own.
+  async createHospital(name: string, address: string): Promise<Hospital> {
+    const result = await this.createHospitalFn({ name, address });
+    return result.data;
+  }
+
+  async deleteHospital(hospitalId: string): Promise<void> {
+    await this.deleteHospitalFn({ hospitalId });
   }
 }

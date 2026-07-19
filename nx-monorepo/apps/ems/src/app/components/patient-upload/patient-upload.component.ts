@@ -10,7 +10,8 @@ import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
-import { DESTINATION_HOSPITALS, Patient } from '../../models/patient.model';
+import { HospitalService } from '@amdash/auth';
+import { Patient } from '../../models/patient.model';
 import { PatientUploadService } from '../../services/patient-upload.service';
 import { PatientSessionService } from '../../services/patient-session.service';
 import { EmsTrackingService } from '../../services/ems-tracking.service';
@@ -42,6 +43,7 @@ export class PatientUploadComponent {
   private readonly patientUploadService = inject(PatientUploadService);
   private readonly patientSessionService = inject(PatientSessionService);
   private readonly trackingService = inject(EmsTrackingService);
+  private readonly hospitalService = inject(HospitalService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly dialog = inject(MatDialog);
@@ -49,7 +51,7 @@ export class PatientUploadComponent {
   private editingId: string | null = null;
   private formPrefilled = false;
 
-  readonly destinationHospitals = DESTINATION_HOSPITALS;
+  readonly destinationHospitals = this.hospitalService.hospitalNames;
 
   readonly isEditing = signal(false);
   readonly submitting = signal(false);

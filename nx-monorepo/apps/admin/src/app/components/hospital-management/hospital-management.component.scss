@@ -1,0 +1,105 @@
+.hospital-management-container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+  box-sizing: border-box;
+  height: 100%;
+  overflow-y: auto;
+
+  h2 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    color: #333;
+  }
+
+  h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #333;
+    margin: 24px 0 12px;
+
+    &:first-of-type {
+      margin-top: 0;
+    }
+  }
+}
+
+.hospital-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px;
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+
+  mat-form-field {
+    flex: 1 1 240px;
+  }
+
+  button[type='submit'] {
+    margin-top: 8px;
+  }
+}
+
+.form-message {
+  margin: 16px 0 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.form-message--success {
+  color: #16a34a;
+}
+
+.form-message--error {
+  color: #dc2626;
+}
+
+.hospitals-section {
+  margin-top: 32px;
+}
+
+.hospitals-table-wrapper {
+  overflow-x: auto;
+  margin-top: 12px;
+}
+
+.hospitals-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+
+  th, td {
+    text-align: left;
+    padding: 12px 16px;
+    font-size: 14px;
+    border-bottom: 1px solid #eef0f3;
+  }
+
+  th {
+    color: #6f7280;
+    font-weight: 600;
+  }
+
+  tr:last-child td {
+    border-bottom: none;
+  }
+
+  &__actions {
+    width: 1%;
+    white-space: nowrap;
+    text-align: right;
+  }
+}
+
+.empty-state {
+  color: #6f7280;
+  font-size: 14px;
+  margin-top: 12px;
+}

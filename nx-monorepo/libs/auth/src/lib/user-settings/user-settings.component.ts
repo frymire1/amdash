@@ -6,14 +6,8 @@ import { MatAutocompleteModule } from '@angular/material/autocomplete';
 import { MatButtonModule } from '@angular/material/button';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
-import { HOSPITAL_NAMES } from '../hospitals';
+import { HospitalService } from '../hospitals';
 import { UserProfileService } from '../services/user-profile.service';
-
-// See work-location.component.ts's identical validator for why this exists:
-// mat-autocomplete alone doesn't constrain the input to one of its options.
-function hospitalNameValidator(control: AbstractControl): ValidationErrors | null {
-  return !control.value || HOSPITAL_NAMES.includes(control.value) ? null : { unknownHospital: true };
-}
 
 @Component({
   selector: 'lib-user-settings',
@@ -25,6 +19,7 @@ function hospitalNameValidator(control: AbstractControl): ValidationErrors | nul
 export class UserSettingsComponent {
   private readonly formBuilder = inject(FormBuilder);
   private readonly userProfileService = inject(UserProfileService);
+  private readonly hospitalService = inject(HospitalService);
   private readonly router = inject(Router);
 
   readonly submitting = signal(false);
@@ -36,17 +31,28 @@ export class UserSettingsComponent {
     return roles.includes('physician') || roles.includes('nurse');
   });
 
+  // See work-location.component.ts's identical validator for why this
+  // exists: mat-autocomplete alone doesn't constrain the input to one of its
+  // options. Empty is allowed here (unlike work-location.component.ts) since
+  // this field is only for changing an already-set hospital, not setting one.
+  private readonly hospitalNameValidator = (control: AbstractControl): ValidationErrors | null => {
+    return !control.value || this.hospitalService.hospitalNames().includes(control.value)
+      ? null
+      : { unknownHospital: true };
+  };
+
   readonly settingsForm = this.formBuilder.nonNullable.group({
     firstName: ['', Validators.required],
     lastName: ['', Validators.required],
-    hospital: ['', hospitalNameValidator],
+    hospital: ['', this.hospitalNameValidator],
   });
 
   private readonly typedHospital = signal('');
 
   readonly filteredHospitals = computed(() => {
     const query = this.typedHospital().trim().toLowerCase();
-    return query ? HOSPITAL_NAMES.filter((name) => name.toLowerCase().includes(query)) : HOSPITAL_NAMES;
+    const names = this.hospitalService.hospitalNames();
+    return query ? names.filter((name) => name.toLowerCase().includes(query)) : names;
   });
 
   constructor() {
@@ -61,6 +67,13 @@ export class UserSettingsComponent {
           hospital: profile.workLocation,
         });
       }
+    });
+
+    // The hospital list starts empty until the first Firestore snapshot
+    // arrives — re-run validation once it loads, same as work-location.component.ts.
+    effect(() => {
+      this.hospitalService.hospitalNames();
+      this.settingsForm.controls.hospital.updateValueAndValidity();
     });
   }
 

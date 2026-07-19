@@ -32,7 +32,7 @@
       <mat-form-field appearance="outline">
         <mat-label>Destination Hospital</mat-label>
         <mat-select formControlName="destination">
-          @for (hospital of destinationHospitals; track hospital) {
+          @for (hospital of destinationHospitals(); track hospital) {
             <mat-option [value]="hospital">{{ hospital }}</mat-option>
           }
         </mat-select>

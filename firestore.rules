@@ -25,5 +25,14 @@ service cloud.firestore {
     match /emsLocations/{locationId} {
       allow read, write: if request.auth != null;
     }
+
+    // Hospitals are only ever written by the createHospital/deleteHospital
+    // Cloud Functions (Admin SDK, bypasses these rules) so an admin-only
+    // write can be enforced server-side (including geocoding the address) —
+    // clients, including the admin app itself, never write here directly.
+    match /hospitals/{hospitalId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
   }
 }

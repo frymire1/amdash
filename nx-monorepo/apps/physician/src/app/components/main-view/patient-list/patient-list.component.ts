@@ -5,9 +5,9 @@ import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatSelectModule } from '@angular/material/select';
-import { findHospital, UserProfileService } from '@amdash/auth';
+import { HospitalService, UserProfileService } from '@amdash/auth';
 import { PatientCardComponent } from './patient-card/patient-card.component';
-import { DESTINATION_HOSPITALS, Patient } from './patient-card/patient-card.component';
+import { Patient } from './patient-card/patient-card.component';
 import { PatientService } from '../../../services/patient.service';
 import { EmsLocationService } from '../../../services/ems-location.service';
 
@@ -53,8 +53,9 @@ export class PatientListComponent {
   private readonly patientService = inject(PatientService);
   private readonly emsLocationService = inject(EmsLocationService);
   private readonly userProfileService = inject(UserProfileService);
+  private readonly hospitalService = inject(HospitalService);
 
-  readonly destinationOptions = [ALL_DESTINATIONS, ...DESTINATION_HOSPITALS];
+  readonly destinationOptions = computed(() => [ALL_DESTINATIONS, ...this.hospitalService.hospitalNames()]);
   readonly selectedDestination = signal(ALL_DESTINATIONS);
   readonly filterOpen = signal(false);
   readonly sortByDistance = signal(false);
@@ -66,7 +67,7 @@ export class PatientListComponent {
   // component, so this is a fixed hospital lookup rather than a live,
   // permission-gated navigator.geolocation request.
   private readonly hospitalLocation = computed<Coordinates | null>(() => {
-    const hospital = findHospital(this.userProfileService.profile()?.workLocation);
+    const hospital = this.hospitalService.findHospital(this.userProfileService.profile()?.workLocation);
     return hospital ? { latitude: hospital.latitude, longitude: hospital.longitude } : null;
   });
 

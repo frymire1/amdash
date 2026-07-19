@@ -14,9 +14,9 @@ export interface UserProfile {
   // Only ever set server-side (see setUserRole/removeUserRole in
   // functions/src/index.ts) — clients are blocked from touching this field.
   role?: UserRole[];
-  // Hospital name (see @amdash/auth's HOSPITALS) a physician/nurse works
-  // out of — mandatory for those roles (see workLocationGuard), unused by
-  // ems/admin accounts.
+  // Hospital name (see @amdash/auth's HospitalService) a physician/nurse
+  // works out of — mandatory for those roles (see workLocationGuard),
+  // unused by ems/admin accounts.
   workLocation?: string;
 }
 

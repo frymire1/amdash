@@ -17,7 +17,7 @@
     <mat-form-field appearance="outline" class="destination-filter">
       <mat-label>Filter by destination</mat-label>
       <mat-select [value]="selectedDestination()" (valueChange)="selectedDestination.set($event)">
-        @for (destination of destinationOptions; track destination) {
+        @for (destination of destinationOptions(); track destination) {
           <mat-option [value]="destination">{{ destination }}</mat-option>
         }
       </mat-select>
