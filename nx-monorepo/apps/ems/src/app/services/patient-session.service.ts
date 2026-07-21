@@ -1,12 +1,8 @@
 import { Injectable, signal } from '@angular/core';
 import { collection, getFirestore, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { getFirebaseApp } from '../firebase';
-import { Patient } from '../models/patient.model';
-
-export interface UploadedPatient {
-  id: string;
-  patient: Patient;
-}
+import { Patient } from '@amdash/patients';
+import { UploadedPatient } from '../classes/uploaded-patient';
 
 @Injectable({ providedIn: 'root' })
 export class PatientSessionService {

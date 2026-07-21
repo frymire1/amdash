@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { addDoc, collection, deleteDoc, doc, getFirestore, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { getFirebaseApp } from '../firebase';
-import { Patient } from '../models/patient.model';
+import { Patient } from '@amdash/patients';
 
 @Injectable({ providedIn: 'root' })
 export class PatientUploadService {

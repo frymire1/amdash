@@ -5,7 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatDialog } from '@angular/material/dialog';
-import { UploadedPatient } from '../../services/patient-session.service';
+import { UploadedPatient } from '../../classes/uploaded-patient';
 import { EmsTrackingService } from '../../services/ems-tracking.service';
 import { PatientUploadService } from '../../services/patient-upload.service';
 import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.component';

@@ -1,58 +1,17 @@
 import { Injectable, signal } from '@angular/core';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getFirebaseApp, Hospital } from '@amdash/auth';
+import { AssignableRole } from '../classes/assignable-role';
+import { ManagedUser } from '../classes/managed-user';
+import { CreateUserRequest } from '../classes/create-user-request';
+import { CreateUserResponse } from '../classes/create-user-response';
+import { SetUserRoleRequest } from '../classes/set-user-role-request';
+import { RemoveUserRoleRequest } from '../classes/remove-user-role-request';
+import { SetUserRoleResponse } from '../classes/set-user-role-response';
+import { CreateHospitalRequest } from '../classes/create-hospital-request';
+import { DeleteHospitalRequest } from '../classes/delete-hospital-request';
 
 const FUNCTIONS_REGION = 'northamerica-northeast2';
-
-export type AssignableRole = 'ems' | 'physician' | 'nurse';
-
-export interface ManagedUser {
-  uid: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  role: AssignableRole[];
-}
-
-interface CreateUserRequest {
-  email: string;
-  firstName: string;
-  lastName: string;
-  role: AssignableRole;
-}
-
-interface CreateUserResponse {
-  uid: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  role: string;
-}
-
-interface SetUserRoleRequest {
-  email: string;
-  role: AssignableRole;
-}
-
-interface RemoveUserRoleRequest {
-  email: string;
-  role: AssignableRole;
-}
-
-interface SetUserRoleResponse {
-  uid: string;
-  email: string;
-  role: string;
-}
-
-interface CreateHospitalRequest {
-  name: string;
-  address: string;
-}
-
-interface DeleteHospitalRequest {
-  hospitalId: string;
-}
 
 @Injectable({ providedIn: 'root' })
 export class AdminService {

@@ -8,3 +8,6 @@ export * from './lib/hospitals';
 export * from './lib/work-location/work-location.component';
 export * from './lib/access-denied/access-denied.component';
 export * from './lib/app-urls';
+export * from './lib/classes/hospital';
+export * from './lib/classes/user-profile';
+export * from './lib/classes/account-status';

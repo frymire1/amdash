@@ -11,26 +11,12 @@ import {
 } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getFirebaseApp } from '../firebase-app';
+import { SetInitialPasswordRequest } from '../classes/set-initial-password-request';
+import { SetInitialPasswordResponse } from '../classes/set-initial-password-response';
+import { CheckAccountStatusRequest } from '../classes/check-account-status-request';
+import { AccountStatus } from '../classes/account-status';
 
 const FUNCTIONS_REGION = 'northamerica-northeast2';
-
-interface SetInitialPasswordRequest {
-  email: string;
-  password: string;
-}
-
-interface SetInitialPasswordResponse {
-  email: string;
-}
-
-interface CheckAccountStatusRequest {
-  email: string;
-}
-
-export interface AccountStatus {
-  exists: boolean;
-  hasPassword: boolean;
-}
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {

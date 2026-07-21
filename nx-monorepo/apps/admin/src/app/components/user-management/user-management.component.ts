@@ -6,12 +6,10 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
-import { AdminService, AssignableRole, ManagedUser } from '../../services/admin.service';
-
-interface RoleOption {
-  value: AssignableRole;
-  label: string;
-}
+import { AdminService } from '../../services/admin.service';
+import { AssignableRole } from '../../classes/assignable-role';
+import { ManagedUser } from '../../classes/managed-user';
+import { RoleOption } from '../../classes/role-option';
 
 const ROLE_OPTIONS: RoleOption[] = [
   { value: 'ems', label: 'EMS' },

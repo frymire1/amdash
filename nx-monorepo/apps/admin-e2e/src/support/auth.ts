@@ -1,10 +1,8 @@
 import { Page, expect } from '@playwright/test';
 import { createPasswordlessAccount } from './admin';
+import { E2eAccount } from './classes/e2e-account';
 
-export interface E2eAccount {
-  email: string;
-  password: string;
-}
+export type { E2eAccount } from './classes/e2e-account';
 
 export function generateE2eAccount(prefix: string): E2eAccount {
   const unique = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;

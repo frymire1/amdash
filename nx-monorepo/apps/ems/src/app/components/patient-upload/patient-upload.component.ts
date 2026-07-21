@@ -11,7 +11,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { HospitalService } from '@amdash/auth';
-import { Patient } from '../../models/patient.model';
+import { Patient } from '@amdash/patients';
 import { PatientUploadService } from '../../services/patient-upload.service';
 import { PatientSessionService } from '../../services/patient-session.service';
 import { EmsTrackingService } from '../../services/ems-tracking.service';

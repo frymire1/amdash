@@ -5,6 +5,18 @@ import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { PubSub } from '@google-cloud/pubsub';
+import { AssignableRole } from './classes/assignable-role';
+import { EmsLocationEvent } from './classes/ems-location-event';
+import { PublishLocationRequest } from './classes/publish-location-request';
+import { StopLocationRequest } from './classes/stop-location-request';
+import { CreateUserRequest } from './classes/create-user-request';
+import { SetInitialPasswordRequest } from './classes/set-initial-password-request';
+import { CheckAccountStatusRequest } from './classes/check-account-status-request';
+import { SetUserRoleRequest } from './classes/set-user-role-request';
+import { RemoveUserRoleRequest } from './classes/remove-user-role-request';
+import { CreateHospitalRequest } from './classes/create-hospital-request';
+import { DeleteHospitalRequest } from './classes/delete-hospital-request';
+import { GeocodeResult } from './classes/geocode-result';
 
 initializeApp();
 
@@ -13,25 +25,7 @@ const REGION = 'northamerica-northeast2';
 const pubsub = new PubSub();
 const GEOCODING_API_KEY = defineSecret('GEOCODING_API_KEY');
 
-const ASSIGNABLE_ROLES = ['ems', 'physician', 'nurse'] as const;
-type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
-
-interface EmsLocationEvent {
-  patientId: string;
-  active: boolean;
-  latitude?: number;
-  longitude?: number;
-}
-
-interface PublishLocationRequest {
-  patientId: string;
-  latitude: number;
-  longitude: number;
-}
-
-interface StopLocationRequest {
-  patientId: string;
-}
+const ASSIGNABLE_ROLES: readonly AssignableRole[] = ['ems', 'physician', 'nurse'];
 
 export const publishEmsLocation = onCall<PublishLocationRequest>({ region: REGION }, async (request) => {
   const { patientId, latitude, longitude } = request.data;
@@ -86,32 +80,6 @@ export const onEmsLocationEvent = onMessagePublished(
     await getFirestore().collection('emsLocations').doc(data.patientId).set(update, { merge: true });
   },
 );
-
-interface CreateUserRequest {
-  email: string;
-  firstName: string;
-  lastName: string;
-  role: AssignableRole;
-}
-
-interface SetInitialPasswordRequest {
-  email: string;
-  password: string;
-}
-
-interface CheckAccountStatusRequest {
-  email: string;
-}
-
-interface SetUserRoleRequest {
-  email: string;
-  role: AssignableRole;
-}
-
-interface RemoveUserRoleRequest {
-  email: string;
-  role: AssignableRole;
-}
 
 async function callerIsAdmin(uid: string): Promise<boolean> {
   const snapshot = await getFirestore().collection('users').doc(uid).get();
@@ -273,20 +241,6 @@ export const listUsersWithRoles = onCall({ region: REGION }, async (request) => 
     };
   });
 });
-
-interface CreateHospitalRequest {
-  name: string;
-  address: string;
-}
-
-interface DeleteHospitalRequest {
-  hospitalId: string;
-}
-
-interface GeocodeResult {
-  status: string;
-  results: Array<{ geometry: { location: { lat: number; lng: number } } }>;
-}
 
 // Looks up lat/long for a street address via the Google Maps Geocoding API,
 // so an admin only has to type an address rather than coordinates — the

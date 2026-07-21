@@ -4,7 +4,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { PatientListComponent } from './patient-list/patient-list.component';
 import { PatientViewerComponent } from './patient-viewer/patient-viewer.component';
-import { Patient } from './patient-list/patient-card/patient-card.component';
+import { Patient } from '@amdash/patients';
 
 @Component({
   selector: 'app-main-view',

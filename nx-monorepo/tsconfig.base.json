@@ -14,7 +14,8 @@
     "skipLibCheck": true,
     "skipDefaultLibCheck": true,
     "paths": {
-      "@amdash/auth": ["./libs/auth/src/index.ts"]
+      "@amdash/auth": ["./libs/auth/src/index.ts"],
+      "@amdash/patients": ["./libs/patients/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "tmp"]

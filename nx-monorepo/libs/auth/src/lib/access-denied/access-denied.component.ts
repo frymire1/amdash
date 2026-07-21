@@ -4,11 +4,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { APP_URLS } from '../app-urls';
 import { UserProfileService } from '../services/user-profile.service';
-
-interface AppLink {
-  label: string;
-  url: string;
-}
+import { AppLink } from '../classes/app-link';
 
 @Component({
   selector: 'lib-access-denied',

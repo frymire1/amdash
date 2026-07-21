@@ -1,19 +1,11 @@
 import { Injectable, signal } from '@angular/core';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getFirebaseApp } from '../firebase';
+import { PublishLocationRequest } from '../classes/publish-location-request';
+import { StopLocationRequest } from '../classes/stop-location-request';
 
 const UPDATE_INTERVAL_MS = 15000;
 const FUNCTIONS_REGION = 'northamerica-northeast2';
-
-interface PublishLocationRequest {
-  patientId: string;
-  latitude: number;
-  longitude: number;
-}
-
-interface StopLocationRequest {
-  patientId: string;
-}
 
 @Injectable({ providedIn: 'root' })
 export class EmsTrackingService {

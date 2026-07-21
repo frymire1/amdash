@@ -1,11 +1,7 @@
 import { Component, inject } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
-
-export interface ErrorDialogData {
-  title: string;
-  message: string;
-}
+import { ErrorDialogData } from '../../classes/error-dialog-data';
 
 @Component({
   selector: 'app-error-dialog',

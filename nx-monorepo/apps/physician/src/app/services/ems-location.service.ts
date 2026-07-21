@@ -1,6 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 import { collection, getFirestore, onSnapshot, query, Timestamp, where } from 'firebase/firestore';
 import { getFirebaseApp } from '../firebase';
+import { ActiveLocation } from '../classes/active-location';
 
 // The EMS app publishes an update every 15s. If a device stops publishing
 // (page reload, tab closed, network loss) without sending an explicit stop
@@ -8,11 +9,6 @@ import { getFirebaseApp } from '../firebase';
 // older than this as stale so the dot self-corrects instead of staying
 // green forever.
 const STALE_AFTER_MS = 35000;
-
-interface ActiveLocation {
-  patientId: string;
-  updatedAtMs: number;
-}
 
 @Injectable({ providedIn: 'root' })
 export class EmsLocationService {

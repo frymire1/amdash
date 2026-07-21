@@ -1,7 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 import { collection, getFirestore, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { getFirebaseApp } from '../firebase';
-import { Patient } from '../components/main-view/patient-list/patient-card/patient-card.component';
+import { Patient } from '@amdash/patients';
 
 @Injectable({ providedIn: 'root' })
 export class PatientService {

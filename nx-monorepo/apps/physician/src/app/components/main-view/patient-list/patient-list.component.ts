@@ -6,17 +6,13 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatSelectModule } from '@angular/material/select';
 import { HospitalService, UserProfileService } from '@amdash/auth';
+import { Patient } from '@amdash/patients';
 import { PatientCardComponent } from './patient-card/patient-card.component';
-import { Patient } from './patient-card/patient-card.component';
 import { PatientService } from '../../../services/patient.service';
 import { EmsLocationService } from '../../../services/ems-location.service';
+import { Coordinates } from '../../../classes/coordinates';
 
 export const ALL_DESTINATIONS = 'All destinations';
-
-interface Coordinates {
-  latitude: number;
-  longitude: number;
-}
 
 const EARTH_RADIUS_KM = 6371;
 

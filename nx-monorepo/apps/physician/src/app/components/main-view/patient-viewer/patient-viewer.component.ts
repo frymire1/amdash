@@ -2,7 +2,7 @@ import { Component, computed, input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
 import { GoogleMapsModule } from '@angular/google-maps';
-import { Patient } from '../patient-list/patient-card/patient-card.component';
+import { Patient } from '@amdash/patients';
 
 const DEFAULT_MARKER_POSITION: google.maps.LatLngLiteral = { lat: 40.7128, lng: -74.006 };
 

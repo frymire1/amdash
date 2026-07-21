@@ -1,14 +1,7 @@
 import { Injectable, computed, signal } from '@angular/core';
 import { collection, getFirestore, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { getFirebaseApp } from './firebase-app';
-
-export interface Hospital {
-  id: string;
-  name: string;
-  address: string;
-  latitude: number;
-  longitude: number;
-}
+import { Hospital } from './classes/hospital';
 
 // Hospitals live in Firestore now (managed by admins via the admin app's
 // Hospitals page — see createHospital/deleteHospital in functions/src) —

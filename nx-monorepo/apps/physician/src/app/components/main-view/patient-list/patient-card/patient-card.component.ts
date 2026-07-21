@@ -1,30 +1,6 @@
 import { Component, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
-
-export interface PatientVitals {
-  heartRate: number | string;
-  bloodPressure: string;
-  oxygen: number | string;
-  temperature: number | string;
-}
-
-export interface PatientLocation {
-  latitude: number;
-  longitude: number;
-  address: string;
-}
-
-export interface Patient {
-  id?: string;
-  name: string;
-  gender: string;
-  age: number | string;
-  healthcareNumber: string;
-  vitals: PatientVitals;
-  location: PatientLocation;
-  notes?: string;
-  destination?: string;
-}
+import { Patient } from '@amdash/patients';
 
 @Component({
   selector: 'app-patient-card',
