@@ -39,6 +39,14 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: false,
   retries: 0,
+  // These tests do real, sequential network-bound work (Admin SDK account
+  // creation, full onboarding UI flows, real Firestore writes) against the
+  // live dev site — the 30s default runs uncomfortably close to actual
+  // duration even in a plain CLI run, and Playwright UI mode's extra
+  // tracing/snapshot overhead plus running every test's browser concurrently
+  // pushes it over in practice. See patient-upload.spec.ts's own comment on
+  // its heaviest test for why that one still needs an even higher override.
+  timeout: 60000,
   reporter: [
     [
       'html',

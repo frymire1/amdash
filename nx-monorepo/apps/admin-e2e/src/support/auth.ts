@@ -25,8 +25,16 @@ export async function signIn(page: Page, account: E2eAccount) {
   await page.getByRole('button', { name: 'Sign In' }).click();
 }
 
+// Waits for the resulting navigation to /login rather than just the click,
+// since the nav bar's logOut() kicks off an async signOut() + navigate that
+// Playwright's own click() doesn't wait for — a caller that immediately
+// navigates elsewhere afterward (e.g. back to /login itself) can otherwise
+// race Firebase's client-side auth-state update and get bounced straight
+// back to '/' by guestGuard, since isAuthenticated() briefly still reads
+// true.
 export async function logOut(page: Page) {
   await page.getByRole('button', { name: 'Log out' }).click();
+  await page.waitForURL((url) => url.pathname.endsWith('/login'), { timeout: 15000 });
 }
 
 // Creates a brand-new throwaway account and completes the name-onboarding
