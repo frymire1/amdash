@@ -2,7 +2,7 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 56px);
+  height: calc(100vh - 64px);
   gap: 0;
   background: #f5f7fa;
   overflow: hidden;
@@ -97,7 +97,7 @@
       border-top: none;
       border-left: 1px solid #e2e8f0;
       border-right: 1px solid #e2e8f0;
-      height: calc(100vh - 56px);
+      height: calc(100vh - 64px);
       overflow-y: auto;
       overflow-x: hidden;
       background: white;
@@ -107,7 +107,7 @@
     .active-patient-section {
       flex: 1 1 75%;
       padding: 24px 0;
-      height: calc(100vh - 56px);
+      height: calc(100vh - 64px);
       overflow-y: auto;
       background: #f5f7fa;
       order: 1;
