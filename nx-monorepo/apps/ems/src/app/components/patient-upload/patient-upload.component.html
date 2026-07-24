@@ -61,6 +61,38 @@
         <mat-label>Temperature (&deg;C)</mat-label>
         <input matInput type="number" step="0.1" formControlName="temperature" />
       </mat-form-field>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Respiratory Rate (breaths/min)</mat-label>
+        <input matInput type="number" formControlName="respiratoryRate" />
+      </mat-form-field>
+
+      <mat-form-field appearance="outline">
+        <mat-label>GCS</mat-label>
+        <input matInput type="number" formControlName="gcs" min="3" max="15" placeholder="3-15" />
+      </mat-form-field>
+    </section>
+
+    <section class="form-section">
+      <h3>IV Access</h3>
+
+      <mat-form-field appearance="outline">
+        <mat-label>IV Size (Gauge)</mat-label>
+        <mat-select formControlName="ivSize">
+          @for (size of ivSizes; track size) {
+            <mat-option [value]="size">{{ size }}</mat-option>
+          }
+        </mat-select>
+      </mat-form-field>
+
+      <mat-form-field appearance="outline">
+        <mat-label>IV Placement</mat-label>
+        <mat-select formControlName="ivPlacement">
+          @for (placement of ivPlacements; track placement) {
+            <mat-option [value]="placement">{{ placement }}</mat-option>
+          }
+        </mat-select>
+      </mat-form-field>
     </section>
 
     <section class="form-section location-section">
@@ -94,6 +126,20 @@
     </section>
 
     <section class="form-section notes-section">
+      <h3>Treatment</h3>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Treatment / Medication Given</mat-label>
+        <textarea
+          matInput
+          formControlName="treatment"
+          rows="4"
+          placeholder="IV fluids, medications administered, interventions, etc."
+        ></textarea>
+      </mat-form-field>
+    </section>
+
+    <section class="form-section notes-section">
       <h3>Notes</h3>
 
       <mat-form-field appearance="outline">
@@ -102,7 +148,7 @@
           matInput
           formControlName="notes"
           rows="4"
-          placeholder="Observations, treatment given, hazards, etc."
+          placeholder="Observations, hazards, etc."
         ></textarea>
       </mat-form-field>
     </section>

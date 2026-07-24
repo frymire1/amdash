@@ -26,6 +26,18 @@
               <span class="value">{{ currentPatient.destination }}</span>
             </div>
           }
+          @if (currentPatient.ivSize) {
+            <div class="info-item">
+              <span class="label">IV Size</span>
+              <span class="value">{{ currentPatient.ivSize }}</span>
+            </div>
+          }
+          @if (currentPatient.ivPlacement) {
+            <div class="info-item">
+              <span class="label">IV Placement</span>
+              <span class="value">{{ currentPatient.ivPlacement }}</span>
+            </div>
+          }
         </div>
       </mat-card-content>
     </mat-card>
@@ -52,6 +64,18 @@
             <span class="label">Temperature</span>
             <span class="value">{{ currentPatient.vitals.temperature }}°C</span>
           </div>
+          @if (currentPatient.vitals.respiratoryRate !== undefined) {
+            <div class="vital-item">
+              <span class="label">Respiratory Rate</span>
+              <span class="value">{{ currentPatient.vitals.respiratoryRate }} breaths/min</span>
+            </div>
+          }
+          @if (currentPatient.vitals.gcs !== undefined) {
+            <div class="vital-item">
+              <span class="label">GCS</span>
+              <span class="value">{{ currentPatient.vitals.gcs }}</span>
+            </div>
+          }
         </div>
       </mat-card-content>
     </mat-card>
@@ -78,6 +102,17 @@
         }
       </mat-card-content>
     </mat-card>
+
+    @if (currentPatient.treatment) {
+      <mat-card class="notes-card">
+        <mat-card-header>
+          <mat-card-title>Treatment / Medication Given</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p class="notes-text">{{ currentPatient.treatment }}</p>
+        </mat-card-content>
+      </mat-card>
+    }
 
     @if (currentPatient.notes) {
       <mat-card class="notes-card">

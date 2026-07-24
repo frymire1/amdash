@@ -21,6 +21,21 @@ function toNumberOrNull(value: number | string | undefined): number | null {
   return typeof value === 'number' ? value : null;
 }
 
+// Standard peripheral IV catheter gauges, largest (trauma) to smallest
+// (pediatric/fragile veins).
+export const IV_SIZES: readonly string[] = ['14G', '16G', '18G', '20G', '22G', '24G'];
+
+export const IV_PLACEMENTS: readonly string[] = [
+  'Left Hand',
+  'Right Hand',
+  'Left Forearm',
+  'Right Forearm',
+  'Left Antecubital (AC)',
+  'Right Antecubital (AC)',
+  'External Jugular (EJ)',
+  'Other',
+];
+
 @Component({
   selector: 'app-patient-upload',
   standalone: true,
@@ -52,6 +67,8 @@ export class PatientUploadComponent {
   private formPrefilled = false;
 
   readonly destinationHospitals = this.hospitalService.hospitalNames;
+  readonly ivSizes = IV_SIZES;
+  readonly ivPlacements = IV_PLACEMENTS;
 
   readonly isEditing = signal(false);
   readonly submitting = signal(false);
@@ -72,11 +89,21 @@ export class PatientUploadComponent {
       bloodPressure: [''],
       oxygen: [null as number | null],
       temperature: [null as number | null],
+      respiratoryRate: [null as number | null, Validators.min(0)],
+      gcs: [null as number | null, [Validators.min(3), Validators.max(15)]],
     }),
+    // Every field, including location, is optional — this is only
+    // best-effort auto-populated from the device's geolocation (see
+    // useCurrentLocation below) rather than manually entered, and a denied
+    // or unavailable permission shouldn't block submitting the rest of the
+    // form.
     location: this.formBuilder.nonNullable.group({
-      latitude: [null as number | null, Validators.required],
-      longitude: [null as number | null, Validators.required],
+      latitude: [null as number | null],
+      longitude: [null as number | null],
     }),
+    ivSize: [''],
+    ivPlacement: [''],
+    treatment: [''],
     notes: [''],
   });
 
@@ -113,14 +140,22 @@ export class PatientUploadComponent {
             bloodPressure: uploaded.patient.vitals.bloodPressure,
             oxygen: toNumberOrNull(uploaded.patient.vitals.oxygen),
             temperature: toNumberOrNull(uploaded.patient.vitals.temperature),
+            respiratoryRate: uploaded.patient.vitals.respiratoryRate ?? null,
+            gcs: uploaded.patient.vitals.gcs ?? null,
           },
           location: {
-            latitude: uploaded.patient.location.latitude,
-            longitude: uploaded.patient.location.longitude,
+            latitude: uploaded.patient.location?.latitude ?? null,
+            longitude: uploaded.patient.location?.longitude ?? null,
           },
+          ivSize: uploaded.patient.ivSize ?? '',
+          ivPlacement: uploaded.patient.ivPlacement ?? '',
+          treatment: uploaded.patient.treatment ?? '',
           notes: uploaded.patient.notes ?? '',
         });
-        this.locationShared.set(true);
+        // Only claim location is already shared if this patient actually
+        // has one on record — it's optional now, so an edited patient may
+        // never have had one (e.g. geolocation was denied on upload).
+        this.locationShared.set(!!uploaded.patient.location);
       });
     } else {
       this.useCurrentLocation();
@@ -164,6 +199,11 @@ export class PatientUploadComponent {
     }
 
     const value = this.patientForm.getRawValue();
+    const hasLocation = value.location.latitude != null && value.location.longitude != null;
+
+    // Firestore's JS SDK rejects a literal `undefined` field value outright
+    // (addDoc/updateDoc throw), so optional fields left empty are omitted
+    // via spread here rather than assigned `undefined` directly.
     const patient: Patient = {
       name: value.name || 'Unknown',
       gender: value.gender || 'Unknown',
@@ -175,12 +215,21 @@ export class PatientUploadComponent {
         bloodPressure: value.vitals.bloodPressure || 'Unknown',
         oxygen: value.vitals.oxygen ?? 'Unknown',
         temperature: value.vitals.temperature ?? 'Unknown',
+        ...(value.vitals.respiratoryRate != null ? { respiratoryRate: value.vitals.respiratoryRate } : {}),
+        ...(value.vitals.gcs != null ? { gcs: value.vitals.gcs } : {}),
       },
-      location: {
-        latitude: value.location.latitude!,
-        longitude: value.location.longitude!,
-        address: '',
-      },
+      ...(hasLocation
+        ? {
+            location: {
+              latitude: value.location.latitude as number,
+              longitude: value.location.longitude as number,
+              address: '',
+            },
+          }
+        : {}),
+      ...(value.ivSize ? { ivSize: value.ivSize } : {}),
+      ...(value.ivPlacement ? { ivPlacement: value.ivPlacement } : {}),
+      ...(value.treatment ? { treatment: value.treatment } : {}),
       notes: value.notes,
     };
 
