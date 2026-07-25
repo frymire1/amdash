@@ -43,7 +43,15 @@ describe('PatientUploadComponent', () => {
     expect(component).toBeTruthy();
   });
 
-  it('should not submit an invalid form', async () => {
+  // Every field is optional now, including location — see
+  // PatientUploadComponent's patientForm.
+  it('should submit an empty form', async () => {
+    await component.onSubmit();
+    expect(uploadCalled).toBe(true);
+  });
+
+  it('should not submit a form with an out-of-range value', async () => {
+    component.patientForm.controls.age.setValue(-5);
     await component.onSubmit();
     expect(uploadCalled).toBe(false);
     expect(component.patientForm.touched).toBe(true);
