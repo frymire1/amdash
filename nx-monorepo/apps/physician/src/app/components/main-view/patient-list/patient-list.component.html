@@ -36,7 +36,7 @@
     <div class="patients-grid">
       @for (patient of filteredPatients(); track patient.id) {
         <app-patient-card
-          (select)="onPatientSelect(patient)"
+          (patientSelected)="onPatientSelect(patient)"
           [patient]="patient"
           [isTracked]="isTracked(patient)"
         ></app-patient-card>

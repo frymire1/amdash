@@ -1,4 +1,4 @@
-<div class="patient-card" (click)="select.emit(patient())" role="button" tabindex="0">
+<div class="patient-card" (click)="patientSelected.emit(patient())" role="button" tabindex="0">
   @if (isTracked()) {
     <span class="patient-card__tracking-dot" title="Location actively being tracked"></span>
   }

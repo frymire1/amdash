@@ -12,7 +12,7 @@ import { Patient } from '@amdash/patients';
 export class PatientCardComponent {
   readonly patient = input.required<Patient>();
   readonly isTracked = input(false);
-  readonly select = output<Patient>();
+  readonly patientSelected = output<Patient>();
 
   // A field EMS left blank on upload isn't `undefined` for every field —
   // required-typed ones (name, vitals, etc.) instead get the app's own
