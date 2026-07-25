@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  test-lint-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: nx-monorepo/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: nx-monorepo
+
+      - name: Test, lint, build
+        run: npx nx run-many -t test,lint,build
+        working-directory: nx-monorepo
+
+  deploy-and-e2e:
+    runs-on: ubuntu-latest
+    needs: test-lint-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            nx-monorepo/package-lock.json
+            functions/package-lock.json
+
+      - name: Install nx-monorepo dependencies
+        run: npm ci
+        working-directory: nx-monorepo
+
+      - name: Install functions dependencies
+        run: npm ci
+        working-directory: functions
+
+      - name: Build functions
+        run: npm run build
+        working-directory: functions
+
+      - name: Build physician/ems/admin
+        run: npx nx run-many -t build -p physician,ems,admin
+        working-directory: nx-monorepo
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      # Used both by `firebase deploy` below and by the e2e suites' own
+      # Admin SDK calls (see apps/*-e2e/src/support/admin.ts) — both the
+      # Firebase CLI and the Admin SDK auto-detect this standard env var, no
+      # extra plumbing needed. Requires a real GCP service account key
+      # stored as the FIREBASE_SERVICE_ACCOUNT_KEY repo secret (Firebase
+      # Console → Project Settings → Service Accounts → Generate new private
+      # key, for the amdash-dev project).
+      - name: Authenticate to Firebase
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+
+      - name: Deploy to amdash-dev
+        run: firebase deploy --only hosting,functions,firestore:rules --project amdash-dev --non-interactive
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: nx-monorepo
+
+      - name: Run physician-e2e
+        run: npx playwright test --project=chromium
+        working-directory: nx-monorepo/apps/physician-e2e
+
+      - name: Run ems-e2e
+        run: npx playwright test --project=chromium
+        working-directory: nx-monorepo/apps/ems-e2e
+
+      # role-assignment.spec.ts stays skipped (matching its existing local
+      # behavior) unless these two are set — point them at a real,
+      # persistent admin account you create by hand in the amdash-dev
+      # Firestore console, same as running this test locally. Deliberately
+      # not auto-created per run, unlike the rest of e2e's throwaway
+      # accounts: this is the real project, not disposable emulator data, so
+      # a fixed account avoids accumulating admin-role junk accounts in it.
+      - name: Run admin-e2e
+        run: npx playwright test --project=chromium
+        working-directory: nx-monorepo/apps/admin-e2e
+        env:
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+
+      - name: Upload Playwright reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-reports
+          path: nx-monorepo/dist/.playwright/apps/*/playwright-report
+          retention-days: 7

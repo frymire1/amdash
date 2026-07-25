@@ -17,9 +17,19 @@ let initialized = false;
 // firestore.rules and the setUserRole Cloud Function), so there's no
 // client-only way for a test to grant itself a role; this is what lets the
 // e2e suite do it without real user credentials. Requires the machine
-// running these tests to have an authenticated `firebase login` session.
+// running these tests to have an authenticated `firebase login` session —
+// except when GOOGLE_APPLICATION_CREDENTIALS is already set externally (CI
+// sets it to a real service-account key file — see
+// .github/workflows/ci.yml), which the Admin SDK auto-detects on its own, so
+// the local-credential derivation below is skipped entirely.
 function ensureInitialized() {
   if (initialized) {
+    return;
+  }
+
+  if (process.env['GOOGLE_APPLICATION_CREDENTIALS']) {
+    initializeApp({ projectId: 'amdash-dev' });
+    initialized = true;
     return;
   }
 

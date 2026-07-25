@@ -12,9 +12,19 @@ let initialized = false;
 // cached OAuth refresh token into an Application Default Credentials file —
 // the same technique `firebase functions:shell`/emulators use to give local
 // code real project access. Requires the machine running these tests to
-// have an authenticated `firebase login` session.
+// have an authenticated `firebase login` session — except when
+// GOOGLE_APPLICATION_CREDENTIALS is already set externally (CI sets it to a
+// real service-account key file — see .github/workflows/ci.yml), which the
+// Admin SDK auto-detects on its own, so the local-credential derivation
+// below is skipped entirely.
 function ensureInitialized() {
   if (initialized) {
+    return;
+  }
+
+  if (process.env['GOOGLE_APPLICATION_CREDENTIALS']) {
+    initializeApp({ projectId: 'amdash-dev' });
+    initialized = true;
     return;
   }
 
