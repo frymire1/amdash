@@ -132,8 +132,23 @@
       </mat-card-header>
       <mat-card-content>
         @if (currentPatient.location) {
-          <div class="map-container">
-            <google-map [center]="markerPosition()" [zoom]="mapZoom" height="240px" width="100%">
+          <div class="map-container" [class.map-container--expanded]="isMapExpanded()">
+            <button
+              mat-icon-button
+              class="map-container__expand-btn"
+              type="button"
+              (click)="toggleMapExpanded()"
+              [attr.aria-label]="isMapExpanded() ? 'Exit full screen' : 'View map full screen'"
+              [attr.title]="isMapExpanded() ? 'Exit full screen' : 'View map full screen'"
+            >
+              <mat-icon>{{ isMapExpanded() ? 'fullscreen_exit' : 'fullscreen' }}</mat-icon>
+            </button>
+            <google-map
+              [center]="markerPosition()"
+              [zoom]="mapZoom"
+              [height]="isMapExpanded() ? '100vh' : '240px'"
+              width="100%"
+            >
               <map-marker [position]="markerPosition()" [options]="markerOptions"></map-marker>
             </google-map>
           </div>

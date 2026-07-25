@@ -115,6 +115,7 @@
 
     .location-card {
       .map-container {
+        position: relative;
         border: 2px solid #0284c7;
         border-radius: 8px;
         overflow: hidden;
@@ -122,6 +123,32 @@
 
         google-map {
           display: block;
+        }
+
+        // Covers the viewport in-page (not the real Fullscreen API — see
+        // toggleMapExpanded's comment for why) when expanded.
+        &--expanded {
+          position: fixed;
+          inset: 0;
+          z-index: 1000;
+          width: 100vw;
+          height: 100vh;
+          border: none;
+          border-radius: 0;
+          margin-bottom: 0;
+          background: #000;
+        }
+
+        &__expand-btn {
+          position: absolute;
+          top: 8px;
+          right: 8px;
+          z-index: 1;
+          background: rgba(255, 255, 255, 0.9);
+
+          &:hover {
+            background: #ffffff;
+          }
         }
       }
 
