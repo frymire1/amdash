@@ -26,4 +26,13 @@ export class PatientViewerComponent {
     const location = this.patient()?.location;
     return location ? { lat: location.latitude, lng: location.longitude } : DEFAULT_MARKER_POSITION;
   });
+
+  // A field EMS left blank on upload isn't `undefined` for every field —
+  // required-typed ones (name, vitals, etc.) instead get the app's own
+  // 'Unknown' sentinel string (see PatientUploadComponent.onSubmit) since
+  // the Patient type doesn't make them optional. Treat both the same way so
+  // this reads "not added" rather than a confusing literal "Unknown".
+  protected isProvided(value: string | number | undefined): boolean {
+    return typeof value === 'number' || (typeof value === 'string' && value !== '' && value !== 'Unknown');
+  }
 }

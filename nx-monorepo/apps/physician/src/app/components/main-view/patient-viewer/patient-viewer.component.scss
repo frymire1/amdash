@@ -146,6 +146,12 @@
         white-space: pre-wrap;
       }
     }
+
+    .value--missing {
+      font-style: italic;
+      font-weight: 400 !important;
+      color: #94a3b8 !important;
+    }
   }
 }
 

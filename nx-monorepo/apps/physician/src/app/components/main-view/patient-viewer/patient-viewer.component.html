@@ -1,8 +1,20 @@
 @if (patient(); as currentPatient) {
   <div class="active-patient-container">
     <div class="patient-header">
-      <h1>{{ currentPatient.name }}</h1>
-      <span class="healthcare-number">{{ currentPatient.healthcareNumber }}</span>
+      <h1>
+        @if (isProvided(currentPatient.name)) {
+          {{ currentPatient.name }}
+        } @else {
+          <span class="value--missing">Not added by EMS yet</span>
+        }
+      </h1>
+      <span class="healthcare-number">
+        @if (isProvided(currentPatient.healthcareNumber)) {
+          {{ currentPatient.healthcareNumber }}
+        } @else {
+          <span class="value--missing">Not added by EMS yet</span>
+        }
+      </span>
     </div>
 
     <div class="patient-content">
@@ -14,30 +26,44 @@
         <div class="info-grid">
           <div class="info-item">
             <span class="label">Gender</span>
-            <span class="value">{{ currentPatient.gender }}</span>
+            @if (isProvided(currentPatient.gender)) {
+              <span class="value">{{ currentPatient.gender }}</span>
+            } @else {
+              <span class="value value--missing">Not added by EMS yet</span>
+            }
           </div>
           <div class="info-item">
             <span class="label">Age</span>
-            <span class="value">{{ currentPatient.age }} years</span>
+            @if (isProvided(currentPatient.age)) {
+              <span class="value">{{ currentPatient.age }} years</span>
+            } @else {
+              <span class="value value--missing">Not added by EMS yet</span>
+            }
           </div>
-          @if (currentPatient.destination) {
-            <div class="info-item">
-              <span class="label">Destination</span>
+          <div class="info-item">
+            <span class="label">Destination</span>
+            @if (isProvided(currentPatient.destination)) {
               <span class="value">{{ currentPatient.destination }}</span>
-            </div>
-          }
-          @if (currentPatient.ivSize) {
-            <div class="info-item">
-              <span class="label">IV Size</span>
+            } @else {
+              <span class="value value--missing">Not added by EMS yet</span>
+            }
+          </div>
+          <div class="info-item">
+            <span class="label">IV Size</span>
+            @if (isProvided(currentPatient.ivSize)) {
               <span class="value">{{ currentPatient.ivSize }}</span>
-            </div>
-          }
-          @if (currentPatient.ivPlacement) {
-            <div class="info-item">
-              <span class="label">IV Placement</span>
+            } @else {
+              <span class="value value--missing">Not added by EMS yet</span>
+            }
+          </div>
+          <div class="info-item">
+            <span class="label">IV Placement</span>
+            @if (isProvided(currentPatient.ivPlacement)) {
               <span class="value">{{ currentPatient.ivPlacement }}</span>
-            </div>
-          }
+            } @else {
+              <span class="value value--missing">Not added by EMS yet</span>
+            }
+          </div>
         </div>
       </mat-card-content>
     </mat-card>
@@ -50,32 +76,52 @@
         <div class="vitals-grid">
           <div class="vital-item">
             <span class="label">Heart Rate</span>
-            <span class="value">{{ currentPatient.vitals.heartRate }} bpm</span>
+            @if (isProvided(currentPatient.vitals.heartRate)) {
+              <span class="value">{{ currentPatient.vitals.heartRate }} bpm</span>
+            } @else {
+              <span class="value value--missing">Not added by EMS yet</span>
+            }
           </div>
           <div class="vital-item">
             <span class="label">Blood Pressure</span>
-            <span class="value">{{ currentPatient.vitals.bloodPressure }}</span>
+            @if (isProvided(currentPatient.vitals.bloodPressure)) {
+              <span class="value">{{ currentPatient.vitals.bloodPressure }}</span>
+            } @else {
+              <span class="value value--missing">Not added by EMS yet</span>
+            }
           </div>
           <div class="vital-item">
             <span class="label">Oxygen</span>
-            <span class="value">{{ currentPatient.vitals.oxygen }}%</span>
+            @if (isProvided(currentPatient.vitals.oxygen)) {
+              <span class="value">{{ currentPatient.vitals.oxygen }}%</span>
+            } @else {
+              <span class="value value--missing">Not added by EMS yet</span>
+            }
           </div>
           <div class="vital-item">
             <span class="label">Temperature</span>
-            <span class="value">{{ currentPatient.vitals.temperature }}°C</span>
+            @if (isProvided(currentPatient.vitals.temperature)) {
+              <span class="value">{{ currentPatient.vitals.temperature }}°C</span>
+            } @else {
+              <span class="value value--missing">Not added by EMS yet</span>
+            }
           </div>
-          @if (currentPatient.vitals.respiratoryRate !== undefined) {
-            <div class="vital-item">
-              <span class="label">Respiratory Rate</span>
+          <div class="vital-item">
+            <span class="label">Respiratory Rate</span>
+            @if (isProvided(currentPatient.vitals.respiratoryRate)) {
               <span class="value">{{ currentPatient.vitals.respiratoryRate }} breaths/min</span>
-            </div>
-          }
-          @if (currentPatient.vitals.gcs !== undefined) {
-            <div class="vital-item">
-              <span class="label">GCS</span>
+            } @else {
+              <span class="value value--missing">Not added by EMS yet</span>
+            }
+          </div>
+          <div class="vital-item">
+            <span class="label">GCS</span>
+            @if (isProvided(currentPatient.vitals.gcs)) {
               <span class="value">{{ currentPatient.vitals.gcs }}</span>
-            </div>
-          }
+            } @else {
+              <span class="value value--missing">Not added by EMS yet</span>
+            }
+          </div>
         </div>
       </mat-card-content>
     </mat-card>
@@ -99,31 +145,37 @@
               {{ currentPatient.location.longitude | number: '1.4-4' }}
             </p>
           </div>
+        } @else {
+          <p class="value--missing">Not added by EMS yet</p>
         }
       </mat-card-content>
     </mat-card>
 
-    @if (currentPatient.treatment) {
-      <mat-card class="notes-card">
-        <mat-card-header>
-          <mat-card-title>Treatment / Medication Given</mat-card-title>
-        </mat-card-header>
-        <mat-card-content>
+    <mat-card class="notes-card">
+      <mat-card-header>
+        <mat-card-title>Treatment / Medication Given</mat-card-title>
+      </mat-card-header>
+      <mat-card-content>
+        @if (isProvided(currentPatient.treatment)) {
           <p class="notes-text">{{ currentPatient.treatment }}</p>
-        </mat-card-content>
-      </mat-card>
-    }
+        } @else {
+          <p class="value--missing">Not added by EMS yet</p>
+        }
+      </mat-card-content>
+    </mat-card>
 
-    @if (currentPatient.notes) {
-      <mat-card class="notes-card">
-        <mat-card-header>
-          <mat-card-title>Patient Notes</mat-card-title>
-        </mat-card-header>
-        <mat-card-content>
+    <mat-card class="notes-card">
+      <mat-card-header>
+        <mat-card-title>Patient Notes</mat-card-title>
+      </mat-card-header>
+      <mat-card-content>
+        @if (isProvided(currentPatient.notes)) {
           <p class="notes-text">{{ currentPatient.notes }}</p>
-        </mat-card-content>
-      </mat-card>
-    }
+        } @else {
+          <p class="value--missing">Not added by EMS yet</p>
+        }
+      </mat-card-content>
+    </mat-card>
     </div>
   </div>
 } @else {

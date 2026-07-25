@@ -3,15 +3,91 @@
     <span class="patient-card__tracking-dot" title="Location actively being tracked"></span>
   }
   <div class="patient-card__header">
-    <div class="patient-card__title">{{ patient().name }}</div>
-    <div class="patient-card__subtitle">Healthcare #{{ patient().healthcareNumber }}</div>
+    <div class="patient-card__title">
+      @if (isProvided(patient().name)) {
+        {{ patient().name }}
+      } @else {
+        <span class="value--missing">Not added by EMS yet</span>
+      }
+    </div>
+    <div class="patient-card__meta">
+      @if (isProvided(patient().gender)) {
+        {{ patient().gender }}
+      } @else {
+        <span class="value--missing">Not added yet</span>
+      }
+      &middot;
+      @if (isProvided(patient().age)) {
+        {{ patient().age }}
+      } @else {
+        <span class="value--missing">Not added yet</span>
+      }
+    </div>
+    <div class="patient-card__subtitle">
+      Healthcare #
+      @if (isProvided(patient().healthcareNumber)) {
+        {{ patient().healthcareNumber }}
+      } @else {
+        <span class="value--missing">Not added by EMS yet</span>
+      }
+    </div>
+    <div class="patient-card__subtitle">
+      Destination:
+      @if (isProvided(patient().destination)) {
+        {{ patient().destination }}
+      } @else {
+        <span class="value--missing">Not added yet</span>
+      }
+    </div>
   </div>
-  <div class="patient-card__content">
-    <div class="patient-info">
-      <p><strong>Gender:</strong> {{ patient().gender }}</p>
-      <p><strong>Age:</strong> {{ patient().age }}</p>
-      @if (patient().destination) {
-        <p><strong>Destination:</strong> {{ patient().destination }}</p>
+
+  <div class="patient-card__fields">
+    <div class="field">
+      <span class="label">GCS</span>
+      @if (isProvided(patient().vitals.gcs)) {
+        <span class="value">{{ patient().vitals.gcs }}</span>
+      } @else {
+        <span class="value value--missing">Not added yet</span>
+      }
+    </div>
+    <div class="field">
+      <span class="label">Heart Rate</span>
+      @if (isProvided(patient().vitals.heartRate)) {
+        <span class="value">{{ patient().vitals.heartRate }} bpm</span>
+      } @else {
+        <span class="value value--missing">Not added yet</span>
+      }
+    </div>
+    <div class="field">
+      <span class="label">Blood Pressure</span>
+      @if (isProvided(patient().vitals.bloodPressure)) {
+        <span class="value">{{ patient().vitals.bloodPressure }}</span>
+      } @else {
+        <span class="value value--missing">Not added yet</span>
+      }
+    </div>
+    <div class="field">
+      <span class="label">Oxygen</span>
+      @if (isProvided(patient().vitals.oxygen)) {
+        <span class="value">{{ patient().vitals.oxygen }}%</span>
+      } @else {
+        <span class="value value--missing">Not added yet</span>
+      }
+    </div>
+    <div class="field">
+      <span class="label">Temp</span>
+      @if (isProvided(patient().vitals.temperature)) {
+        <span class="value">{{ patient().vitals.temperature }}°C</span>
+      } @else {
+        <span class="value value--missing">Not added yet</span>
+      }
+    </div>
+    <div class="field">
+      <span class="label">Resp. Rate</span>
+      @if (isProvided(patient().vitals.respiratoryRate)) {
+        <span class="value">{{ patient().vitals.respiratoryRate }}/min</span>
+      } @else {
+        <span class="value value--missing">Not added yet</span>
       }
     </div>
   </div>
