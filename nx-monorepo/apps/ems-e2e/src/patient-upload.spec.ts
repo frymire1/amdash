@@ -1,5 +1,6 @@
 import { Page, test, expect } from '@playwright/test';
 import { E2eAccount, deleteAccount, signUpAndOnboard } from './support/auth';
+import { deletePatientData } from './support/admin';
 
 // The upload form only sources coordinates from the browser's geolocation
 // API (no manual lat/lng fields), so a mock position + granted permission is
@@ -10,15 +11,26 @@ test.use({
 });
 
 // Otherwise the account and its Firestore users/ doc are left behind
-// permanently, since nothing in the app itself ever deletes a user.
+// permanently, since nothing in the app itself ever deletes a user. Both
+// tests below also delete the patient via the UI's own delete button as part
+// of the flow they're testing — but that only runs if every prior step
+// succeeds. Capturing the patient id as soon as it exists and clearing it
+// here too (deletePatientData is idempotent) means a mid-test failure still
+// can't leave a `patients` doc behind — live-tracking is explicitly toggled
+// off in both tests below, so there's never an `emsLocations` doc to worry
+// about here, unlike ems-patient-live-update.spec.ts / live-tracking.spec.ts.
 let createdAccount: E2eAccount | undefined;
+let createdPatientId: string | undefined;
 
 test.afterEach(async () => {
-  if (!createdAccount) {
-    return;
+  if (createdPatientId) {
+    await deletePatientData(createdPatientId);
+    createdPatientId = undefined;
   }
-  await deleteAccount(createdAccount);
-  createdAccount = undefined;
+  if (createdAccount) {
+    await deleteAccount(createdAccount);
+    createdAccount = undefined;
+  }
 });
 
 test('uploads a mock patient and deletes it', async ({ page }) => {
@@ -47,6 +59,13 @@ test('uploads a mock patient and deletes it', async ({ page }) => {
   await expect(page).toHaveURL(/\/$/);
   const card = page.locator('.patient-summary-card', { hasText: patientName });
   await expect(card).toBeVisible();
+
+  // Read the id off the Edit link's href (routerLink ['/upload', id] renders
+  // as href="/upload/{id}") without navigating there, so afterEach can clean
+  // this record up even if the delete steps below never run.
+  const editHref = await card.getByRole('link', { name: 'Edit' }).getAttribute('href');
+  createdPatientId = editHref?.split('/').filter(Boolean).pop();
+  expect(createdPatientId, 'expected the Edit link to contain the new patient id').toBeTruthy();
 
   await card.getByRole('button', { name: 'Delete' }).click();
   await page.locator('mat-dialog-container').getByRole('button', { name: 'Delete' }).click();
@@ -180,6 +199,15 @@ test('fills every field on upload, then edits every field and confirms the new v
 
   const initialCard = page.locator('.patient-summary-card', { hasText: initial.name });
   await expect(initialCard).toBeVisible();
+
+  // Same reasoning as the other test in this file: capture the id now, right
+  // after the doc first exists, so afterEach can clean it up even if a later
+  // step (the edit pass, or the final delete) fails first. The id doesn't
+  // change across the edit below — it's an update to the same doc, not a
+  // new one.
+  const editHref = await initialCard.getByRole('link', { name: 'Edit' }).getAttribute('href');
+  createdPatientId = editHref?.split('/').filter(Boolean).pop();
+  expect(createdPatientId, 'expected the Edit link to contain the new patient id').toBeTruthy();
 
   // Re-open the edit form rather than trusting the form's own in-memory
   // state — this confirms every field actually round-tripped through

@@ -1,5 +1,5 @@
 import { Page, expect } from '@playwright/test';
-import { createPasswordlessAccount } from './admin';
+import { UserRole, createPasswordlessAccount, deleteAccountByEmail, grantRole } from './admin';
 import { E2eAccount } from './classes/e2e-account';
 
 export type { E2eAccount } from './classes/e2e-account';
@@ -13,9 +13,10 @@ export function generateE2eAccount(prefix: string): E2eAccount {
 }
 
 // The login page is email-first: submitting the email decides server-side
-// whether to show a single-password sign-in screen (an existing account) or
-// a set-your-password screen (no account yet, or an admin-created one with
-// no password) — see signUpAndOnboard below for that second path.
+// (checkAccountStatus) whether to show a single-password sign-in screen (an
+// existing account) or a set-your-password screen (no account yet, or an
+// admin-created one with no password) — see signUpAndOnboard below for that
+// second path.
 export async function signIn(page: Page, account: E2eAccount) {
   await page.goto('/login');
   await page.getByLabel('Email').fill(account.email);
@@ -37,20 +38,32 @@ export async function logOut(page: Page) {
   await page.waitForURL((url) => url.pathname.endsWith('/login'), { timeout: 15000 });
 }
 
-// Creates a brand-new throwaway account and completes the name-onboarding
-// step. Every test gets its own account so tests stay independent and can
-// run in parallel. Accounts are admin-created only — the login page has no
-// self-registration path — so this first creates a passwordless account via
-// the Admin SDK (support/admin.ts), then drives the same "set your
-// password" flow a real invited user would use on first login.
+// Creates a brand-new throwaway account and completes the mandatory
+// name-onboarding step. Every test gets its own account so tests stay
+// independent and can run in parallel. Accounts are admin-created only —
+// the login page has no self-registration path — so this first creates a
+// passwordless account via the Admin SDK (support/admin.ts), then drives
+// the same "set your password" flow a real invited user would use on first
+// login.
+// `options.role` grants a Firestore role via the Admin SDK before completing
+// onboarding — adminGuard blocks access to this app for accounts with no
+// role, and nothing client-side can ever set that field on its own.
+// `options.onAccountCreated` fires as soon as the account exists in Firebase
+// Auth, before the rest of this function drives the onboarding UI — register
+// the account for cleanup here rather than off this function's return value,
+// since a failure anywhere below (a UI step timing out, a role grant
+// failing) would otherwise leave the just-created account untracked and
+// permanently orphaned.
 export async function signUpAndOnboard(
   page: Page,
   prefix: string,
   name: { firstName: string; lastName: string } = { firstName: 'E2E', lastName: 'Tester' },
+  options?: { role?: UserRole; onAccountCreated?: (account: E2eAccount) => void },
 ): Promise<E2eAccount> {
   const account = generateE2eAccount(prefix);
 
   await createPasswordlessAccount(account.email);
+  options?.onAccountCreated?.(account);
 
   await page.goto('/login');
   await page.getByLabel('Email').fill(account.email);
@@ -75,9 +88,26 @@ export async function signUpAndOnboard(
   // way there.
   await page.getByRole('link', { name: 'Account settings' }).click();
   await expect(page).toHaveURL(/\/user-settings$/);
+
+  if (options?.role) {
+    // Must land before the "Continue" click below, since that's what
+    // navigates into the role-guarded app routes.
+    await grantRole(account.email, options.role);
+  }
+
   await page.getByLabel('First Name').fill(name.firstName);
   await page.getByLabel('Last Name').fill(name.lastName);
   await page.getByRole('button', { name: 'Continue' }).click();
 
   return account;
+}
+
+// Deletes a throwaway e2e account entirely: its `users/{uid}` Firestore doc
+// and the Firebase Auth account itself, via the Admin SDK (see
+// deleteAccountByEmail in support/admin.ts). Every test that calls
+// signUpAndOnboard should call this in an `afterEach` — otherwise the
+// account (and its Firestore profile doc) is left behind permanently, since
+// nothing in the app itself ever deletes a user.
+export async function deleteAccount(account: E2eAccount): Promise<void> {
+  await deleteAccountByEmail(account.email);
 }

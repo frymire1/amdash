@@ -39,4 +39,33 @@ test.describe('ems auth', () => {
 
     await expect(page.locator('.login-card__error')).toHaveText('Invalid email or password.');
   });
+
+  test('an unknown email shows a not-activated error instead of self-registering', async ({ page }) => {
+    const email = 'no-such-account-' + Date.now() + '@amdash-e2e.test';
+    await page.goto('/login');
+    await page.getByLabel('Email').fill(email);
+    await page.getByRole('button', { name: 'Continue' }).click();
+
+    await expect(page.getByText(`Your email, ${email}, has not been activated by your admin.`)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Use a different email' })).toBeVisible();
+  });
+
+  // A physician-only account hitting the EMS app should land on
+  // access-denied with a link to the app its actual role does grant it —
+  // not a dead end.
+  test("access-denied links to the app matching the account's actual role", async ({ page }) => {
+    createdAccount = await signUpAndOnboard(page, 'physician-on-ems', undefined, {
+      role: 'physician',
+      onAccountCreated: (account) => (createdAccount = account),
+    });
+
+    await expect(page).toHaveURL(/\/access-denied$/);
+    await expect(page.getByRole('heading', { name: 'Access denied' })).toBeVisible();
+
+    const physicianLink = page.getByRole('link', { name: 'Physician app' });
+    await expect(physicianLink).toBeVisible();
+    await expect(physicianLink).toHaveAttribute('href', 'https://amdash-physician-dev.web.app');
+    await expect(page.getByRole('link', { name: 'EMS app' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Admin app' })).toHaveCount(0);
+  });
 });

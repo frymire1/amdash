@@ -39,6 +39,13 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: false,
   retries: 0,
+  // These tests do real, sequential network-bound work (Admin SDK account
+  // creation, full onboarding UI flows, real Firestore/Cloud Functions
+  // writes, geocoding) against the live dev site — the 30s default runs
+  // uncomfortably close to actual duration once hospital-management.spec.ts
+  // and user-creation.spec.ts's multi-step admin flows are included. Same
+  // reasoning as ems-e2e's playwright.config.mts.
+  timeout: 60000,
   reporter: [
     [
       'html',
