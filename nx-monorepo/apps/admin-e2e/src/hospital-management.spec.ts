@@ -1,35 +1,35 @@
 import { test, expect } from '@playwright/test';
-import { signIn } from './support/auth';
+import { E2eAccount, deleteAccount, signUpAndOnboard } from './support/auth';
 import { deleteHospitalByName } from './support/admin';
-
-// Needs a real, pre-existing admin account (role: 'admin' set by hand in the
-// Firestore console) since nothing can self-grant that role anymore — same
-// constraint as role-assignment.spec.ts.
-const ADMIN_EMAIL = process.env['E2E_ADMIN_EMAIL'];
-const ADMIN_PASSWORD = process.env['E2E_ADMIN_PASSWORD'];
 
 // The test below also deletes its hospital via the UI's own delete button —
 // but that only runs if every earlier step succeeds. This afterEach is an
 // idempotent safety net (deleteHospitalByName is a no-op if the UI delete
 // already ran) so a mid-test failure can't leave a `hospitals` doc behind.
+let createdAdmin: E2eAccount | undefined;
 let createdHospitalName: string | undefined;
 
 test.afterEach(async () => {
-  if (!createdHospitalName) {
-    return;
+  if (createdHospitalName) {
+    await deleteHospitalByName(createdHospitalName);
+    createdHospitalName = undefined;
   }
-  await deleteHospitalByName(createdHospitalName);
-  createdHospitalName = undefined;
+  if (createdAdmin) {
+    await deleteAccount(createdAdmin);
+    createdAdmin = undefined;
+  }
 });
 
 test.describe('hospital management', () => {
-  test.skip(
-    !ADMIN_EMAIL || !ADMIN_PASSWORD,
-    'Set E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD to an existing admin account to run these tests.',
-  );
-
   test('an admin can add a hospital and delete it again', async ({ page }) => {
-    await signIn(page, { email: ADMIN_EMAIL as string, password: ADMIN_PASSWORD as string });
+    // The admin account driving this test is itself just another throwaway
+    // e2e account — see role-assignment.spec.ts for why granting 'admin' via
+    // the Admin SDK here is fine even though the app's own UI has no
+    // self-granting path.
+    await signUpAndOnboard(page, 'hospital-admin', undefined, {
+      role: 'admin',
+      onAccountCreated: (account) => (createdAdmin = account),
+    });
     await expect(page.getByRole('heading', { name: 'User Management' })).toBeVisible();
 
     // Drive the hamburger menu itself rather than page.goto('/hospitals')
@@ -59,11 +59,10 @@ test.describe('hospital management', () => {
   });
 
   test('adding a hospital with empty fields does not submit', async ({ page }) => {
-    await signIn(page, { email: ADMIN_EMAIL as string, password: ADMIN_PASSWORD as string });
-    // signIn() doesn't wait for the post-sign-in redirect to settle — only
-    // for the click. Navigating straight to /hospitals can race that
-    // redirect and land back on /login. Wait for the app's own landing page
-    // first, same as the test above.
+    await signUpAndOnboard(page, 'hospital-admin-empty', undefined, {
+      role: 'admin',
+      onAccountCreated: (account) => (createdAdmin = account),
+    });
     await expect(page.getByRole('heading', { name: 'User Management' })).toBeVisible();
     await page.goto('/hospitals');
     await expect(page.getByRole('heading', { name: 'Hospital Management' })).toBeVisible();

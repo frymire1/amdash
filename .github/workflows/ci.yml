@@ -148,19 +148,13 @@ jobs:
         run: npx playwright test --project=chromium
         working-directory: nx-monorepo/apps/ems-e2e
 
-      # role-assignment.spec.ts stays skipped (matching its existing local
-      # behavior) unless these two are set — point them at a real,
-      # persistent admin account you create by hand in the amdash-dev
-      # Firestore console, same as running this test locally. Deliberately
-      # not auto-created per run, unlike the rest of e2e's throwaway
-      # accounts: this is the real project, not disposable emulator data, so
-      # a fixed account avoids accumulating admin-role junk accounts in it.
+      # No admin fixture account/secrets needed: admin-e2e grants itself a
+      # throwaway 'admin' role via the Admin SDK the same way it grants
+      # ems/physician/nurse elsewhere, then deletes that account in its own
+      # afterEach — see role-assignment.spec.ts.
       - name: Run admin-e2e
         run: npx playwright test --project=chromium
         working-directory: nx-monorepo/apps/admin-e2e
-        env:
-          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
-          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
 
       - name: Upload Playwright reports
         if: failure()

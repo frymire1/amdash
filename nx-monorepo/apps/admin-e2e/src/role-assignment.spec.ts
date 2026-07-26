@@ -1,11 +1,5 @@
 import { Locator, Page, test, expect } from '@playwright/test';
-import { E2eAccount, deleteAccount, logOut, signIn, signUpAndOnboard } from './support/auth';
-
-// This test needs a real, pre-existing admin account (role: 'admin' set by
-// hand in the Firestore console) since nothing can self-grant that role
-// anymore. Point it at your own admin dev account to exercise this path.
-const ADMIN_EMAIL = process.env['E2E_ADMIN_EMAIL'];
-const ADMIN_PASSWORD = process.env['E2E_ADMIN_PASSWORD'];
+import { E2eAccount, deleteAccount, logOut, signUpAndOnboard } from './support/auth';
 
 // The "Add User" form (user-creation.spec.ts) sits on the same page and also
 // labels a field "Role" — an unscoped getByLabel('Role') is ambiguous
@@ -15,22 +9,21 @@ function assignRoleForm(page: Page): Locator {
   return page.locator('h3:has-text("Assign a Role") + form');
 }
 
+let createdAdmin: E2eAccount | undefined;
 let createdTarget: E2eAccount | undefined;
 
 test.afterEach(async () => {
-  if (!createdTarget) {
-    return;
+  if (createdTarget) {
+    await deleteAccount(createdTarget);
+    createdTarget = undefined;
   }
-  await deleteAccount(createdTarget);
-  createdTarget = undefined;
+  if (createdAdmin) {
+    await deleteAccount(createdAdmin);
+    createdAdmin = undefined;
+  }
 });
 
 test.describe('admin role assignment', () => {
-  test.skip(
-    !ADMIN_EMAIL || !ADMIN_PASSWORD,
-    'Set E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD to an existing admin account to run this test.',
-  );
-
   test('an admin can assign multiple roles to another user by email, then remove one', async ({ page }) => {
     // Create a disposable target account to assign roles to, rather than
     // mutating the admin fixture account's own roles.
@@ -39,7 +32,16 @@ test.describe('admin role assignment', () => {
     });
     await logOut(page);
 
-    await signIn(page, { email: ADMIN_EMAIL as string, password: ADMIN_PASSWORD as string });
+    // The admin account driving this test is itself just another throwaway
+    // e2e account — grantRole (support/admin.ts) writes role via the Admin
+    // SDK, which bypasses Firestore rules the same way it does for
+    // ems/physician/nurse elsewhere in this suite. There's no self-granting
+    // path in the app's own UI, but that's a client-side restriction, not
+    // one that applies to this Admin-SDK-backed test setup.
+    await signUpAndOnboard(page, 'role-admin', undefined, {
+      role: 'admin',
+      onAccountCreated: (account) => (createdAdmin = account),
+    });
     await expect(page.getByRole('heading', { name: 'User Management' })).toBeVisible();
 
     const row = page.locator('.users-table tbody tr', { hasText: target.email });

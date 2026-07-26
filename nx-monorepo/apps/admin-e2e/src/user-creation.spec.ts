@@ -1,26 +1,12 @@
 import { Locator, Page, test, expect } from '@playwright/test';
 import { createPasswordlessAccount, deleteAccountByEmail } from './support/admin';
-import { generateE2eAccount, signIn } from './support/auth';
+import { E2eAccount, deleteAccount, generateE2eAccount, signUpAndOnboard } from './support/auth';
 
-// Needs a real, pre-existing admin account (role: 'admin' set by hand in the
-// Firestore console) since nothing can self-grant that role anymore — same
-// constraint as role-assignment.spec.ts. Distinct from that file: this
-// exercises the "Add User" form itself (the createUser callable), not the
-// "Assign a Role" form (setUserRole) — role-assignment.spec.ts's target
-// account is always created via the Admin SDK directly, so the createUser
-// callable driven through its own UI form had no coverage until now.
-const ADMIN_EMAIL = process.env['E2E_ADMIN_EMAIL'];
-const ADMIN_PASSWORD = process.env['E2E_ADMIN_PASSWORD'];
-
-let createdEmail: string | undefined;
-
-test.afterEach(async () => {
-  if (!createdEmail) {
-    return;
-  }
-  await deleteAccountByEmail(createdEmail);
-  createdEmail = undefined;
-});
+// Distinct from role-assignment.spec.ts: this exercises the "Add User" form
+// itself (the createUser callable), not the "Assign a Role" form
+// (setUserRole) — role-assignment.spec.ts's target account is always created
+// via the Admin SDK directly, so the createUser callable driven through its
+// own UI form had no coverage until now.
 
 // The "Add User" and "Assign a Role" forms sit on the same page and both
 // happen to label a field "Email"/"User email" and "Role" — "Role" is an
@@ -31,17 +17,33 @@ function addUserForm(page: Page): Locator {
   return page.locator('h3:has-text("Add User") + form');
 }
 
-test.describe('admin user creation', () => {
-  test.skip(
-    !ADMIN_EMAIL || !ADMIN_PASSWORD,
-    'Set E2E_ADMIN_EMAIL / E2E_ADMIN_PASSWORD to an existing admin account to run these tests.',
-  );
+let createdAdmin: E2eAccount | undefined;
+let createdEmail: string | undefined;
 
+test.afterEach(async () => {
+  if (createdEmail) {
+    await deleteAccountByEmail(createdEmail);
+    createdEmail = undefined;
+  }
+  if (createdAdmin) {
+    await deleteAccount(createdAdmin);
+    createdAdmin = undefined;
+  }
+});
+
+test.describe('admin user creation', () => {
   test('an admin can create a new user with a role, and they appear in the table', async ({ page }) => {
     const account = generateE2eAccount('created-by-admin');
     createdEmail = account.email;
 
-    await signIn(page, { email: ADMIN_EMAIL as string, password: ADMIN_PASSWORD as string });
+    // The admin account driving this test is itself just another throwaway
+    // e2e account — see role-assignment.spec.ts for why granting 'admin' via
+    // the Admin SDK here is fine even though the app's own UI has no
+    // self-granting path.
+    await signUpAndOnboard(page, 'user-creation-admin', undefined, {
+      role: 'admin',
+      onAccountCreated: (a) => (createdAdmin = a),
+    });
     await expect(page.getByRole('heading', { name: 'User Management' })).toBeVisible();
 
     const form = addUserForm(page);
@@ -65,7 +67,10 @@ test.describe('admin user creation', () => {
     createdEmail = account.email;
     await createPasswordlessAccount(account.email);
 
-    await signIn(page, { email: ADMIN_EMAIL as string, password: ADMIN_PASSWORD as string });
+    await signUpAndOnboard(page, 'user-creation-admin', undefined, {
+      role: 'admin',
+      onAccountCreated: (a) => (createdAdmin = a),
+    });
     await expect(page.getByRole('heading', { name: 'User Management' })).toBeVisible();
 
     const form = addUserForm(page);

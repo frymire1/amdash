@@ -16,9 +16,17 @@ test.use({
 // of the flow they're testing — but that only runs if every prior step
 // succeeds. Capturing the patient id as soon as it exists and clearing it
 // here too (deletePatientData is idempotent) means a mid-test failure still
-// can't leave a `patients` doc behind — live-tracking is explicitly toggled
-// off in both tests below, so there's never an `emsLocations` doc to worry
-// about here, unlike ems-patient-live-update.spec.ts / live-tracking.spec.ts.
+// can't leave a `patients` doc behind.
+//
+// Toggling "Live-track this patient" off does NOT avoid emsLocations writes
+// entirely, despite that being the original intent here — PatientUploadComponent's
+// onSubmit() still fires trackingService.stopTracking(id) on the "off" branch
+// (patient-upload.component.ts), which calls the stopEmsLocation Cloud
+// Function and writes emsLocations/{id} with `active: false`. That call is
+// fire-and-forget, same as the live-tracking "start" path live-tracking.spec.ts
+// already has to wait out — without the same wait here, this file's own
+// afterEach could run deletePatientData before that write lands, leaving an
+// orphaned emsLocations doc behind despite the test itself passing.
 let createdAccount: E2eAccount | undefined;
 let createdPatientId: string | undefined;
 
@@ -50,13 +58,20 @@ test('uploads a mock patient and deletes it', async ({ page }) => {
   await page.getByLabel('Full Name').fill(patientName);
   await page.getByLabel('Healthcare Number').fill(`E2E-${runId}`);
 
-  // Avoid triggering the real Pub/Sub location-tracking pipeline for a
-  // throwaway test record — this only exercises upload/list/delete.
+  // Turned off so this test doesn't rely on the real live-tracking pipeline
+  // for a throwaway record — but see the file-level comment above: this
+  // still fires a fire-and-forget stopEmsLocation call on submit.
   await page.getByRole('switch', { name: 'Live-track this patient' }).click();
 
   await page.getByRole('button', { name: 'Upload Patient' }).click();
 
   await expect(page).toHaveURL(/\/$/);
+
+  // Gives the fire-and-forget stopEmsLocation call (see the file-level
+  // comment above) time to actually land before this test's own cleanup
+  // runs — same reasoning as live-tracking.spec.ts's wait after its publish.
+  await page.waitForTimeout(3000);
+
   const card = page.locator('.patient-summary-card', { hasText: patientName });
   await expect(card).toBeVisible();
 
@@ -163,10 +178,12 @@ test('fills every field on upload, then edits every field and confirms the new v
   await page.getByRole('link', { name: 'Add Patient' }).click();
   await expect(page).toHaveURL(/\/upload$/);
 
-  // Avoid triggering the real Pub/Sub location-tracking pipeline for a
-  // throwaway test record. Not re-toggled on the edit pass below: since
-  // tracking was never actually started, the form reloads with this already
-  // off (see PatientUploadComponent's constructor, which seeds it from
+  // Turned off so this test doesn't rely on the real live-tracking pipeline
+  // for a throwaway record — but see the file-level comment above: this
+  // still fires a fire-and-forget stopEmsLocation call on every submit below.
+  // Not re-toggled on the edit pass below: since tracking was never actually
+  // started, the form reloads with this already off (see
+  // PatientUploadComponent's constructor, which seeds it from
   // EmsTrackingService.isTracking(id)).
   await page.getByRole('switch', { name: 'Live-track this patient' }).click();
 
@@ -237,6 +254,10 @@ test('fills every field on upload, then edits every field and confirms the new v
   await fillPatientForm(page, updated);
   await page.getByRole('button', { name: 'Save Changes' }).click();
   await expect(page).toHaveURL(/\/$/);
+
+  // Gives this submit's own fire-and-forget stopEmsLocation call (see the
+  // file-level comment above) time to land before this test's cleanup runs.
+  await page.waitForTimeout(3000);
 
   const updatedCard = page.locator('.patient-summary-card', { hasText: updated.name });
   await expect(updatedCard).toBeVisible();
