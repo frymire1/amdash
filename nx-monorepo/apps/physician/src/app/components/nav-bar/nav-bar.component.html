@@ -24,8 +24,12 @@
   }
 
   @if (authService.isAuthenticated()) {
-    <button mat-icon-button (click)="logOut()" aria-label="Log out" title="Log out">
-      <mat-icon>logout</mat-icon>
+    <button mat-icon-button (click)="logOut()" [disabled]="loggingOut()" aria-label="Log out" title="Log out">
+      @if (loggingOut()) {
+        <mat-spinner diameter="20"></mat-spinner>
+      } @else {
+        <mat-icon>logout</mat-icon>
+      }
     </button>
   }
 </mat-toolbar>

@@ -6,13 +6,22 @@ import { MatAutocompleteModule } from '@angular/material/autocomplete';
 import { MatButtonModule } from '@angular/material/button';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { HospitalService } from '../hospitals';
 import { UserProfileService } from '../services/user-profile.service';
 
 @Component({
   selector: 'lib-user-settings',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, MatAutocompleteModule, MatButtonModule, MatFormFieldModule, MatInputModule],
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    MatAutocompleteModule,
+    MatButtonModule,
+    MatFormFieldModule,
+    MatInputModule,
+    MatProgressSpinnerModule,
+  ],
   templateUrl: './user-settings.component.html',
   styleUrls: ['./user-settings.component.scss'],
 })

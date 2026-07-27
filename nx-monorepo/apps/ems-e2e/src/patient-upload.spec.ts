@@ -64,7 +64,7 @@ test('uploads a mock patient and deletes it', async ({ page }) => {
   await page.getByRole('switch', { name: 'Live-track this patient' }).click();
 
   await page.getByRole('button', { name: 'Upload Patient' }).click();
-
+  await expect(page.locator('.submit-button__spinner')).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
 
   // Gives the fire-and-forget stopEmsLocation call (see the file-level
@@ -86,6 +86,48 @@ test('uploads a mock patient and deletes it', async ({ page }) => {
   await page.locator('mat-dialog-container').getByRole('button', { name: 'Delete' }).click();
 
   await expect(page.locator('.patient-summary-card', { hasText: patientName })).toHaveCount(0);
+});
+
+// uploadPatient() (patient-upload.service.ts) goes through Firestore's Write
+// WebChannel — a multiplexed, long-polling connection, not a discrete
+// per-call HTTPS request — so this aborts the whole channel rather than one
+// specific call. Narrowly scoped to this one click: at this point in the
+// test, this account's own addDoc is the only thing using it.
+//
+// This isn't a contrived edge case: EMS crews submit patient data from
+// ambulances and other locations with unreliable cellular coverage, so a
+// write failing mid-submission in the field is a realistic failure mode for
+// this app specifically. Aborting the request here faithfully reproduces
+// what a real dropped connection does, rather than just approximating it —
+// neither this app nor any other in the repo configures Firestore's offline
+// persistence (`enableIndexedDbPersistence` / `persistentLocalCache`; no
+// matches anywhere in the codebase), so a blocked write has nothing to queue
+// it locally and sync later — it rejects addDoc()'s promise immediately, the
+// same way this test's aborted route does. Without this test, a medic in a
+// dead zone could tap "Upload Patient," see nothing happen, and not realize
+// the patient record was never saved.
+test('shows an error if the upload fails, without navigating away', async ({ page }) => {
+  await signUpAndOnboard(page, 'ems', undefined, {
+    role: 'ems',
+    onAccountCreated: (account) => (createdAccount = account),
+  });
+
+  await page.getByRole('link', { name: 'Add Patient' }).click();
+  await expect(page).toHaveURL(/\/upload$/);
+
+  const runId = Date.now();
+  await page.getByLabel('Full Name').fill(`E2E Upload Fail ${runId}`);
+  await page.getByLabel('Healthcare Number').fill(`E2E-FAIL-${runId}`);
+  await page.getByRole('switch', { name: 'Live-track this patient' }).click();
+
+  await page.route('**/Write/channel**', (route) => route.abort('failed'));
+
+  await page.getByRole('button', { name: 'Upload Patient' }).click();
+  await expect(page.locator('.submit-button__spinner')).toBeVisible();
+  await expect(page.locator('.form-message--error')).toHaveText('Failed to upload patient. Please try again.');
+  await expect(page).toHaveURL(/\/upload$/);
+
+  await page.unroute('**/Write/channel**');
 });
 
 interface PatientFormValues {
@@ -212,6 +254,7 @@ test('fills every field on upload, then edits every field and confirms the new v
 
   await fillPatientForm(page, initial);
   await page.getByRole('button', { name: 'Upload Patient' }).click();
+  await expect(page.locator('.submit-button__spinner')).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
 
   const initialCard = page.locator('.patient-summary-card', { hasText: initial.name });
@@ -253,6 +296,7 @@ test('fills every field on upload, then edits every field and confirms the new v
 
   await fillPatientForm(page, updated);
   await page.getByRole('button', { name: 'Save Changes' }).click();
+  await expect(page.locator('.submit-button__spinner')).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
 
   // Gives this submit's own fire-and-forget stopEmsLocation call (see the

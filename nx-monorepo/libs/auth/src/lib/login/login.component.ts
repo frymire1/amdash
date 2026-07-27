@@ -5,6 +5,7 @@ import { Router } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AuthService } from '../services/auth.service';
 
 type LoginStep = 'email' | 'not-activated' | 'set-password' | 'sign-in';
@@ -12,7 +13,7 @@ type LoginStep = 'email' | 'not-activated' | 'set-password' | 'sign-in';
 @Component({
   selector: 'lib-login',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, MatButtonModule, MatFormFieldModule, MatInputModule],
+  imports: [CommonModule, ReactiveFormsModule, MatButtonModule, MatFormFieldModule, MatInputModule, MatProgressSpinnerModule],
   templateUrl: './login.component.html',
   styleUrls: ['./login.component.scss'],
 })

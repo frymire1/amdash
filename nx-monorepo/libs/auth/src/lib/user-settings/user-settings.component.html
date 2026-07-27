@@ -32,8 +32,13 @@
         <p class="user-settings-card__error">{{ errorMessage() }}</p>
       }
 
-      <button mat-raised-button color="primary" type="button" [disabled]="submitting()" (click)="onSubmit()">
-        {{ submitting() ? 'Saving…' : 'Continue' }}
+      <button mat-raised-button color="primary" type="button" class="user-settings-card__submit" [disabled]="submitting()" (click)="onSubmit()">
+        @if (submitting()) {
+          <mat-spinner diameter="18" class="user-settings-card__button-spinner"></mat-spinner>
+          Saving…
+        } @else {
+          Continue
+        }
       </button>
     </form>
   </div>

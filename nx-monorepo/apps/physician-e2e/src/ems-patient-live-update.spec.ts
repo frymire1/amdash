@@ -58,6 +58,7 @@ test.describe('EMS patient card live update', () => {
     await expect(pageA.locator('.location-status--shared')).toBeVisible({ timeout: 15000 });
 
     await pageA.getByRole('button', { name: 'Upload Patient' }).click();
+    await expect(pageA.locator('.submit-button__spinner')).toBeVisible();
     await expect(pageA).toHaveURL(`${EMS_ORIGIN}/`);
 
     const cardA = pageA.locator('.patient-summary-card', { hasText: originalName });
@@ -88,6 +89,7 @@ test.describe('EMS patient card live update', () => {
     const updatedName = `E2E Live Update UPDATED ${runId}`;
     await pageA.getByLabel('Full Name').fill(updatedName);
     await pageA.getByRole('button', { name: 'Save Changes' }).click();
+    await expect(pageA.locator('.submit-button__spinner')).toBeVisible();
     await expect(pageA).toHaveURL(`${EMS_ORIGIN}/`);
 
     // The editor's own home list should reflect the change without a reload.

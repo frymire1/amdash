@@ -82,7 +82,12 @@
         }
 
         <button mat-raised-button color="primary" type="submit" [disabled]="submitting() || !allRequirementsMet()">
-          {{ submitting() ? 'Setting password…' : 'Set Password' }}
+          @if (submitting()) {
+            <mat-spinner diameter="18" class="login-card__button-spinner"></mat-spinner>
+            Setting password…
+          } @else {
+            Set Password
+          }
         </button>
 
         <button type="button" class="login-card__toggle-mode" mat-button (click)="useAnotherEmail()">
@@ -119,7 +124,12 @@
         }
 
         <button mat-raised-button color="primary" type="submit" [disabled]="submitting()">
-          {{ submitting() ? 'Signing in…' : 'Sign In' }}
+          @if (submitting()) {
+            <mat-spinner diameter="18" class="login-card__button-spinner"></mat-spinner>
+            Signing in…
+          } @else {
+            Sign In
+          }
         </button>
 
         <button type="button" class="login-card__toggle-mode" mat-button (click)="useAnotherEmail()">

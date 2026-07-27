@@ -115,6 +115,7 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
   // Date mocking below) — an approximation of when EMS's publish fires.
   const publishedAtMs = Date.now();
   await page.getByRole('button', { name: 'Upload Patient' }).click();
+  await expect(page.locator('.submit-button__spinner')).toBeVisible();
   await expect(page).toHaveURL(`${EMS_ORIGIN}/`);
 
   // Capture the Firestore-generated patient ID (same ID emsLocations ends up

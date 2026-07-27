@@ -69,6 +69,14 @@
   button[type='submit'] {
     margin-top: 8px;
     width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  &__button-spinner {
+    display: inline-flex;
   }
 }
 

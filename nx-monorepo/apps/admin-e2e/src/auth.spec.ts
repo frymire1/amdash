@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { E2eAccount, deleteAccount, logOut, signUpAndOnboard } from './support/auth';
+import { E2eAccount, deleteAccount, generateE2eAccount, logOut, signUpAndOnboard } from './support/auth';
+import { createPasswordlessAccount, grantRole } from './support/admin';
 
 let createdAccount: E2eAccount | undefined;
 
@@ -34,7 +35,58 @@ test.describe('admin auth', () => {
     await page.getByLabel('Password', { exact: true }).fill('WrongPassword1!');
     await page.getByRole('button', { name: 'Sign In' }).click();
 
+    // Real signInWithPassword round trip, so the spinner is reliably
+    // observable without needing to force a delay — it's only replaced by
+    // the error message once Firebase actually rejects the credentials.
+    await expect(page.locator('.login-card__button-spinner')).toBeVisible();
     await expect(page.locator('.login-card__error')).toHaveText('Invalid email or password.');
+  });
+
+  // A real user's actual journey: sign up once (Set Password, then save
+  // profile), then log back in later. Covers the Set Password, user-settings
+  // Continue, and Sign In buttons' in-flight spinners together, each
+  // immediately followed by the navigation it leads to on success. Grants
+  // itself a throwaway 'admin' role via the Admin SDK the same way
+  // role-assignment.spec.ts's fixture account does — see that file for why
+  // that's fine even though the app's own UI has no self-granting path.
+  test('shows a spinner on each submit during sign-up and a later sign-in, then navigates every time', async ({
+    page,
+  }) => {
+    const account = generateE2eAccount('onboarding-spinner');
+    createdAccount = account;
+    await createPasswordlessAccount(account.email);
+    await grantRole(account.email, 'admin');
+
+    await page.goto('/login');
+    await page.getByLabel('Email').fill(account.email);
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.getByRole('button', { name: 'Set Password' }).waitFor();
+    await page.getByLabel('Password', { exact: true }).fill(account.password);
+    await page.getByLabel('Confirm Password').fill(account.password);
+
+    await page.getByRole('button', { name: 'Set Password' }).click();
+    await expect(page.locator('.login-card__button-spinner')).toBeVisible();
+    await expect(page).not.toHaveURL(/\/login$/, { timeout: 15000 });
+
+    await page.getByRole('link', { name: 'Account settings' }).click();
+    await expect(page).toHaveURL(/\/user-settings$/);
+    await page.getByLabel('First Name').fill('E2E');
+    await page.getByLabel('Last Name').fill('Onboarding');
+
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.locator('.user-settings-card__button-spinner')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'User Management' })).toBeVisible({ timeout: 15000 });
+
+    await logOut(page);
+
+    await page.getByLabel('Email').fill(account.email);
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.getByRole('button', { name: 'Sign In' }).waitFor();
+    await page.getByLabel('Password', { exact: true }).fill(account.password);
+
+    await page.getByRole('button', { name: 'Sign In' }).click();
+    await expect(page.locator('.login-card__button-spinner')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'User Management' })).toBeVisible({ timeout: 15000 });
   });
 
   // Same shared LoginComponent as physician/ems — verifies the not-activated
