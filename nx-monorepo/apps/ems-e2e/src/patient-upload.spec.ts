@@ -1,6 +1,6 @@
 import { Page, test, expect } from '@playwright/test';
-import { E2eAccount, deleteAccount, signUpAndOnboard } from './support/auth';
-import { deletePatientData } from './support/admin';
+import { E2eAccount, deleteAccount, generateE2eAccount, signUpAndOnboard } from './support/auth';
+import { createAccountWithPassword, deletePatientData } from './support/admin';
 
 // The upload form only sources coordinates from the browser's geolocation
 // API (no manual lat/lng fields), so a mock position + granted permission is
@@ -89,28 +89,41 @@ test('uploads a mock patient and deletes it', async ({ page }) => {
 });
 
 // uploadPatient() (patient-upload.service.ts) goes through Firestore's Write
-// WebChannel — a multiplexed, long-polling connection, not a discrete
-// per-call HTTPS request — so this aborts the whole channel rather than one
-// specific call. Narrowly scoped to this one click: at this point in the
-// test, this account's own addDoc is the only thing using it.
+// WebChannel — a long-lived, multiplexed connection the client keeps open
+// and reuses across writes once established. signUpAndOnboard() drives a
+// real saveProfile() write via user-settings before this test ever runs,
+// which would open that channel well before this test registers its
+// interception — meaning this write could go out over that already-open
+// connection instead of a fresh request the interception would catch, and
+// silently succeed anyway. Using createAccountWithPassword to skip straight
+// to a real Sign In means this is the very first Firestore write of the
+// whole browser session, so there's no such connection yet to reuse.
 //
 // This isn't a contrived edge case: EMS crews submit patient data from
 // ambulances and other locations with unreliable cellular coverage, so a
-// write failing mid-submission in the field is a realistic failure mode for
+// write hanging mid-submission in the field is a realistic failure mode for
 // this app specifically. Aborting the request here faithfully reproduces
-// what a real dropped connection does, rather than just approximating it —
-// neither this app nor any other in the repo configures Firestore's offline
-// persistence (`enableIndexedDbPersistence` / `persistentLocalCache`; no
-// matches anywhere in the codebase), so a blocked write has nothing to queue
-// it locally and sync later — it rejects addDoc()'s promise immediately, the
-// same way this test's aborted route does. Without this test, a medic in a
-// dead zone could tap "Upload Patient," see nothing happen, and not realize
-// the patient record was never saved.
+// what a real dropped connection does — but NOT as an immediate rejection:
+// Firestore's client SDK never rejects a blocked write, it retries
+// indefinitely instead (confirmed by watching an equivalent test hang on its
+// "Uploading…" spinner for 45+ seconds with no error, before with-timeout.ts
+// existed). Without with-timeout.ts's 15s bound, a medic in a dead zone
+// could tap "Upload Patient" and watch it spin forever with no way to know
+// the record was never saved, let alone retry.
 test('shows an error if the upload fails, without navigating away', async ({ page }) => {
-  await signUpAndOnboard(page, 'ems', undefined, {
-    role: 'ems',
-    onAccountCreated: (account) => (createdAccount = account),
-  });
+  test.setTimeout(60000);
+
+  const account = generateE2eAccount('upload-fail');
+  createdAccount = account;
+  await createAccountWithPassword(account.email, account.password, 'ems');
+
+  await page.goto('/login');
+  await page.getByLabel('Email').fill(account.email);
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByRole('button', { name: 'Sign In' }).waitFor();
+  await page.getByLabel('Password', { exact: true }).fill(account.password);
+  await page.getByRole('button', { name: 'Sign In' }).click();
+  await expect(page).toHaveURL(/\/$/, { timeout: 15000 });
 
   await page.getByRole('link', { name: 'Add Patient' }).click();
   await expect(page).toHaveURL(/\/upload$/);
@@ -124,7 +137,10 @@ test('shows an error if the upload fails, without navigating away', async ({ pag
 
   await page.getByRole('button', { name: 'Upload Patient' }).click();
   await expect(page.locator('.submit-button__spinner')).toBeVisible();
-  await expect(page.locator('.form-message--error')).toHaveText('Failed to upload patient. Please try again.');
+  await expect(page.locator('.form-message--error')).toHaveText(
+    'This is taking longer than expected. Check your connection and try again.',
+    { timeout: 20000 },
+  );
   await expect(page).toHaveURL(/\/upload$/);
 
   await page.unroute('**/Write/channel**');

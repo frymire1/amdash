@@ -9,6 +9,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { HospitalService } from '../hospitals';
 import { UserProfileService } from '../services/user-profile.service';
+import { TimeoutError, withTimeout } from '../with-timeout';
 
 @Component({
   selector: 'lib-work-location',
@@ -77,10 +78,19 @@ export class WorkLocationComponent {
     this.errorMessage.set(null);
 
     try {
-      await this.userProfileService.saveWorkLocation(this.hospitalControl.value);
+      // Firestore never rejects a write blocked by a dropped connection —
+      // it retries indefinitely instead — so this bounds how long the user
+      // waits before seeing an error rather than a spinner stuck forever.
+      // The underlying write isn't cancelled, and may still complete in the
+      // background afterward.
+      await withTimeout(this.userProfileService.saveWorkLocation(this.hospitalControl.value));
       this.router.navigateByUrl('/');
     } catch (error) {
-      this.errorMessage.set('Failed to save your work location. Please try again.');
+      this.errorMessage.set(
+        error instanceof TimeoutError
+          ? 'This is taking longer than expected. Check your connection and try again.'
+          : 'Failed to save your work location. Please try again.',
+      );
       console.error('Failed to save work location', error);
     } finally {
       this.submitting.set(false);

@@ -10,7 +10,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
-import { HospitalService } from '@amdash/auth';
+import { HospitalService, TimeoutError, withTimeout } from '@amdash/auth';
 import { Patient } from '@amdash/patients';
 import { PatientUploadService } from '../../services/patient-upload.service';
 import { PatientSessionService } from '../../services/patient-session.service';
@@ -238,11 +238,16 @@ export class PatientUploadComponent {
 
     let id: string;
     try {
+      // Firestore never rejects a write blocked by a dropped connection —
+      // it retries indefinitely instead — so this bounds how long the user
+      // waits before seeing an error rather than a spinner stuck forever.
+      // The underlying write isn't cancelled, and may still complete in the
+      // background afterward.
       if (this.editingId) {
         id = this.editingId;
-        await this.patientUploadService.updatePatient(id, patient);
+        await withTimeout(this.patientUploadService.updatePatient(id, patient));
       } else {
-        id = await this.patientUploadService.uploadPatient(patient);
+        id = await withTimeout(this.patientUploadService.uploadPatient(patient));
         // If live tracking below fails, the user stays on this page to
         // retry rather than being navigated away — treat the patient as
         // already-created from here on so a retry updates it instead of
@@ -251,7 +256,11 @@ export class PatientUploadComponent {
         this.isEditing.set(true);
       }
     } catch (error) {
-      this.errorMessage.set('Failed to upload patient. Please try again.');
+      this.errorMessage.set(
+        error instanceof TimeoutError
+          ? 'This is taking longer than expected. Check your connection and try again.'
+          : 'Failed to upload patient. Please try again.',
+      );
       console.error('Failed to upload patient', error);
       this.submitting.set(false);
       return;

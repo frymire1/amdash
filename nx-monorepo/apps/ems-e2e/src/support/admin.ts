@@ -67,6 +67,26 @@ export async function createPasswordlessAccount(email: string): Promise<string> 
   return user.uid;
 }
 
+// Creates a real, ready-to-sign-in account directly via the Admin SDK — with
+// a password and role already set, unlike createPasswordlessAccount above —
+// so a test only needs the real Sign In flow to reach an app route, skipping
+// every UI-driven write (Set Password, saveProfile) that reaching it would
+// otherwise require. That matters specifically for a test that forces some
+// *other*, later Firestore write to fail via network interception: Firestore's
+// Write WebChannel is a long-lived, multiplexed connection the client keeps
+// open and reuses once established, so a route interception registered right
+// before a second write in the same session can silently miss it — the
+// write goes out over the already-open connection from an earlier,
+// unintercepted write instead of a fresh request the interception would
+// catch. Skipping every real write before the one under test guarantees
+// there's no such connection yet to reuse.
+export async function createAccountWithPassword(email: string, password: string, role: UserRole): Promise<string> {
+  ensureInitialized();
+  const user = await getAuth().createUser({ email, password });
+  await getFirestore().doc(`users/${user.uid}`).set({ email, role: [role] }, { merge: true });
+  return user.uid;
+}
+
 // Adds a role Firestore rules otherwise forbid clients from setting on
 // themselves, so an e2e-created account can pass the app's role guards
 // (physicianAppGuard / emsAppGuard / adminGuard). `role` is an array — a

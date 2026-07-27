@@ -1,13 +1,14 @@
 import { Component, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterOutlet } from '@angular/router';
+import { OfflineBannerComponent } from '@amdash/auth';
 import { NavBarComponent } from './components/nav-bar/nav-bar.component';
 import { getAnalytics } from 'firebase/analytics';
 import { getFirebaseApp } from './firebase';
 
 @Component({
   selector: 'app-root',
-  imports: [CommonModule, RouterOutlet, NavBarComponent],
+  imports: [CommonModule, RouterOutlet, NavBarComponent, OfflineBannerComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })

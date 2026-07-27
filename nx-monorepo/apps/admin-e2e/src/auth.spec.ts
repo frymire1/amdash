@@ -18,6 +18,28 @@ test.describe('admin auth', () => {
     await expect(page).toHaveURL(/\/login$/);
   });
 
+  // OfflineBannerComponent is rendered in app.html outside <router-outlet>,
+  // wired into this app's own app.ts independently of the other two apps —
+  // needs its own check that this app's wiring is actually correct, not just
+  // that the shared component works somewhere. No account needed: it's
+  // visible on every route, authenticated or not. context.setOffline()
+  // fires the browser's real online/offline events, unlike simulating a
+  // stuck Firestore write (see with-timeout.ts's own comment) — this is
+  // exactly what that API is for.
+  test('shows an offline banner when the connection drops, and hides it once it returns', async ({
+    page,
+    context,
+  }) => {
+    await page.goto('/login');
+    await expect(page.locator('.offline-banner')).toHaveCount(0);
+
+    await context.setOffline(true);
+    await expect(page.locator('.offline-banner')).toBeVisible();
+
+    await context.setOffline(false);
+    await expect(page.locator('.offline-banner')).toHaveCount(0);
+  });
+
   // An email with no account at all doesn't error via self-registration —
   // the login page has no such path — it lands on the not-activated step
   // instead (see the test below). Testing "invalid credentials" therefore

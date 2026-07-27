@@ -18,6 +18,28 @@ test.describe('ems auth', () => {
     await expect(page).toHaveURL(/\/login$/);
   });
 
+  // OfflineBannerComponent is rendered in app.html outside <router-outlet>,
+  // wired into this app's own app.ts independently of the other two apps —
+  // needs its own check that this app's wiring is actually correct, not just
+  // that the shared component works somewhere. No account needed: it's
+  // visible on every route, authenticated or not. context.setOffline()
+  // fires the browser's real online/offline events, unlike simulating a
+  // stuck Firestore write (see with-timeout.ts's own comment) — this is
+  // exactly what that API is for.
+  test('shows an offline banner when the connection drops, and hides it once it returns', async ({
+    page,
+    context,
+  }) => {
+    await page.goto('/login');
+    await expect(page.locator('.offline-banner')).toHaveCount(0);
+
+    await context.setOffline(true);
+    await expect(page.locator('.offline-banner')).toBeVisible();
+
+    await context.setOffline(false);
+    await expect(page.locator('.offline-banner')).toHaveCount(0);
+  });
+
   // An email with no account at all shows a "not activated" error, not
   // "invalid credentials" — that specifically needs a *real* account and a
   // wrong password on its sign-in step, so this does a full signUpAndOnboard
@@ -80,6 +102,13 @@ test.describe('ems auth', () => {
   // rather than one specific call. Narrowly scoped to this one click: at
   // this point in the test, this account's own setDoc is the only thing
   // using it.
+  //
+  // Also: Firestore never actually rejects a write blocked this way — it
+  // retries indefinitely instead of erroring — so this doesn't hit an
+  // application-level error at all. It hits with-timeout.ts's timeout after
+  // 15s, which is what actually produces the error message here. Confirmed
+  // by watching an equivalent test (physician-e2e's work-location one) hang
+  // on "Saving…" for 45+ seconds with no error before that timeout existed.
   test('shows an error if saving the profile fails, without navigating away', async ({ page }) => {
     const account = generateE2eAccount('settings-fail');
     createdAccount = account;
@@ -104,7 +133,10 @@ test.describe('ems auth', () => {
     await page.getByRole('button', { name: 'Continue' }).click();
 
     await expect(page.locator('.user-settings-card__button-spinner')).toBeVisible();
-    await expect(page.locator('.user-settings-card__error')).toHaveText('Failed to save your details. Please try again.');
+    await expect(page.locator('.user-settings-card__error')).toHaveText(
+      'This is taking longer than expected. Check your connection and try again.',
+      { timeout: 20000 },
+    );
     await expect(page).toHaveURL(/\/user-settings$/);
 
     await page.unroute('**/Write/channel**');

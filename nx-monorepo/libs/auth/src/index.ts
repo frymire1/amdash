@@ -11,3 +11,5 @@ export * from './lib/app-urls';
 export * from './lib/classes/hospital';
 export * from './lib/classes/user-profile';
 export * from './lib/classes/account-status';
+export * from './lib/with-timeout';
+export * from './lib/offline-banner/offline-banner.component';
