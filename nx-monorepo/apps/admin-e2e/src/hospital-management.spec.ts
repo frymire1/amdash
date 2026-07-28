@@ -67,6 +67,14 @@ test.describe('hospital management', () => {
     await page.goto('/hospitals');
     await expect(page.getByRole('heading', { name: 'Hospital Management' })).toBeVisible();
 
+    // hospitals() (hospital-management.component.ts) starts as an empty
+    // signal and only fills in once the Firestore listener's first snapshot
+    // arrives — reading .count() before that lands races the real data and
+    // reads 0 regardless of how many hospitals actually exist. Waiting for
+    // the first row to render (this dev project always has real, seeded
+    // hospitals) guarantees the snapshot has landed before the count below
+    // is captured.
+    await expect(page.locator('.hospitals-table tbody tr').first()).toBeVisible();
     const rowCountBefore = await page.locator('.hospitals-table tbody tr').count();
 
     await page.getByRole('button', { name: 'Add Hospital' }).click();
