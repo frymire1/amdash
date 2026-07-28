@@ -148,6 +148,7 @@
               [zoom]="mapZoom"
               [height]="isMapExpanded() ? '100vh' : '240px'"
               width="100%"
+              [options]="mapOptions"
             >
               <map-marker [position]="markerPosition()" [options]="markerOptions"></map-marker>
             </google-map>

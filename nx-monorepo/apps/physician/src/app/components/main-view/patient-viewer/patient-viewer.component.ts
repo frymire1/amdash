@@ -24,6 +24,18 @@ export class PatientViewerComponent {
     draggable: false
   };
 
+  // Google Maps renders its own native fullscreen control in the map's
+  // top-right corner by default — the same corner map-container__expand-btn
+  // (our own CSS-overlay toggle, added for iOS Safari, which doesn't
+  // implement the Fullscreen API Google's control relies on) occupies. On
+  // platforms where the Fullscreen API IS available (Windows, Android, macOS
+  // desktop browsers), Google still renders its own control there too,
+  // stacking both buttons on top of each other. Disabling Google's native
+  // one leaves a single, consistent control on every platform.
+  readonly mapOptions: google.maps.MapOptions = {
+    fullscreenControl: false,
+  };
+
   readonly markerPosition = computed<google.maps.LatLngLiteral>(() => {
     const location = this.patient()?.location;
     return location ? { lat: location.latitude, lng: location.longitude } : DEFAULT_MARKER_POSITION;
