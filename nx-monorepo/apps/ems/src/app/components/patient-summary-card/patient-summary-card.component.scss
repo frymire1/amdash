@@ -8,14 +8,35 @@
   flex-direction: column;
   gap: 12px;
 
-  &__tracking-dot {
+  &__tracking-status {
     position: absolute;
     top: 10px;
     right: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  &__tracking-label {
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+
+    &--online {
+      color: #16a34a;
+    }
+
+    &--offline {
+      color: #dc2626;
+    }
+  }
+
+  &__tracking-dot {
     width: 10px;
     height: 10px;
     border-radius: 50%;
     background: #dc2626;
+    flex-shrink: 0;
   }
 
   &__tracking-dot--active {

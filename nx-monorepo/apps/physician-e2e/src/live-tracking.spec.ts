@@ -168,11 +168,16 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
   // The EMS publish is a real Cloud Function + Pub/Sub round trip, so give it
   // real time to land in Firestore and reach the physician app's listener,
   // even though the client's own clock now reads as 15s post-publish.
-  await expect(card.locator('.patient-card__tracking-dot')).toBeVisible({ timeout: 30000 });
+  // The dot itself is always rendered now (online or offline) — the
+  // `--active` modifier plus the "Tracking Online" label are what actually
+  // signal tracking is live.
+  await expect(card.locator('.patient-card__tracking-dot--active')).toBeVisible({ timeout: 30000 });
+  await expect(card.locator('.patient-card__tracking-label--online')).toHaveText('Tracking Online');
 
   // --- Mock further forward past STALE_AFTER_MS (35s, see ems-location.service.ts)
   // without waiting that long in real time, and confirm it goes stale.
   await mockElapsedTimeSincePublish(page, publishedAtMs, 40_000);
 
-  await expect(card.locator('.patient-card__tracking-dot')).toHaveCount(0);
+  await expect(card.locator('.patient-card__tracking-dot--active')).toHaveCount(0);
+  await expect(card.locator('.patient-card__tracking-label--offline')).toHaveText('Tracking Offline');
 });

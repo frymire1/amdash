@@ -1,9 +1,16 @@
 <div class="patient-summary-card">
-  <span
-    class="patient-summary-card__tracking-dot"
-    [class.patient-summary-card__tracking-dot--active]="isTracking()"
-    [title]="isTracking() ? 'Location is being shared' : 'Location is not being shared'"
-  ></span>
+  <div class="patient-summary-card__tracking-status">
+    @if (isTracking()) {
+      <span class="patient-summary-card__tracking-label patient-summary-card__tracking-label--online">Tracking Online</span>
+    } @else {
+      <span class="patient-summary-card__tracking-label patient-summary-card__tracking-label--offline">Tracking Offline</span>
+    }
+    <span
+      class="patient-summary-card__tracking-dot"
+      [class.patient-summary-card__tracking-dot--active]="isTracking()"
+      [title]="isTracking() ? 'Location is being shared' : 'Location is not being shared'"
+    ></span>
+  </div>
   <div class="patient-summary-card__header">
     <div class="patient-summary-card__title">{{ uploaded.patient.name }}</div>
     <div class="patient-summary-card__subtitle">
