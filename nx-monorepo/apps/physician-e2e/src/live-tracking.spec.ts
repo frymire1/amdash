@@ -151,7 +151,7 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
       onAccountCreated: (a) => (physicianAccount = a),
     },
   );
-  await expect(page).toHaveURL(`${PHYSICIAN_ORIGIN}/physician`);
+  await expect(page).toHaveURL(`${PHYSICIAN_ORIGIN}/`);
 
   // main-view.component.html renders <app-patient-list> twice — once inside
   // .patient-list-panel (a mobile drawer, display:none by default) and once
