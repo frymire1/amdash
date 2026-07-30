@@ -161,7 +161,7 @@ test.describe('physician auth', () => {
 
     await page.getByRole('button', { name: 'Continue' }).click();
     await expect(page.locator('.work-location-card__button-spinner')).toBeVisible();
-    await expect(page).toHaveURL(/\/physician$/, { timeout: 15000 });
+    await expect(page).toHaveURL(/\/$/, { timeout: 15000 });
     await expect(page.getByRole('heading', { name: 'Patient List' })).toBeVisible();
     await expect(page.locator('.user-avatar--initials')).toBeVisible();
 
@@ -174,7 +174,7 @@ test.describe('physician auth', () => {
 
     await page.getByRole('button', { name: 'Sign In' }).click();
     await expect(page.locator('.login-card__button-spinner')).toBeVisible();
-    await expect(page).toHaveURL(/\/physician$/, { timeout: 15000 });
+    await expect(page).toHaveURL(/\/$/, { timeout: 15000 });
   });
 
   // An EMS-only account hitting the physician app should land on

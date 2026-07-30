@@ -38,11 +38,6 @@ export const appRoutes: Route[] = [
     children: [
       {
         path: '',
-        redirectTo: 'physician',
-        pathMatch: 'full',
-      },
-      {
-        path: 'physician',
         component: MainViewComponent,
       },
     ],
