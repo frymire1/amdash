@@ -6,6 +6,8 @@ import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { PubSub } from '@google-cloud/pubsub';
 import { AssignableRole } from './classes/assignable-role';
+import { UserRole } from './classes/user-role';
+import { CallerProfile } from './classes/caller-profile';
 import { EmsLocationEvent } from './classes/ems-location-event';
 import { PublishLocationRequest } from './classes/publish-location-request';
 import { StopLocationRequest } from './classes/stop-location-request';
@@ -16,6 +18,7 @@ import { SetUserRoleRequest } from './classes/set-user-role-request';
 import { RemoveUserRoleRequest } from './classes/remove-user-role-request';
 import { CreateHospitalRequest } from './classes/create-hospital-request';
 import { DeleteHospitalRequest } from './classes/delete-hospital-request';
+import { CreateOrganizationRequest } from './classes/create-organization-request';
 import { GeocodeResult } from './classes/geocode-result';
 
 initializeApp();
@@ -27,31 +30,89 @@ const GEOCODING_API_KEY = defineSecret('GEOCODING_API_KEY');
 
 const ASSIGNABLE_ROLES: readonly AssignableRole[] = ['ems', 'physician', 'nurse'];
 
-export const publishEmsLocation = onCall<PublishLocationRequest>({ region: REGION }, async (request) => {
-  const { patientId, latitude, longitude } = request.data;
+// The one place every Cloud Function reads a caller's role/org — a single
+// `users/{uid}` read, reused by every requireAdmin/requireSuperAdmin/manual
+// role check below, rather than each function re-implementing its own
+// lookup (that's what callerIsAdmin used to be, before organizations existed
+// and a second field — organizationId — needed reading alongside role).
+async function getCallerProfile(uid: string | undefined): Promise<CallerProfile> {
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'You must be signed in.');
+  }
+  const snapshot = await getFirestore().collection('users').doc(uid).get();
+  const data = snapshot.data();
+  const role = data?.['role'];
+  return {
+    role: Array.isArray(role) ? (role as UserRole[]) : [],
+    organizationId: data?.['organizationId'],
+  };
+}
 
+function requireAdmin(profile: CallerProfile, message = 'Only admins can do this.'): void {
+  if (!profile.role.includes('admin')) {
+    throw new HttpsError('permission-denied', message);
+  }
+}
+
+function requireSuperAdmin(profile: CallerProfile, message = 'Only the super-admin can do this.'): void {
+  if (!profile.role.includes('super-admin')) {
+    throw new HttpsError('permission-denied', message);
+  }
+}
+
+export const publishEmsLocation = onCall<PublishLocationRequest>({ region: REGION }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+  if (!profile.role.includes('ems')) {
+    throw new HttpsError('permission-denied', 'Only EMS accounts can publish a location update.');
+  }
+
+  const { patientId, latitude, longitude } = request.data;
   if (!patientId || typeof latitude !== 'number' || typeof longitude !== 'number') {
     throw new HttpsError('invalid-argument', 'patientId, latitude, and longitude are required.');
   }
 
-  const event: EmsLocationEvent = { patientId, active: true, latitude, longitude };
+  const organizationId = await patientOrganizationId(patientId, profile);
+
+  const event: EmsLocationEvent = { patientId, organizationId, active: true, latitude, longitude };
   await pubsub.topic(LOCATION_TOPIC).publishMessage({ json: event });
 
   return { published: true };
 });
 
 export const stopEmsLocation = onCall<StopLocationRequest>({ region: REGION }, async (request) => {
-  const { patientId } = request.data;
+  const profile = await getCallerProfile(request.auth?.uid);
+  if (!profile.role.includes('ems')) {
+    throw new HttpsError('permission-denied', 'Only EMS accounts can stop a location update.');
+  }
 
+  const { patientId } = request.data;
   if (!patientId) {
     throw new HttpsError('invalid-argument', 'patientId is required.');
   }
 
-  const event: EmsLocationEvent = { patientId, active: false };
+  const organizationId = await patientOrganizationId(patientId, profile);
+
+  const event: EmsLocationEvent = { patientId, organizationId, active: false };
   await pubsub.topic(LOCATION_TOPIC).publishMessage({ json: event });
 
   return { published: true };
 });
+
+// Shared by publishEmsLocation/stopEmsLocation — reads the patient's own
+// organizationId (never trusting a client-supplied one) and confirms the
+// caller belongs to that same org before letting them publish anything
+// about this patient.
+async function patientOrganizationId(patientId: string, caller: CallerProfile): Promise<string> {
+  const snapshot = await getFirestore().collection('patients').doc(patientId).get();
+  const organizationId = snapshot.data()?.['organizationId'];
+  if (!snapshot.exists || typeof organizationId !== 'string') {
+    throw new HttpsError('not-found', `No patient found with id ${patientId}.`);
+  }
+  if (organizationId !== caller.organizationId) {
+    throw new HttpsError('permission-denied', 'That patient belongs to a different organization.');
+  }
+  return organizationId;
+}
 
 export const onEmsLocationEvent = onMessagePublished(
   // retry: true — without it, Pub/Sub does not retry a failed delivery (a
@@ -68,6 +129,7 @@ export const onEmsLocationEvent = onMessagePublished(
 
     const update: Record<string, unknown> = {
       patientId: data.patientId,
+      organizationId: data.organizationId,
       active: data.active,
       updatedAt: FieldValue.serverTimestamp(),
     };
@@ -81,17 +143,22 @@ export const onEmsLocationEvent = onMessagePublished(
   },
 );
 
-async function callerIsAdmin(uid: string): Promise<boolean> {
-  const snapshot = await getFirestore().collection('users').doc(uid).get();
-  const roles = snapshot.data()?.['role'];
-  return Array.isArray(roles) && roles.includes('admin');
-}
-
 async function findUserByEmail(email: string) {
   try {
     return await getAuth().getUserByEmail(email);
   } catch {
     throw new HttpsError('not-found', `No account found for ${email}.`);
+  }
+}
+
+// setUserRole/removeUserRole/deleteHospital all take an opaque id (an email
+// or a hospitalId) that could name a doc in ANY organization, not just the
+// caller's own — this confirms the target actually belongs to the caller's
+// org before the mutation proceeds, the same way patientOrganizationId does
+// for EMS location updates above.
+function requireSameOrg(caller: CallerProfile, targetOrganizationId: unknown, message: string): void {
+  if (targetOrganizationId !== caller.organizationId) {
+    throw new HttpsError('permission-denied', message);
   }
 }
 
@@ -102,9 +169,8 @@ async function findUserByEmail(email: string) {
 // set-password screen, which calls setInitialPassword below), or via
 // "Forgot password?".
 export const createUser = onCall<CreateUserRequest>({ region: REGION }, async (request) => {
-  if (!request.auth || !(await callerIsAdmin(request.auth.uid))) {
-    throw new HttpsError('permission-denied', 'Only admins can create users.');
-  }
+  const profile = await getCallerProfile(request.auth?.uid);
+  requireAdmin(profile, 'Only admins can create users.');
 
   const { email, firstName, lastName, role } = request.data;
   if (!email || !firstName || !lastName || !ASSIGNABLE_ROLES.includes(role)) {
@@ -124,7 +190,12 @@ export const createUser = onCall<CreateUserRequest>({ region: REGION }, async (r
     throw new HttpsError('internal', 'Failed to create the account.');
   }
 
-  await getFirestore().collection('users').doc(newUser.uid).set({ email, firstName, lastName, role: [role] });
+  // Always the caller's own org — never client-supplied, so an org-admin can
+  // never seed a user into a different organization.
+  await getFirestore()
+    .collection('users')
+    .doc(newUser.uid)
+    .set({ email, firstName, lastName, role: [role], organizationId: profile.organizationId });
 
   return { uid: newUser.uid, email, firstName, lastName, role };
 });
@@ -180,9 +251,8 @@ export const setInitialPassword = onCall<SetInitialPasswordRequest>({ region: RE
 // inverse. Only ever called by an admin; clients can never write `role`
 // themselves (see firestore.rules).
 export const setUserRole = onCall<SetUserRoleRequest>({ region: REGION }, async (request) => {
-  if (!request.auth || !(await callerIsAdmin(request.auth.uid))) {
-    throw new HttpsError('permission-denied', 'Only admins can assign roles.');
-  }
+  const profile = await getCallerProfile(request.auth?.uid);
+  requireAdmin(profile, 'Only admins can assign roles.');
 
   const { email, role } = request.data;
   if (!email || !ASSIGNABLE_ROLES.includes(role)) {
@@ -190,18 +260,18 @@ export const setUserRole = onCall<SetUserRoleRequest>({ region: REGION }, async 
   }
 
   const targetUser = await findUserByEmail(email);
-  await getFirestore()
-    .collection('users')
-    .doc(targetUser.uid)
-    .set({ role: FieldValue.arrayUnion(role) }, { merge: true });
+  const targetDocRef = getFirestore().collection('users').doc(targetUser.uid);
+  const targetDoc = await targetDocRef.get();
+  requireSameOrg(profile, targetDoc.data()?.['organizationId'], `${email} is not a member of your organization.`);
+
+  await targetDocRef.set({ role: FieldValue.arrayUnion(role) }, { merge: true });
 
   return { uid: targetUser.uid, email: targetUser.email, role };
 });
 
 export const removeUserRole = onCall<RemoveUserRoleRequest>({ region: REGION }, async (request) => {
-  if (!request.auth || !(await callerIsAdmin(request.auth.uid))) {
-    throw new HttpsError('permission-denied', 'Only admins can remove roles.');
-  }
+  const profile = await getCallerProfile(request.auth?.uid);
+  requireAdmin(profile, 'Only admins can remove roles.');
 
   const { email, role } = request.data;
   if (!email || !ASSIGNABLE_ROLES.includes(role)) {
@@ -209,34 +279,37 @@ export const removeUserRole = onCall<RemoveUserRoleRequest>({ region: REGION }, 
   }
 
   const targetUser = await findUserByEmail(email);
-  await getFirestore()
-    .collection('users')
-    .doc(targetUser.uid)
-    .update({ role: FieldValue.arrayRemove(role) });
+  const targetDocRef = getFirestore().collection('users').doc(targetUser.uid);
+  const targetDoc = await targetDocRef.get();
+  requireSameOrg(profile, targetDoc.data()?.['organizationId'], `${email} is not a member of your organization.`);
+
+  await targetDocRef.update({ role: FieldValue.arrayRemove(role) });
 
   return { uid: targetUser.uid, email: targetUser.email, role };
 });
 
+// Firebase Auth has no organization concept, so listUsers(1000) (the old
+// implementation) can only ever return the whole project regardless of org —
+// this queries Firestore's own users collection instead, which both scopes
+// the result to the caller's org and drops the old hard 1000-user,
+// no-pagination cap that came from misusing the Auth Admin API for this.
 export const listUsersWithRoles = onCall({ region: REGION }, async (request) => {
-  if (!request.auth || !(await callerIsAdmin(request.auth.uid))) {
-    throw new HttpsError('permission-denied', 'Only admins can list users.');
-  }
+  const profile = await getCallerProfile(request.auth?.uid);
+  requireAdmin(profile, 'Only admins can list users.');
 
-  const [authUsers, profileDocs] = await Promise.all([
-    getAuth().listUsers(1000),
-    getFirestore().collection('users').get(),
-  ]);
+  const profileDocs = await getFirestore()
+    .collection('users')
+    .where('organizationId', '==', profile.organizationId)
+    .get();
 
-  const profilesByUid = new Map(profileDocs.docs.map((docSnapshot) => [docSnapshot.id, docSnapshot.data()]));
-
-  return authUsers.users.map((user) => {
-    const profile = profilesByUid.get(user.uid);
-    const roles = profile?.['role'];
+  return profileDocs.docs.map((docSnapshot) => {
+    const data = docSnapshot.data();
+    const roles = data['role'];
     return {
-      uid: user.uid,
-      email: user.email ?? '',
-      firstName: profile?.['firstName'] ?? '',
-      lastName: profile?.['lastName'] ?? '',
+      uid: docSnapshot.id,
+      email: data['email'] ?? '',
+      firstName: data['firstName'] ?? '',
+      lastName: data['lastName'] ?? '',
       role: Array.isArray(roles) ? roles : [],
     };
   });
@@ -267,9 +340,8 @@ async function geocodeAddress(address: string): Promise<{ latitude: number; long
 export const createHospital = onCall<CreateHospitalRequest>(
   { region: REGION, secrets: [GEOCODING_API_KEY] },
   async (request) => {
-    if (!request.auth || !(await callerIsAdmin(request.auth.uid))) {
-      throw new HttpsError('permission-denied', 'Only admins can create hospitals.');
-    }
+    const profile = await getCallerProfile(request.auth?.uid);
+    requireAdmin(profile, 'Only admins can create hospitals.');
 
     const { name, address } = request.data;
     if (!name || !address) {
@@ -278,23 +350,81 @@ export const createHospital = onCall<CreateHospitalRequest>(
 
     const { latitude, longitude } = await geocodeAddress(address);
 
-    const docRef = await getFirestore().collection('hospitals').add({ name, address, latitude, longitude });
+    const docRef = await getFirestore()
+      .collection('hospitals')
+      .add({ name, address, latitude, longitude, organizationId: profile.organizationId });
 
     return { id: docRef.id, name, address, latitude, longitude };
   },
 );
 
 export const deleteHospital = onCall<DeleteHospitalRequest>({ region: REGION }, async (request) => {
-  if (!request.auth || !(await callerIsAdmin(request.auth.uid))) {
-    throw new HttpsError('permission-denied', 'Only admins can delete hospitals.');
-  }
+  const profile = await getCallerProfile(request.auth?.uid);
+  requireAdmin(profile, 'Only admins can delete hospitals.');
 
   const { hospitalId } = request.data;
   if (!hospitalId) {
     throw new HttpsError('invalid-argument', 'A hospitalId is required.');
   }
 
-  await getFirestore().collection('hospitals').doc(hospitalId).delete();
+  const hospitalRef = getFirestore().collection('hospitals').doc(hospitalId);
+  const hospitalDoc = await hospitalRef.get();
+  requireSameOrg(profile, hospitalDoc.data()?.['organizationId'], 'That hospital belongs to a different organization.');
+
+  await hospitalRef.delete();
 
   return { hospitalId };
+});
+
+// The only Cloud Function that can ever mint an 'admin' — createUser/
+// setUserRole are structurally limited to ASSIGNABLE_ROLES (ems/physician/
+// nurse), so this is the sole path to a new organization's first admin.
+// Creates the Auth user before anything else: it's the one step that can
+// fail on a duplicate email, so failing there first leaves nothing to clean
+// up and is safe to retry immediately with the same input.
+export const createOrganization = onCall<CreateOrganizationRequest>({ region: REGION }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+  requireSuperAdmin(profile, 'Only the super-admin can create organizations.');
+
+  const { organizationName, adminEmail, adminFirstName, adminLastName } = request.data;
+  if (!organizationName || !adminEmail || !adminFirstName || !adminLastName) {
+    throw new HttpsError(
+      'invalid-argument',
+      'An organization name and the first admin\'s email, first name, and last name are required.',
+    );
+  }
+
+  const existing = await getFirestore().collection('organizations').where('name', '==', organizationName).get();
+  if (!existing.empty) {
+    throw new HttpsError('already-exists', `An organization named "${organizationName}" already exists.`);
+  }
+
+  let newAdmin;
+  try {
+    newAdmin = await getAuth().createUser({ email: adminEmail });
+  } catch (error) {
+    if ((error as { code?: string }).code === 'auth/email-already-exists') {
+      throw new HttpsError('already-exists', `An account with ${adminEmail} already exists.`);
+    }
+    throw new HttpsError('internal', 'Failed to create the admin account.');
+  }
+
+  const orgRef = await getFirestore()
+    .collection('organizations')
+    .add({ name: organizationName, createdAt: FieldValue.serverTimestamp(), createdBy: request.auth?.uid });
+
+  await getFirestore().collection('users').doc(newAdmin.uid).set({
+    email: adminEmail,
+    firstName: adminFirstName,
+    lastName: adminLastName,
+    role: ['admin'],
+    organizationId: orgRef.id,
+  });
+
+  return {
+    organizationId: orgRef.id,
+    organizationName,
+    adminUid: newAdmin.uid,
+    adminEmail,
+  };
 });

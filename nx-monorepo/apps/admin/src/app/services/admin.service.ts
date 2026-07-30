@@ -10,6 +10,8 @@ import { RemoveUserRoleRequest } from '../classes/remove-user-role-request';
 import { SetUserRoleResponse } from '../classes/set-user-role-response';
 import { CreateHospitalRequest } from '../classes/create-hospital-request';
 import { DeleteHospitalRequest } from '../classes/delete-hospital-request';
+import { CreateOrganizationRequest } from '../classes/create-organization-request';
+import { CreateOrganizationResponse } from '../classes/create-organization-response';
 
 const FUNCTIONS_REGION = 'northamerica-northeast2';
 
@@ -39,6 +41,10 @@ export class AdminService {
   private readonly deleteHospitalFn = httpsCallable<DeleteHospitalRequest, { hospitalId: string }>(
     this.functions,
     'deleteHospital',
+  );
+  private readonly createOrganizationFn = httpsCallable<CreateOrganizationRequest, CreateOrganizationResponse>(
+    this.functions,
+    'createOrganization',
   );
 
   readonly users = signal<ManagedUser[]>([]);
@@ -90,5 +96,21 @@ export class AdminService {
 
   async deleteHospital(hospitalId: string): Promise<void> {
     await this.deleteHospitalFn({ hospitalId });
+  }
+
+  // Creates the organization and its first admin together, in one call —
+  // see createOrganization in functions/src/index.ts for why this is
+  // deliberately atomic rather than two separate steps. No
+  // refreshOrganizations() needed afterward: OrganizationService
+  // (super-admin-only) already has a live Firestore listener on the same
+  // collection, so the new organization appears on its own.
+  async createOrganization(
+    organizationName: string,
+    adminEmail: string,
+    adminFirstName: string,
+    adminLastName: string,
+  ): Promise<CreateOrganizationResponse> {
+    const result = await this.createOrganizationFn({ organizationName, adminEmail, adminFirstName, adminLastName });
+    return result.data;
   }
 }

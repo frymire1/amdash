@@ -1,4 +1,4 @@
-.hospital-management-container {
+.organization-management-container {
   max-width: 960px;
   margin: 0 auto;
   padding: 24px 16px 48px;
@@ -25,7 +25,7 @@
   }
 }
 
-.hospital-form {
+.organization-form {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
@@ -65,16 +65,16 @@
   color: #dc2626;
 }
 
-.hospitals-section {
+.organizations-section {
   margin-top: 32px;
 }
 
-.hospitals-table-wrapper {
+.organizations-table-wrapper {
   overflow-x: auto;
   margin-top: 12px;
 }
 
-.hospitals-table {
+.organizations-table {
   width: 100%;
   border-collapse: collapse;
   background: #ffffff;
@@ -96,12 +96,6 @@
 
   tr:last-child td {
     border-bottom: none;
-  }
-
-  &__actions {
-    width: 1%;
-    white-space: nowrap;
-    text-align: right;
   }
 }
 

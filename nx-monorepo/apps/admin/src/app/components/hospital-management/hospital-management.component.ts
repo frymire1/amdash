@@ -5,6 +5,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { Hospital, HospitalService } from '@amdash/auth';
 import { AdminService } from '../../services/admin.service';
 
@@ -18,6 +19,7 @@ import { AdminService } from '../../services/admin.service';
     MatFormFieldModule,
     MatIconModule,
     MatInputModule,
+    MatProgressSpinnerModule,
   ],
   templateUrl: './hospital-management.component.html',
   styleUrls: ['./hospital-management.component.scss'],

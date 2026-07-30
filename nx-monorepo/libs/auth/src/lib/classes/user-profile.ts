@@ -1,4 +1,4 @@
-export type UserRole = 'ems' | 'physician' | 'nurse' | 'admin';
+export type UserRole = 'ems' | 'physician' | 'nurse' | 'admin' | 'super-admin';
 
 export interface UserProfile {
   // Optional: a freshly signed-up account has a Firestore reference (just an
@@ -13,4 +13,10 @@ export interface UserProfile {
   // works out of — mandatory for those roles (see workLocationGuard),
   // unused by ems/admin accounts.
   workLocation?: string;
+  // Every role except 'super-admin' belongs to exactly one organization —
+  // deliberately absent (not null) on a super-admin's own doc, since org
+  // membership is meaningless for that role. Only ever set server-side
+  // (createUser/createOrganization in functions/src/index.ts), same as
+  // `role` — clients are blocked from touching this field too.
+  organizationId?: string;
 }

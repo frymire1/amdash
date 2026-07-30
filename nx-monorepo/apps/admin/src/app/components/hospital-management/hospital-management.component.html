@@ -18,8 +18,9 @@
       <input matInput formControlName="address" placeholder="123 Main St, Toronto, ON" />
     </mat-form-field>
 
-    <button mat-raised-button color="primary" type="submit" [disabled]="creating()">
+    <button mat-raised-button color="primary" type="submit" class="submit-button" [disabled]="creating()">
       @if (creating()) {
+        <mat-spinner diameter="18" class="submit-button__spinner"></mat-spinner>
         Adding…
       } @else {
         Add Hospital
@@ -65,7 +66,11 @@
                     [attr.aria-label]="'Delete ' + hospital.name"
                     title="Delete"
                   >
-                    <mat-icon>delete</mat-icon>
+                    @if (deletingId() === hospital.id) {
+                      <mat-spinner diameter="20"></mat-spinner>
+                    } @else {
+                      <mat-icon>delete</mat-icon>
+                    }
                   </button>
                 </td>
               </tr>

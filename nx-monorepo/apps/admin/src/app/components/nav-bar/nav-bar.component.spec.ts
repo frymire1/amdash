@@ -17,7 +17,7 @@ describe('NavBarComponent', () => {
           provide: AuthService,
           useValue: { isAuthenticated: () => false, signOut: async () => undefined },
         },
-        { provide: UserProfileService, useValue: { initials: () => '' } },
+        { provide: UserProfileService, useValue: { initials: () => '', profile: () => null } },
       ],
     }).compileComponents();
 

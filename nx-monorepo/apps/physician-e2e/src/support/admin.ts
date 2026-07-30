@@ -5,9 +5,10 @@ import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 
-export type UserRole = 'ems' | 'physician' | 'nurse' | 'admin';
+export type UserRole = 'ems' | 'physician' | 'nurse' | 'admin' | 'super-admin';
 
 let initialized = false;
+let cachedTestOrganizationId: string | undefined;
 
 // Grants Admin SDK access by reusing whatever account is already logged
 // into the Firebase CLI on this machine (`firebase login`), converting its
@@ -53,6 +54,25 @@ function ensureInitialized() {
   initialized = true;
 }
 
+// A one-time migration created this once, for real, in amdash-dev, when
+// organizations were introduced. Every e2e fixture account lands inside it
+// rather than a fresh empty org per test — physician-e2e/admin-e2e reference
+// the seeded hospital "General Hospital" by name, which only exists in
+// test-org, so a fresh empty org would make those tests fail with zero
+// visible hospitals.
+async function getTestOrganizationId(): Promise<string> {
+  if (cachedTestOrganizationId) {
+    return cachedTestOrganizationId;
+  }
+  ensureInitialized();
+  const snapshot = await getFirestore().collection('organizations').where('name', '==', 'test-org').get();
+  if (snapshot.empty) {
+    throw new Error('No "test-org" organization found in amdash-dev — has it been reset since organizations were introduced?');
+  }
+  cachedTestOrganizationId = snapshot.docs[0].id;
+  return cachedTestOrganizationId;
+}
+
 // Accounts are admin-created only now — the login page has no
 // self-registration path (an email with no account shows an error instead).
 // This mirrors createUser in functions/src/index.ts closely enough for e2e
@@ -62,8 +82,9 @@ function ensureInitialized() {
 // to call the real callable.
 export async function createPasswordlessAccount(email: string): Promise<string> {
   ensureInitialized();
+  const organizationId = await getTestOrganizationId();
   const user = await getAuth().createUser({ email });
-  await getFirestore().doc(`users/${user.uid}`).set({ email }, { merge: true });
+  await getFirestore().doc(`users/${user.uid}`).set({ email, organizationId }, { merge: true });
   return user.uid;
 }
 
@@ -84,8 +105,9 @@ export async function createPasswordlessAccount(email: string): Promise<string> 
 // test guarantees there's no such connection yet to reuse.
 export async function createAccountWithPassword(email: string, password: string, role: UserRole): Promise<string> {
   ensureInitialized();
+  const organizationId = await getTestOrganizationId();
   const user = await getAuth().createUser({ email, password });
-  await getFirestore().doc(`users/${user.uid}`).set({ email, role: [role] }, { merge: true });
+  await getFirestore().doc(`users/${user.uid}`).set({ email, role: [role], organizationId }, { merge: true });
   return user.uid;
 }
 

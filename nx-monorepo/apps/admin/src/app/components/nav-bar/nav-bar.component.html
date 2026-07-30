@@ -3,8 +3,12 @@
     <mat-icon>menu</mat-icon>
   </button>
   <mat-menu #sectionMenu="matMenu">
-    <a mat-menu-item routerLink="/users">Users</a>
-    <a mat-menu-item routerLink="/hospitals">Hospitals</a>
+    @if (userProfileService.profile()?.role?.includes('super-admin')) {
+      <a mat-menu-item routerLink="/organizations">Organizations</a>
+    } @else {
+      <a mat-menu-item routerLink="/users">Users</a>
+      <a mat-menu-item routerLink="/hospitals">Hospitals</a>
+    }
   </mat-menu>
 
   <a class="brand" routerLink="/">AmDash Admin</a>

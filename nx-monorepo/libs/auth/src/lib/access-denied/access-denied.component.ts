@@ -31,7 +31,7 @@ export class AccessDeniedComponent {
     if (roles.includes('ems')) {
       links.push({ label: 'EMS app', url: APP_URLS.ems });
     }
-    if (roles.includes('admin')) {
+    if (roles.includes('admin') || roles.includes('super-admin')) {
       links.push({ label: 'Admin app', url: APP_URLS.admin });
     }
 

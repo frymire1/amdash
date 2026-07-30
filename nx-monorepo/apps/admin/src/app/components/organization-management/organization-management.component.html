@@ -1,0 +1,72 @@
+<div class="organization-management-container">
+  <h2>Organization Management</h2>
+
+  <h3>Create Organization</h3>
+  <form
+    class="organization-form"
+    [formGroup]="organizationForm"
+    #organizationFormDirective="ngForm"
+    (ngSubmit)="onCreateOrganization()"
+  >
+    <mat-form-field appearance="outline">
+      <mat-label>Organization Name</mat-label>
+      <input matInput formControlName="organizationName" placeholder="New York" />
+    </mat-form-field>
+
+    <mat-form-field appearance="outline">
+      <mat-label>Admin Email</mat-label>
+      <input matInput type="email" formControlName="adminEmail" placeholder="admin@example.com" />
+    </mat-form-field>
+
+    <mat-form-field appearance="outline">
+      <mat-label>Admin First Name</mat-label>
+      <input matInput formControlName="adminFirstName" />
+    </mat-form-field>
+
+    <mat-form-field appearance="outline">
+      <mat-label>Admin Last Name</mat-label>
+      <input matInput formControlName="adminLastName" />
+    </mat-form-field>
+
+    <button mat-raised-button color="primary" type="submit" class="submit-button" [disabled]="creating()">
+      @if (creating()) {
+        <mat-spinner diameter="18" class="submit-button__spinner"></mat-spinner>
+        Creating…
+      } @else {
+        Create Organization
+      }
+    </button>
+  </form>
+
+  @if (createSuccess()) {
+    <p class="form-message form-message--success">{{ createSuccess() }}</p>
+  }
+  @if (createError()) {
+    <p class="form-message form-message--error">{{ createError() }}</p>
+  }
+
+  <div class="organizations-section">
+    <h3>Organizations</h3>
+
+    @if (organizations().length > 0) {
+      <div class="organizations-table-wrapper">
+        <table class="organizations-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (organization of organizations(); track organization.id) {
+              <tr>
+                <td>{{ organization.name }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <p class="empty-state">No organizations yet.</p>
+    }
+  </div>
+</div>

@@ -109,7 +109,7 @@ jobs:
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
 
       - name: Deploy to amdash-dev
-        run: firebase deploy --only hosting,functions,firestore:rules --project amdash-dev --non-interactive
+        run: firebase deploy --only hosting,functions,firestore:rules,firestore:indexes --project amdash-dev --non-interactive
 
   e2e:
     runs-on: ubuntu-latest

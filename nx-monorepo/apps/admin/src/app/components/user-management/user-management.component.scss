@@ -39,8 +39,15 @@
     flex: 1 1 240px;
   }
 
-  button[type='submit'] {
+  .submit-button {
     margin-top: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+
+    &__spinner {
+      display: inline-flex;
+    }
   }
 }
 
@@ -130,6 +137,9 @@
     height: 20px;
     line-height: 20px;
     padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 
     mat-icon {
       font-size: 14px;

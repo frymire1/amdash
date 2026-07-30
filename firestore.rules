@@ -2,36 +2,91 @@ rules_version='2'
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Every user's own profile lives here, including their assigned `role`.
-    // Roles are only ever set by the setUserRole Cloud Function, which uses
-    // the Admin SDK and bypasses these rules entirely — so clients are
-    // explicitly blocked from creating or changing the `role` field
-    // themselves. NOTE: Firestore rules are OR'd across every matching
-    // `match` block for a given path, so this collection deliberately has no
-    // other rule matching it (no blanket `{document=**}` catch-all) — that
-    // would otherwise re-permit the writes this block exists to block.
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // A single `get()` on the caller's own profile — Firestore's rules
+    // engine dedupes repeated calls to this within one rule evaluation into
+    // one actual read, so calling this multiple times per request (e.g. via
+    // both isSuperAdmin() and callerOrgId()) doesn't cost extra reads.
+    function callerDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Bypasses org isolation everywhere except where explicitly withheld —
+    // see functions/src/index.ts's getCallerProfile/requireSuperAdmin for
+    // the server-side equivalent. A super-admin's own profile deliberately
+    // has no `organizationId` field at all (see UserProfile's comment).
+    function isSuperAdmin() {
+      return isSignedIn() && ('super-admin' in callerDoc().get('role', []));
+    }
+
+    function callerOrgId() {
+      return callerDoc().get('organizationId', null);
+    }
+
+    function sameOrgAsCaller(orgId) {
+      return isSignedIn() && orgId == callerOrgId();
+    }
+
+    // Every user's own profile lives here, including their assigned `role`
+    // and `organizationId`. Both are only ever set by Cloud Functions (Admin
+    // SDK, bypasses these rules) — clients are explicitly blocked from
+    // creating or changing either field themselves. NOTE: Firestore rules
+    // are OR'd across every matching `match` block for a given path, so this
+    // collection deliberately has no other rule matching it (no blanket
+    // `{document=**}` catch-all) — that would otherwise re-permit the writes
+    // this block exists to block.
     match /users/{userId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth.uid == userId && !('role' in request.resource.data);
+      allow get: if isSuperAdmin()
+        || request.auth.uid == userId
+        || sameOrgAsCaller(resource.data.get('organizationId', null));
+      // Org-scoped listing goes through the listUsersWithRoles Cloud
+      // Function (Admin SDK), not a direct client query — only a super-admin
+      // ever legitimately needs to list this collection directly.
+      allow list: if isSuperAdmin();
+      allow create: if request.auth.uid == userId
+        && !('role' in request.resource.data)
+        && !('organizationId' in request.resource.data);
       allow update: if request.auth.uid == userId
-        && request.resource.data.get('role', null) == resource.data.get('role', null);
+        && request.resource.data.get('role', null) == resource.data.get('role', null)
+        && request.resource.data.get('organizationId', null) == resource.data.get('organizationId', null);
       allow delete: if request.auth.uid == userId;
     }
 
-    match /patients/{patientId} {
-      allow read, write: if request.auth != null;
+    // Organizations are only ever written by the createOrganization Cloud
+    // Function (Admin SDK, bypasses these rules) — no client, including a
+    // regular org admin, ever creates or edits one directly.
+    match /organizations/{orgId} {
+      allow get: if isSuperAdmin() || sameOrgAsCaller(orgId);
+      allow list: if isSuperAdmin();
+      allow write: if false;
     }
 
+    match /patients/{patientId} {
+      allow read: if isSuperAdmin() || sameOrgAsCaller(resource.data.get('organizationId', null));
+      allow create: if isSignedIn() && sameOrgAsCaller(request.resource.data.organizationId);
+      allow update: if sameOrgAsCaller(resource.data.get('organizationId', null))
+        && request.resource.data.organizationId == resource.data.organizationId;
+      allow delete: if sameOrgAsCaller(resource.data.get('organizationId', null));
+    }
+
+    // Only ever written by the onEmsLocationEvent Cloud Function (Admin SDK,
+    // triggered via Pub/Sub from publishEmsLocation/stopEmsLocation) — no
+    // client writes here directly.
     match /emsLocations/{locationId} {
-      allow read, write: if request.auth != null;
+      allow read: if isSuperAdmin() || sameOrgAsCaller(resource.data.get('organizationId', null));
+      allow write: if false;
     }
 
     // Hospitals are only ever written by the createHospital/deleteHospital
-    // Cloud Functions (Admin SDK, bypasses these rules) so an admin-only
-    // write can be enforced server-side (including geocoding the address) —
-    // clients, including the admin app itself, never write here directly.
+    // Cloud Functions (Admin SDK, bypasses these rules) so an admin-only,
+    // org-scoped write can be enforced server-side (including geocoding the
+    // address) — clients, including the admin app itself, never write here
+    // directly.
     match /hospitals/{hospitalId} {
-      allow read: if request.auth != null;
+      allow read: if isSuperAdmin() || sameOrgAsCaller(resource.data.get('organizationId', null));
       allow write: if false;
     }
   }

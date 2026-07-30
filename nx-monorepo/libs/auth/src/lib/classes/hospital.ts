@@ -4,4 +4,5 @@ export interface Hospital {
   address: string;
   latitude: number;
   longitude: number;
+  organizationId: string;
 }

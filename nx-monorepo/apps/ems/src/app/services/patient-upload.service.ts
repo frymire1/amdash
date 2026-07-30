@@ -1,7 +1,8 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { addDoc, collection, deleteDoc, deleteField, doc, getFirestore, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { getFirebaseApp } from '../firebase';
 import { Patient } from '@amdash/patients';
+import { UserProfileService } from '@amdash/auth';
 
 // Optional top-level Patient fields the upload form can leave unset — see
 // updatePatient below for why these specifically need deleteField().
@@ -10,10 +11,16 @@ const OPTIONAL_PATIENT_FIELDS = ['location', 'ivSize', 'ivPlacement', 'treatment
 @Injectable({ providedIn: 'root' })
 export class PatientUploadService {
   private readonly firestore = getFirestore(getFirebaseApp());
+  private readonly userProfileService = inject(UserProfileService);
 
   async uploadPatient(patient: Patient): Promise<string> {
     const docRef = await addDoc(collection(this.firestore, 'patients'), {
       ...patient,
+      // Stamped from the signed-in user's own profile, never client-chosen —
+      // firestore.rules requires this to match the caller's own org on
+      // create. Every EMS account always has an organizationId by the time
+      // it can reach this page (assigned at account-creation time).
+      organizationId: this.userProfileService.profile()?.organizationId,
       submittedAt: serverTimestamp(),
     });
     return docRef.id;
@@ -27,7 +34,8 @@ export class PatientUploadService {
   // (vitals.respiratoryRate/vitals.gcs don't need this: `vitals` itself is
   // always present as a plain nested object, and Firestore replaces a
   // nested map wholesale rather than merging it, so omitting them there
-  // already clears them.)
+  // already clears them.) organizationId is deliberately never included
+  // here — firestore.rules blocks changing it after creation.
   async updatePatient(id: string, patient: Patient): Promise<void> {
     const update: Record<string, unknown> = { ...patient, updatedAt: serverTimestamp() };
     for (const field of OPTIONAL_PATIENT_FIELDS) {

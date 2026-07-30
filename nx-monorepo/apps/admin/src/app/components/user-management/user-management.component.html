@@ -32,8 +32,9 @@
       </mat-select>
     </mat-form-field>
 
-    <button mat-raised-button color="primary" type="submit" [disabled]="creatingUser()">
+    <button mat-raised-button color="primary" type="submit" class="submit-button" [disabled]="creatingUser()">
       @if (creatingUser()) {
+        <mat-spinner diameter="18" class="submit-button__spinner"></mat-spinner>
         Creating…
       } @else {
         Add User
@@ -64,8 +65,9 @@
       </mat-select>
     </mat-form-field>
 
-    <button mat-raised-button color="primary" type="submit" [disabled]="submitting()">
+    <button mat-raised-button color="primary" type="submit" class="submit-button" [disabled]="submitting()">
       @if (submitting()) {
+        <mat-spinner diameter="18" class="submit-button__spinner"></mat-spinner>
         Assigning…
       } @else {
         Assign Role
@@ -125,7 +127,11 @@
                             (click)="removeRole(user, role)"
                             [attr.aria-label]="'Remove ' + role + ' role from ' + user.email"
                           >
-                            <mat-icon>close</mat-icon>
+                            @if (removingRole() === removingRoleKey(user, role)) {
+                              <mat-spinner diameter="14"></mat-spinner>
+                            } @else {
+                              <mat-icon>close</mat-icon>
+                            }
                           </button>
                         </span>
                       }

@@ -6,6 +6,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AdminService } from '../../services/admin.service';
 import { AssignableRole } from '../../classes/assignable-role';
 import { ManagedUser } from '../../classes/managed-user';
@@ -28,6 +29,7 @@ const ROLE_OPTIONS: RoleOption[] = [
     MatIconModule,
     MatInputModule,
     MatSelectModule,
+    MatProgressSpinnerModule,
   ],
   templateUrl: './user-management.component.html',
   styleUrls: ['./user-management.component.scss'],

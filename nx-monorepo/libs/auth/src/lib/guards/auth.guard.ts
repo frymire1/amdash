@@ -48,6 +48,7 @@ function roleGuard(...allowedRoles: UserRole[]): CanActivateFn {
 }
 
 export const adminGuard: CanActivateFn = roleGuard('admin');
+export const superAdminGuard: CanActivateFn = roleGuard('super-admin');
 export const physicianAppGuard: CanActivateFn = roleGuard('physician', 'nurse');
 export const emsAppGuard: CanActivateFn = roleGuard('ems');
 

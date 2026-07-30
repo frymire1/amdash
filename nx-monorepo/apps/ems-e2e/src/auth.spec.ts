@@ -83,7 +83,13 @@ test.describe('ems auth', () => {
     await page.getByRole('button', { name: 'Continue' }).click();
     await page.getByRole('button', { name: 'Set Password' }).waitFor();
 
-    await page.route('**/setInitialPassword**', (route) => route.abort('failed'));
+    // A same-process route.abort() resolves near-instantly, unlike a real
+    // failed round trip — without this delay the spinner can render and
+    // clear again before the assertion below gets a chance to poll for it.
+    await page.route('**/setInitialPassword**', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await route.abort('failed');
+    });
 
     await page.getByLabel('Password', { exact: true }).fill(account.password);
     await page.getByLabel('Confirm Password').fill(account.password);

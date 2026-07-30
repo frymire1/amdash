@@ -1,7 +1,17 @@
 import { Route } from '@angular/router';
-import { AccessDeniedComponent, adminGuard, authGuard, guestGuard, LoginComponent, UserSettingsComponent } from '@amdash/auth';
+import {
+  AccessDeniedComponent,
+  adminGuard,
+  authGuard,
+  guestGuard,
+  LoginComponent,
+  superAdminGuard,
+  UserSettingsComponent,
+} from '@amdash/auth';
 import { UserManagementComponent } from './components/user-management/user-management.component';
 import { HospitalManagementComponent } from './components/hospital-management/hospital-management.component';
+import { OrganizationManagementComponent } from './components/organization-management/organization-management.component';
+import { landingGuard } from './guards/landing.guard';
 
 export const appRoutes: Route[] = [
   {
@@ -21,11 +31,12 @@ export const appRoutes: Route[] = [
   },
   {
     path: '',
-    canActivateChild: [authGuard, adminGuard],
+    canActivateChild: [authGuard],
     children: [
-      { path: '', redirectTo: 'users', pathMatch: 'full' },
-      { path: 'users', component: UserManagementComponent },
-      { path: 'hospitals', component: HospitalManagementComponent },
+      { path: '', pathMatch: 'full', canActivate: [landingGuard], component: UserManagementComponent },
+      { path: 'users', component: UserManagementComponent, canActivate: [adminGuard] },
+      { path: 'hospitals', component: HospitalManagementComponent, canActivate: [adminGuard] },
+      { path: 'organizations', component: OrganizationManagementComponent, canActivate: [superAdminGuard] },
     ],
   },
 ];
