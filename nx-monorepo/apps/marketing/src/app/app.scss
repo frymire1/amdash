@@ -115,44 +115,47 @@ section h2 {
   text-align: center;
 }
 
-.how-it-works {
+.how-it-works,
+.getting-started {
   padding: 64px 0;
+}
 
-  .steps {
-    list-style: none;
-    margin: 40px 0 0;
-    padding: 0;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 32px;
+// Shared by "How it works" and "Getting started" — both are the same
+// numbered-steps layout, just with different content.
+.steps {
+  list-style: none;
+  margin: 40px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 32px;
+}
+
+.step {
+  text-align: center;
+
+  &__number {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: $accent;
+    color: #ffffff;
+    font-weight: 700;
+    margin-bottom: 16px;
   }
 
-  .step {
-    text-align: center;
+  h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
 
-    &__number {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      background: $accent;
-      color: #ffffff;
-      font-weight: 700;
-      margin-bottom: 16px;
-    }
-
-    h3 {
-      font-size: 18px;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-
-    p {
-      color: $text-muted;
-      font-size: 15px;
-    }
+  p {
+    color: $text-muted;
+    font-size: 15px;
   }
 }
 
@@ -219,7 +222,7 @@ section h2 {
     font-size: 32px;
   }
 
-  .how-it-works .steps,
+  .steps,
   .features .feature-grid {
     grid-template-columns: 1fr;
   }
