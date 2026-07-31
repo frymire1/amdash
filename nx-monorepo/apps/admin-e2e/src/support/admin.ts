@@ -88,6 +88,21 @@ export async function createPasswordlessAccount(email: string): Promise<string> 
   return user.uid;
 }
 
+// Creates a real, ready-to-sign-in account directly via the Admin SDK — with
+// a password and role already set, unlike createPasswordlessAccount above —
+// so a test only needs the real Sign In flow to reach an app route, skipping
+// every UI-driven write signUpAndOnboard would otherwise require. Lets a
+// spec file share one account across all of its tests (each still signs in
+// fresh via its own page/context) instead of creating and deleting one per
+// test.
+export async function createAccountWithPassword(email: string, password: string, role: UserRole): Promise<string> {
+  ensureInitialized();
+  const organizationId = await getTestOrganizationId();
+  const user = await getAuth().createUser({ email, password });
+  await getFirestore().doc(`users/${user.uid}`).set({ email, role: [role], organizationId }, { merge: true });
+  return user.uid;
+}
+
 // Adds a role Firestore rules otherwise forbid clients from setting on
 // themselves, so an e2e-created account can pass the app's role guards
 // (physicianAppGuard / emsAppGuard / adminGuard). `role` is an array — a

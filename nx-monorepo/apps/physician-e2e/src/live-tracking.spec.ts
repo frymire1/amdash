@@ -68,9 +68,10 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
   page,
   context,
 }) => {
-  // The reload-survival check below adds a real ~25s on top of this
-  // already-substantial test (see playwright.config.mts's 60s default).
-  test.setTimeout(120000);
+  // The reload-survival check and the completed-transport check at the end
+  // both add real time on top of this already-substantial test (see
+  // playwright.config.mts's 60s default).
+  test.setTimeout(150000);
 
   // Grant geolocation explicitly scoped to the EMS origin. A permission
   // granted via `test.use({ permissions: [...] })` at context-creation time
@@ -255,4 +256,21 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
   await card.click();
   await expect(page.locator('.live-position-indicator')).toHaveCount(0);
   await expect(page.locator('.route-info')).toHaveCount(0);
+
+  // --- Reuse the same EMS session and patient one more time: complete the
+  // transport, and confirm patient.service.ts's where('status','==','active')
+  // removes it from this already-open physician session live, with no
+  // reload — the same Firestore session (auth persists per-origin in this
+  // one browser context) this test already established on the EMS side.
+  await page.goto(EMS_ORIGIN);
+  await expect(page).toHaveURL(`${EMS_ORIGIN}/`);
+  await expect(emsCard).toBeVisible({ timeout: 15000 });
+
+  await emsCard.getByRole('button', { name: 'Complete Transport' }).click();
+  await page.locator('mat-dialog-container').getByRole('button', { name: 'Complete Transport' }).click();
+  await expect(page.locator('.patient-summary-card', { hasText: patientName })).toHaveCount(0);
+
+  await page.goto(PHYSICIAN_ORIGIN);
+  await expect(page).toHaveURL(`${PHYSICIAN_ORIGIN}/`);
+  await expect(card).toHaveCount(0, { timeout: 15000 });
 });

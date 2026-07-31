@@ -1,5 +1,5 @@
 import { Page, test, expect } from '@playwright/test';
-import { E2eAccount, deleteAccount, generateE2eAccount, signUpAndOnboard } from './support/auth';
+import { E2eAccount, deleteAccount, generateE2eAccount, signIn } from './support/auth';
 import { createAccountWithPassword, deletePatientData } from './support/admin';
 
 // The upload form only sources coordinates from the browser's geolocation
@@ -10,13 +10,39 @@ test.use({
   geolocation: { latitude: 43.6532, longitude: -79.3832 },
 });
 
-// Otherwise the account and its Firestore users/ doc are left behind
-// permanently, since nothing in the app itself ever deletes a user. Both
-// tests below also delete the patient via the UI's own delete button as part
-// of the flow they're testing — but that only runs if every prior step
-// succeeds. Capturing the patient id as soon as it exists and clearing it
-// here too (deletePatientData is idempotent) means a mid-test failure still
-// can't leave a `patients` doc behind.
+// Every test below signs in with this same account (via signIn(), below)
+// rather than creating and deleting its own — this file only ever creates
+// one throwaway user. Playwright still gives each test its own isolated
+// page/browser context by default, so this doesn't reintroduce the Write
+// WebChannel-reuse problem "shows an error if the upload fails" specifically
+// depends on (see that test's own comment) — each test's signIn() is still
+// the very first Firestore write/read of its own fresh session, account
+// reuse or not. Serial mode is required, not just tidy: with this suite's
+// fullyParallel: true, tests in one file can otherwise be spread across
+// multiple worker processes, and beforeAll/afterAll run once per worker —
+// forcing serial execution is what actually guarantees exactly one account
+// gets created and deleted, not up to one per test.
+test.describe.configure({ mode: 'serial' });
+
+let sharedAccount: E2eAccount;
+let createdPatientId: string | undefined;
+
+test.beforeAll(async () => {
+  sharedAccount = generateE2eAccount('ems');
+  await createAccountWithPassword(sharedAccount.email, sharedAccount.password, 'ems');
+});
+
+test.afterAll(async () => {
+  await deleteAccount(sharedAccount);
+});
+
+// Otherwise a leftover patient doc from a mid-test failure sticks around
+// permanently, since nothing in the app itself ever deletes one on its own.
+// Each test below also deletes/completes the patient via the UI as part of
+// the flow it's testing — but that only runs if every prior step succeeds.
+// Capturing the id as soon as it exists and clearing it here too
+// (deletePatientData is idempotent) means a mid-test failure still can't
+// leave a `patients` doc behind.
 //
 // Toggling "Live-track this patient" off does NOT avoid emsLocations writes
 // entirely, despite that being the original intent here — PatientUploadComponent's
@@ -27,26 +53,15 @@ test.use({
 // already has to wait out — without the same wait here, this file's own
 // afterEach could run deletePatientData before that write lands, leaving an
 // orphaned emsLocations doc behind despite the test itself passing.
-let createdAccount: E2eAccount | undefined;
-let createdPatientId: string | undefined;
-
 test.afterEach(async () => {
   if (createdPatientId) {
     await deletePatientData(createdPatientId);
     createdPatientId = undefined;
   }
-  if (createdAccount) {
-    await deleteAccount(createdAccount);
-    createdAccount = undefined;
-  }
 });
 
 test('uploads a mock patient and deletes it', async ({ page }) => {
-  await signUpAndOnboard(page, 'ems', undefined, {
-    role: 'ems',
-    onAccountCreated: (account) => (createdAccount = account),
-  });
-
+  await signIn(page, sharedAccount);
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole('heading', { name: 'EMS Dashboard' })).toBeVisible();
 
@@ -88,16 +103,51 @@ test('uploads a mock patient and deletes it', async ({ page }) => {
   await expect(page.locator('.patient-summary-card', { hasText: patientName })).toHaveCount(0);
 });
 
+// Doesn't delete the patients/ doc at all — completeTransport()
+// (patient-upload.service.ts) only sets status: 'completed', which
+// patient-session.service.ts's where('status','==','active') then filters
+// out of this same list. deletePatientData in afterEach cleans up the
+// underlying doc regardless, same as every other test in this file.
+test('completes a transport and it disappears from the list', async ({ page }) => {
+  await signIn(page, sharedAccount);
+  await expect(page).toHaveURL(/\/$/);
+  await page.getByRole('link', { name: 'Add Patient' }).click();
+  await expect(page).toHaveURL(/\/upload$/);
+
+  const runId = Date.now();
+  const patientName = `E2E Complete Patient ${runId}`;
+  await page.getByLabel('Full Name').fill(patientName);
+  await page.getByLabel('Healthcare Number').fill(`E2E-COMPLETE-${runId}`);
+
+  // Same reasoning as the test above: off so this doesn't depend on the
+  // real live-tracking pipeline, at the cost of one fire-and-forget
+  // stopEmsLocation call this test's own wait below also has to absorb.
+  await page.getByRole('switch', { name: 'Live-track this patient' }).click();
+
+  await page.getByRole('button', { name: 'Upload Patient' }).click();
+  await expect(page.locator('.submit-button__spinner')).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+  await page.waitForTimeout(3000);
+
+  const card = page.locator('.patient-summary-card', { hasText: patientName });
+  await expect(card).toBeVisible();
+  const editHref = await card.getByRole('link', { name: 'Edit' }).getAttribute('href');
+  createdPatientId = editHref?.split('/').filter(Boolean).pop();
+  expect(createdPatientId, 'expected the Edit link to contain the new patient id').toBeTruthy();
+
+  await card.getByRole('button', { name: 'Complete Transport' }).click();
+  await page.locator('mat-dialog-container').getByRole('button', { name: 'Complete Transport' }).click();
+
+  await expect(page.locator('.patient-summary-card', { hasText: patientName })).toHaveCount(0);
+});
+
 // uploadPatient() (patient-upload.service.ts) goes through Firestore's Write
 // WebChannel — a long-lived, multiplexed connection the client keeps open
-// and reuses across writes once established. signUpAndOnboard() drives a
-// real saveProfile() write via user-settings before this test ever runs,
-// which would open that channel well before this test registers its
-// interception — meaning this write could go out over that already-open
-// connection instead of a fresh request the interception would catch, and
-// silently succeed anyway. Using createAccountWithPassword to skip straight
-// to a real Sign In means this is the very first Firestore write of the
-// whole browser session, so there's no such connection yet to reuse.
+// and reuses across writes once established. Signing in fresh in each test
+// (rather than reusing an already-open page) means this is the very first
+// Firestore write of this test's own browser session, so there's no such
+// connection yet to reuse — the account itself being shared across tests
+// doesn't matter here, only the page/session is.
 //
 // This isn't a contrived edge case: EMS crews submit patient data from
 // ambulances and other locations with unreliable cellular coverage, so a
@@ -113,16 +163,7 @@ test('uploads a mock patient and deletes it', async ({ page }) => {
 test('shows an error if the upload fails, without navigating away', async ({ page }) => {
   test.setTimeout(60000);
 
-  const account = generateE2eAccount('upload-fail');
-  createdAccount = account;
-  await createAccountWithPassword(account.email, account.password, 'ems');
-
-  await page.goto('/login');
-  await page.getByLabel('Email').fill(account.email);
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByRole('button', { name: 'Sign In' }).waitFor();
-  await page.getByLabel('Password', { exact: true }).fill(account.password);
-  await page.getByRole('button', { name: 'Sign In' }).click();
+  await signIn(page, sharedAccount);
   await expect(page).toHaveURL(/\/$/, { timeout: 15000 });
 
   await page.getByRole('link', { name: 'Add Patient' }).click();
@@ -227,10 +268,7 @@ test('fills every field on upload, then edits every field and confirms the new v
   // gets its own override above and beyond playwright.config.mts's `timeout`.
   test.setTimeout(90000);
 
-  await signUpAndOnboard(page, 'ems', undefined, {
-    role: 'ems',
-    onAccountCreated: (account) => (createdAccount = account),
-  });
+  await signIn(page, sharedAccount);
   await expect(page).toHaveURL(/\/$/);
 
   await page.getByRole('link', { name: 'Add Patient' }).click();

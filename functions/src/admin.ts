@@ -1,7 +1,8 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { defineSecret } from 'firebase-functions/params';
 import { getAuth } from 'firebase-admin/auth';
-import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 import { AssignableRole } from './classes/assignable-role';
 import { CallerProfile } from './classes/caller-profile';
 import { CreateUserRequest } from './classes/create-user-request';
@@ -10,6 +11,7 @@ import { RemoveUserRoleRequest } from './classes/remove-user-role-request';
 import { CreateHospitalRequest } from './classes/create-hospital-request';
 import { DeleteHospitalRequest } from './classes/delete-hospital-request';
 import { CreateOrganizationRequest } from './classes/create-organization-request';
+import { SetOrganizationRetentionRequest } from './classes/set-organization-retention-request';
 import { GeocodeResult } from './classes/geocode-result';
 import { REGION, findUserByEmail, getCallerProfile } from './shared';
 
@@ -269,3 +271,67 @@ export const createOrganization = onCall<CreateOrganizationRequest>({ region: RE
     adminEmail,
   };
 });
+
+// organizations/{orgId} is Admin-SDK-write-only (see firestore.rules), so
+// an org-admin needs this to flip their own org's retention setting —
+// requireAdmin already confirms the caller has an organizationId, so
+// there's no way to target any org but the caller's own.
+export const setOrganizationRetention = onCall<SetOrganizationRetentionRequest>(
+  { region: REGION },
+  async (request) => {
+    const profile = await getCallerProfile(request.auth?.uid);
+    requireAdmin(profile, 'Only admins can change data retention settings.');
+
+    const { retainAllData } = request.data;
+    if (typeof retainAllData !== 'boolean') {
+      throw new HttpsError('invalid-argument', 'retainAllData must be a boolean.');
+    }
+
+    await getFirestore().collection('organizations').doc(profile.organizationId as string).update({ retainAllData });
+
+    return { retainAllData };
+  },
+);
+
+const RETENTION_MS = 48 * 60 * 60 * 1000;
+
+// Deletes a completed patient's record 48h after completeTransport()
+// (apps/ems's patient-upload.service.ts) marked it done, along with its
+// emsLocations doc — unless the patient's org has turned on "retain all
+// data" via setOrganizationRetention above, in which case that org's
+// completed patients are skipped entirely.
+//
+// Cloud Scheduler (which onSchedule provisions under the hood) doesn't
+// support northamerica-northeast2 (Toronto), unlike every other function
+// here — northamerica-northeast1 (Montreal) is the nearest region that
+// does. This is purely where the schedule trigger + function execute; the
+// Firestore reads/deletes below still target the same (default) database
+// regardless, at the cost of one extra region hop for a function that only
+// ever runs once a day in the background.
+export const cleanupCompletedPatients = onSchedule(
+  { schedule: 'every 24 hours', region: 'northamerica-northeast1' },
+  async () => {
+    const cutoff = Timestamp.fromMillis(Date.now() - RETENTION_MS);
+
+    const orgsSnapshot = await getFirestore().collection('organizations').get();
+    const retainAllOrgIds = new Set(
+      orgsSnapshot.docs.filter((orgDoc) => orgDoc.data()['retainAllData'] === true).map((orgDoc) => orgDoc.id),
+    );
+
+    const completedSnapshot = await getFirestore()
+      .collection('patients')
+      .where('status', '==', 'completed')
+      .where('completedAt', '<=', cutoff)
+      .get();
+
+    const writer = getFirestore().bulkWriter();
+    for (const patientDoc of completedSnapshot.docs) {
+      if (retainAllOrgIds.has(patientDoc.data()['organizationId'])) {
+        continue;
+      }
+      writer.delete(patientDoc.ref);
+      writer.delete(getFirestore().doc(`emsLocations/${patientDoc.id}`));
+    }
+    await writer.close();
+  },
+);

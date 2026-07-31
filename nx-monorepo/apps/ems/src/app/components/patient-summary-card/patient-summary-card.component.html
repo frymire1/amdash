@@ -25,12 +25,23 @@
   @if (deleteError()) {
     <p class="patient-summary-card__error">{{ deleteError() }}</p>
   }
+  @if (completeError()) {
+    <p class="patient-summary-card__error">{{ completeError() }}</p>
+  }
 
   <div class="patient-summary-card__actions">
     <a mat-stroked-button color="primary" [routerLink]="['/upload', uploaded.id]">
       <mat-icon>edit</mat-icon>
       Edit
     </a>
+    <button mat-stroked-button color="primary" [disabled]="completing()" (click)="completeTransport()">
+      @if (completing()) {
+        <mat-spinner diameter="18"></mat-spinner>
+      } @else {
+        <mat-icon>check_circle</mat-icon>
+      }
+      {{ completing() ? 'Completing…' : 'Complete Transport' }}
+    </button>
     <button mat-stroked-button color="warn" [disabled]="deleting()" (click)="deletePatient()">
       <mat-icon>delete</mat-icon>
       {{ deleting() ? 'Deleting…' : 'Delete' }}

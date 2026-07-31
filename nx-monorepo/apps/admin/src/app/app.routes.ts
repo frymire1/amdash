@@ -11,6 +11,7 @@ import {
 import { UserManagementComponent } from './components/user-management/user-management.component';
 import { HospitalManagementComponent } from './components/hospital-management/hospital-management.component';
 import { OrganizationManagementComponent } from './components/organization-management/organization-management.component';
+import { OrganizationSettingsComponent } from './components/organization-settings/organization-settings.component';
 import { landingGuard } from './guards/landing.guard';
 
 export const appRoutes: Route[] = [
@@ -36,6 +37,7 @@ export const appRoutes: Route[] = [
       { path: '', pathMatch: 'full', canActivate: [landingGuard], component: UserManagementComponent },
       { path: 'users', component: UserManagementComponent, canActivate: [adminGuard] },
       { path: 'hospitals', component: HospitalManagementComponent, canActivate: [adminGuard] },
+      { path: 'settings', component: OrganizationSettingsComponent, canActivate: [adminGuard] },
       { path: 'organizations', component: OrganizationManagementComponent, canActivate: [superAdminGuard] },
     ],
   },

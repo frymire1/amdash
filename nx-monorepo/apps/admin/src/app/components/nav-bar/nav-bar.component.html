@@ -9,6 +9,7 @@
     @if (userProfileService.profile()?.role?.includes('admin')) {
       <a mat-menu-item routerLink="/users">Users</a>
       <a mat-menu-item routerLink="/hospitals">Hospitals</a>
+      <a mat-menu-item routerLink="/settings">Settings</a>
     }
   </mat-menu>
 

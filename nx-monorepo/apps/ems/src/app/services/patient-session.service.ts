@@ -32,6 +32,7 @@ export class PatientSessionService {
       const patientsQuery = query(
         collection(this.firestore, 'patients'),
         where('organizationId', '==', organizationId),
+        where('status', '==', 'active'),
         orderBy('submittedAt', 'desc'),
       );
       this.unsubscribe = onSnapshot(patientsQuery, (snapshot) => {

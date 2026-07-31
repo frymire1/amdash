@@ -1,0 +1,33 @@
+<div class="organization-settings-container">
+  <h2>Organization Settings</h2>
+
+  @if (organization(); as org) {
+    <div class="setting-row">
+      <div class="setting-row__text">
+        <h3>Retain all patient data indefinitely</h3>
+        <p>
+          By default, completed transports and their location history are deleted 48 hours after
+          completion. Turn this on to keep {{ org.name }}'s records indefinitely instead.
+        </p>
+      </div>
+      <div class="setting-row__control">
+        @if (saving()) {
+          <mat-spinner diameter="24"></mat-spinner>
+        } @else {
+          <mat-slide-toggle
+            aria-label="Retain all patient data indefinitely"
+            [checked]="org.retainAllData ?? false"
+            (change)="onToggleRetainAllData($event.checked)"
+          >
+          </mat-slide-toggle>
+        }
+      </div>
+    </div>
+
+    @if (error()) {
+      <p class="form-message form-message--error">{{ error() }}</p>
+    }
+  } @else {
+    <p class="empty-state">Loading…</p>
+  }
+</div>

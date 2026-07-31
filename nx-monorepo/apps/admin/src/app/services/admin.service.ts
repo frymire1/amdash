@@ -12,6 +12,7 @@ import { CreateHospitalRequest } from '../classes/create-hospital-request';
 import { DeleteHospitalRequest } from '../classes/delete-hospital-request';
 import { CreateOrganizationRequest } from '../classes/create-organization-request';
 import { CreateOrganizationResponse } from '../classes/create-organization-response';
+import { SetOrganizationRetentionRequest } from '../classes/set-organization-retention-request';
 
 const FUNCTIONS_REGION = 'northamerica-northeast2';
 
@@ -45,6 +46,10 @@ export class AdminService {
   private readonly createOrganizationFn = httpsCallable<CreateOrganizationRequest, CreateOrganizationResponse>(
     this.functions,
     'createOrganization',
+  );
+  private readonly setOrganizationRetentionFn = httpsCallable<SetOrganizationRetentionRequest, { retainAllData: boolean }>(
+    this.functions,
+    'setOrganizationRetention',
   );
 
   readonly users = signal<ManagedUser[]>([]);
@@ -111,6 +116,11 @@ export class AdminService {
     adminLastName: string,
   ): Promise<CreateOrganizationResponse> {
     const result = await this.createOrganizationFn({ organizationName, adminEmail, adminFirstName, adminLastName });
+    return result.data;
+  }
+
+  async setOrganizationRetention(retainAllData: boolean): Promise<{ retainAllData: boolean }> {
+    const result = await this.setOrganizationRetentionFn({ retainAllData });
     return result.data;
   }
 }

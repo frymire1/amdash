@@ -22,6 +22,10 @@ export class PatientUploadService {
       // it can reach this page (assigned at account-creation time).
       organizationId: this.userProfileService.profile()?.organizationId,
       submittedAt: serverTimestamp(),
+      // Both apps' active-patient queries filter on this — see
+      // patient-session.service.ts/patient.service.ts. completeTransport()
+      // below is the only other place this ever changes.
+      status: 'active',
     });
     return docRef.id;
   }
@@ -48,5 +52,18 @@ export class PatientUploadService {
 
   async deletePatient(id: string): Promise<void> {
     await deleteDoc(doc(this.firestore, 'patients', id));
+  }
+
+  // Marks a transport done — this is what the "Complete Transport" button
+  // on the summary card does, alongside stopping live tracking (see
+  // patient-summary-card.component.ts). Both active-patient queries filter
+  // this out immediately; the scheduled cleanupCompletedPatients function
+  // (functions/src/admin.ts) deletes the doc entirely 48h later, unless the
+  // org has turned on "retain all data" (admin app's Organization Settings).
+  async completeTransport(id: string): Promise<void> {
+    await updateDoc(doc(this.firestore, 'patients', id), {
+      status: 'completed',
+      completedAt: serverTimestamp(),
+    });
   }
 }
