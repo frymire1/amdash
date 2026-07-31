@@ -95,6 +95,34 @@
       </mat-form-field>
     </section>
 
+    <section class="form-section notes-section">
+      <h3>Treatment</h3>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Treatment / Medication Given</mat-label>
+        <textarea
+          matInput
+          formControlName="treatment"
+          rows="4"
+          placeholder="IV fluids, medications administered, interventions, etc."
+        ></textarea>
+      </mat-form-field>
+    </section>
+
+    <section class="form-section notes-section">
+      <h3>Notes</h3>
+
+      <mat-form-field appearance="outline">
+        <mat-label>Patient Notes</mat-label>
+        <textarea
+          matInput
+          formControlName="notes"
+          rows="4"
+          placeholder="Observations, hazards, etc."
+        ></textarea>
+      </mat-form-field>
+    </section>
+
     <section class="form-section location-section">
       <h3>Location</h3>
 
@@ -123,34 +151,6 @@
       >
         Live-track this patient
       </mat-slide-toggle>
-    </section>
-
-    <section class="form-section notes-section">
-      <h3>Treatment</h3>
-
-      <mat-form-field appearance="outline">
-        <mat-label>Treatment / Medication Given</mat-label>
-        <textarea
-          matInput
-          formControlName="treatment"
-          rows="4"
-          placeholder="IV fluids, medications administered, interventions, etc."
-        ></textarea>
-      </mat-form-field>
-    </section>
-
-    <section class="form-section notes-section">
-      <h3>Notes</h3>
-
-      <mat-form-field appearance="outline">
-        <mat-label>Patient Notes</mat-label>
-        <textarea
-          matInput
-          formControlName="notes"
-          rows="4"
-          placeholder="Observations, hazards, etc."
-        ></textarea>
-      </mat-form-field>
     </section>
 
     @if (errorMessage()) {

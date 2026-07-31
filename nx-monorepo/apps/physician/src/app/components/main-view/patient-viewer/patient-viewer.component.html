@@ -126,6 +126,32 @@
       </mat-card-content>
     </mat-card>
 
+    <mat-card class="notes-card">
+      <mat-card-header>
+        <mat-card-title>Treatment / Medication Given</mat-card-title>
+      </mat-card-header>
+      <mat-card-content>
+        @if (isProvided(currentPatient.treatment)) {
+          <p class="notes-text">{{ currentPatient.treatment }}</p>
+        } @else {
+          <p class="value--missing">Not added by EMS yet</p>
+        }
+      </mat-card-content>
+    </mat-card>
+
+    <mat-card class="notes-card">
+      <mat-card-header>
+        <mat-card-title>Patient Notes</mat-card-title>
+      </mat-card-header>
+      <mat-card-content>
+        @if (isProvided(currentPatient.notes)) {
+          <p class="notes-text">{{ currentPatient.notes }}</p>
+        } @else {
+          <p class="value--missing">Not added by EMS yet</p>
+        }
+      </mat-card-content>
+    </mat-card>
+
     <mat-card class="location-card">
       <mat-card-header>
         <mat-card-title>Current Location</mat-card-title>
@@ -183,32 +209,6 @@
               <p><strong>Distance:</strong> {{ directions.routes[0].legs[0].distance?.text }}</p>
             </div>
           }
-        } @else {
-          <p class="value--missing">Not added by EMS yet</p>
-        }
-      </mat-card-content>
-    </mat-card>
-
-    <mat-card class="notes-card">
-      <mat-card-header>
-        <mat-card-title>Treatment / Medication Given</mat-card-title>
-      </mat-card-header>
-      <mat-card-content>
-        @if (isProvided(currentPatient.treatment)) {
-          <p class="notes-text">{{ currentPatient.treatment }}</p>
-        } @else {
-          <p class="value--missing">Not added by EMS yet</p>
-        }
-      </mat-card-content>
-    </mat-card>
-
-    <mat-card class="notes-card">
-      <mat-card-header>
-        <mat-card-title>Patient Notes</mat-card-title>
-      </mat-card-header>
-      <mat-card-content>
-        @if (isProvided(currentPatient.notes)) {
-          <p class="notes-text">{{ currentPatient.notes }}</p>
         } @else {
           <p class="value--missing">Not added by EMS yet</p>
         }
