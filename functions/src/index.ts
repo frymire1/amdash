@@ -48,9 +48,18 @@ async function getCallerProfile(uid: string | undefined): Promise<CallerProfile>
   };
 }
 
+// Every caller of this is an org-scoped operation (creates/lists/deletes a
+// resource under the caller's own organizationId) — 'admin' alone isn't
+// enough to guarantee that field exists.
 function requireAdmin(profile: CallerProfile, message = 'Only admins can do this.'): void {
   if (!profile.role.includes('admin')) {
     throw new HttpsError('permission-denied', message);
+  }
+  if (!profile.organizationId) {
+    throw new HttpsError(
+      'failed-precondition',
+      "Your account has the admin role but isn't part of an organization, so it can't do this."
+    );
   }
 }
 
