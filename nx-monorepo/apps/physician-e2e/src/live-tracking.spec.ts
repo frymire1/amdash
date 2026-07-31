@@ -174,10 +174,23 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
   await expect(card.locator('.patient-card__tracking-dot--active')).toBeVisible({ timeout: 30000 });
   await expect(card.locator('.patient-card__tracking-label--online')).toHaveText('Tracking Online');
 
+  // Selecting the card into the viewer exercises PatientViewerComponent's
+  // own live-position marker/indicator (ems-location.service.ts's
+  // activeLocation()), a separate consumer of the same freshness signal
+  // driving the card's dot above — confirms both stay in sync.
+  await card.click();
+  await expect(page.locator('.live-position-indicator')).toBeVisible();
+
   // --- Mock further forward past STALE_AFTER_MS (35s, see ems-location.service.ts)
   // without waiting that long in real time, and confirm it goes stale.
   await mockElapsedTimeSincePublish(page, publishedAtMs, 40_000);
 
   await expect(card.locator('.patient-card__tracking-dot--active')).toHaveCount(0);
   await expect(card.locator('.patient-card__tracking-label--offline')).toHaveText('Tracking Offline');
+
+  // The reload above resets MainViewComponent's in-memory `selectedPatient`,
+  // so re-select the card to confirm the viewer's own indicator also honors
+  // the same now-stale freshness signal, not just the list's dot.
+  await card.click();
+  await expect(page.locator('.live-position-indicator')).toHaveCount(0);
 });

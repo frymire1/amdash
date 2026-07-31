@@ -15,9 +15,10 @@ const STALE_AFTER_MS = 35000;
 export class EmsLocationService {
   private readonly firestore = getFirestore(getFirebaseApp());
   private readonly userProfileService = inject(UserProfileService);
-  private latestActiveLocations: ActiveLocation[] = [];
+  private latestActiveLocations = new Map<string, ActiveLocation>();
 
   readonly trackedPatientIds = signal<ReadonlySet<string>>(new Set());
+  readonly activeLocations = signal<ReadonlyMap<string, ActiveLocation>>(new Map());
 
   private unsubscribe: Unsubscribe | undefined;
 
@@ -30,10 +31,11 @@ export class EmsLocationService {
 
       this.unsubscribe?.();
       this.unsubscribe = undefined;
-      this.latestActiveLocations = [];
+      this.latestActiveLocations = new Map();
 
       if (!organizationId) {
         this.trackedPatientIds.set(new Set());
+        this.activeLocations.set(new Map());
         return;
       }
 
@@ -44,10 +46,34 @@ export class EmsLocationService {
       );
 
       this.unsubscribe = onSnapshot(activeLocationsQuery, (snapshot) => {
-        this.latestActiveLocations = snapshot.docs.map((docSnapshot) => {
-          const updatedAt = docSnapshot.data()['updatedAt'] as Timestamp | undefined;
-          return { patientId: docSnapshot.id, updatedAtMs: updatedAt ? updatedAt.toMillis() : 0 };
-        });
+        const previousLocations = this.latestActiveLocations;
+        const nextLocations = new Map<string, ActiveLocation>();
+
+        for (const docSnapshot of snapshot.docs) {
+          const patientId = docSnapshot.id;
+          const data = docSnapshot.data();
+          const updatedAt = data['updatedAt'] as Timestamp | undefined;
+          const latitude = data['latitude'] as number | undefined;
+          const longitude = data['longitude'] as number | undefined;
+
+          // Carries the previous fix forward so the physician app can
+          // interpolate a smooth glide between two known points instead of
+          // the marker jumping every time a new fix lands (see
+          // patient-viewer.component.ts's animation loop).
+          const previous = previousLocations.get(patientId);
+
+          nextLocations.set(patientId, {
+            patientId,
+            updatedAtMs: updatedAt ? updatedAt.toMillis() : 0,
+            latitude,
+            longitude,
+            previousLatitude: previous?.latitude,
+            previousLongitude: previous?.longitude,
+            previousUpdatedAtMs: previous?.updatedAtMs,
+          });
+        }
+
+        this.latestActiveLocations = nextLocations;
         this.recomputeFreshIds();
       });
     });
@@ -59,13 +85,16 @@ export class EmsLocationService {
     return !!patientId && this.trackedPatientIds().has(patientId);
   }
 
+  activeLocation(patientId: string | undefined): ActiveLocation | undefined {
+    return patientId ? this.activeLocations().get(patientId) : undefined;
+  }
+
   private recomputeFreshIds() {
     const now = Date.now();
-    const fresh = new Set(
-      this.latestActiveLocations
-        .filter((entry) => now - entry.updatedAtMs <= STALE_AFTER_MS)
-        .map((entry) => entry.patientId),
+    const fresh = new Map(
+      [...this.latestActiveLocations].filter(([, entry]) => now - entry.updatedAtMs <= STALE_AFTER_MS),
     );
-    this.trackedPatientIds.set(fresh);
+    this.activeLocations.set(fresh);
+    this.trackedPatientIds.set(new Set(fresh.keys()));
   }
 }

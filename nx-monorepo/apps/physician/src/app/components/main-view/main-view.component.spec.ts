@@ -19,7 +19,12 @@ describe('MainViewComponent', () => {
         },
         {
           provide: EmsLocationService,
-          useValue: { trackedPatientIds: signal(new Set()), isTracked: () => false },
+          useValue: {
+            trackedPatientIds: signal(new Set()),
+            activeLocations: signal(new Map()),
+            isTracked: () => false,
+            activeLocation: () => undefined,
+          },
         },
       ],
     })

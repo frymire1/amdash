@@ -54,7 +54,7 @@ function requireAdmin(profile: CallerProfile, message = 'Only admins can do this
   }
 }
 
-function requireSuperAdmin(profile: CallerProfile, message = 'Only the super-admin can do this.'): void {
+function requireSuperAdmin(profile: CallerProfile, message = 'Only the head-admin can do this.'): void {
   if (!profile.role.includes('super-admin')) {
     throw new HttpsError('permission-denied', message);
   }
@@ -376,7 +376,7 @@ export const deleteHospital = onCall<DeleteHospitalRequest>({ region: REGION }, 
   return { hospitalId };
 });
 
-// The only Cloud Function that can ever mint an 'admin' — createUser/
+// The only Cloud Function that can mint an 'admin' — createUser/
 // setUserRole are structurally limited to ASSIGNABLE_ROLES (ems/physician/
 // nurse), so this is the sole path to a new organization's first admin.
 // Creates the Auth user before anything else: it's the one step that can

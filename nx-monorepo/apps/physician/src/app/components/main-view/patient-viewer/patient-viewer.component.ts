@@ -1,10 +1,12 @@
-import { Component, computed, input, signal } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, input, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatIconModule } from '@angular/material/icon';
 import { GoogleMapsModule } from '@angular/google-maps';
 import { Patient } from '@amdash/patients';
+import { ActiveLocation } from '../../../classes/active-location';
+import { EmsLocationService } from '../../../services/ems-location.service';
 
 const DEFAULT_MARKER_POSITION: google.maps.LatLngLiteral = { lat: 40.7128, lng: -74.006 };
 
@@ -16,6 +18,9 @@ const DEFAULT_MARKER_POSITION: google.maps.LatLngLiteral = { lat: 40.7128, lng: 
   styleUrls: ['./patient-viewer.component.scss']
 })
 export class PatientViewerComponent {
+  private readonly emsLocationService = inject(EmsLocationService);
+  private readonly destroyRef = inject(DestroyRef);
+
   readonly patient = input<Patient>();
 
   readonly mapZoom = 15;
@@ -23,6 +28,54 @@ export class PatientViewerComponent {
   readonly markerOptions: google.maps.MarkerOptions = {
     draggable: false
   };
+
+  // The vehicle marker, styled distinctly from the default pickup pin, in
+  // the same blue already used for accents elsewhere on this card (see
+  // patient-viewer.component.scss's .vital-item border/value color). A
+  // getter rather than a field initializer: the latter runs unconditionally
+  // at construction time, but `google.maps.SymbolPath` is a real runtime
+  // value from the Maps JS API script loaded in index.html — unavailable in
+  // the unit-test (jsdom) environment, which never loads it. A getter only
+  // evaluates when the template actually reads it, i.e. only once a vehicle
+  // position exists to render.
+  get vehicleMarkerOptions(): google.maps.MarkerOptions {
+    return {
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 8,
+        fillColor: '#0284c7',
+        fillOpacity: 1,
+        strokeColor: '#ffffff',
+        strokeWeight: 2,
+      },
+    };
+  }
+
+  // EMS only publishes a fresh fix every 15s (see ems-tracking.service.ts),
+  // which would otherwise make the marker visibly jump on every update.
+  // This holds the animation's current on-screen position, eased between
+  // the last two known fixes by the requestAnimationFrame loop below,
+  // rather than snapping straight to each new fix.
+  readonly activeLocation = computed(() => this.emsLocationService.activeLocation(this.patient()?.id));
+  readonly animatedVehiclePosition = signal<google.maps.LatLngLiteral | undefined>(undefined);
+
+  private animationFrameId: number | undefined;
+
+  constructor() {
+    effect(() => {
+      const location = this.activeLocation();
+      this.stopAnimation();
+
+      if (!location || typeof location.latitude !== 'number' || typeof location.longitude !== 'number') {
+        this.animatedVehiclePosition.set(undefined);
+        return;
+      }
+
+      this.animateTo(location);
+    });
+
+    this.destroyRef.onDestroy(() => this.stopAnimation());
+  }
 
   // Google Maps renders its own native fullscreen control in the map's
   // top-right corner by default — the same corner map-container__expand-btn
@@ -63,5 +116,49 @@ export class PatientViewerComponent {
   // this reads "not added" rather than a confusing literal "Unknown".
   protected isProvided(value: string | number | undefined): boolean {
     return typeof value === 'number' || (typeof value === 'string' && value !== '' && value !== 'Unknown');
+  }
+
+  // Eases the marker from the previous fix to the current one over the
+  // real gap between their timestamps, rather than jumping. Without a
+  // usable previous fix (the very first update for this patient, or a gap
+  // long enough that the two points can't be meaningfully interpolated),
+  // it just shows the current fix immediately.
+  private animateTo(location: ActiveLocation) {
+    const { latitude, longitude, previousLatitude, previousLongitude, previousUpdatedAtMs, updatedAtMs } = location;
+
+    const hasPreviousFix =
+      typeof previousLatitude === 'number' &&
+      typeof previousLongitude === 'number' &&
+      typeof previousUpdatedAtMs === 'number' &&
+      previousUpdatedAtMs < updatedAtMs;
+
+    if (!hasPreviousFix) {
+      this.animatedVehiclePosition.set({ lat: latitude as number, lng: longitude as number });
+      return;
+    }
+
+    const durationMs = updatedAtMs - previousUpdatedAtMs;
+
+    const step = () => {
+      const t = Math.min(Math.max((Date.now() - previousUpdatedAtMs) / durationMs, 0), 1);
+
+      this.animatedVehiclePosition.set({
+        lat: previousLatitude + ((latitude as number) - previousLatitude) * t,
+        lng: previousLongitude + ((longitude as number) - previousLongitude) * t,
+      });
+
+      if (t < 1) {
+        this.animationFrameId = requestAnimationFrame(step);
+      }
+    };
+
+    step();
+  }
+
+  private stopAnimation() {
+    if (this.animationFrameId !== undefined) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = undefined;
+    }
   }
 }

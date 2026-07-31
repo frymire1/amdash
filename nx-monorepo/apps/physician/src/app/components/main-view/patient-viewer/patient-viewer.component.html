@@ -151,6 +151,9 @@
               [options]="mapOptions"
             >
               <map-marker [position]="markerPosition()" [options]="markerOptions"></map-marker>
+              @if (animatedVehiclePosition(); as vehiclePosition) {
+                <map-marker [position]="vehiclePosition" [options]="vehicleMarkerOptions"></map-marker>
+              }
             </google-map>
           </div>
           <div class="location-info">
@@ -160,6 +163,13 @@
               {{ currentPatient.location.latitude | number: '1.4-4' }},
               {{ currentPatient.location.longitude | number: '1.4-4' }}
             </p>
+            @if (animatedVehiclePosition(); as vehiclePosition) {
+              <p class="live-position-indicator">
+                <strong>Live position:</strong>
+                {{ vehiclePosition.lat | number: '1.4-4' }},
+                {{ vehiclePosition.lng | number: '1.4-4' }}
+              </p>
+            }
           </div>
         } @else {
           <p class="value--missing">Not added by EMS yet</p>
