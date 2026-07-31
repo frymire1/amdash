@@ -3,12 +3,37 @@ import { CommonModule } from '@angular/common';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatIconModule } from '@angular/material/icon';
-import { GoogleMapsModule } from '@angular/google-maps';
+import { GoogleMapsModule, MapDirectionsService } from '@angular/google-maps';
 import { Patient } from '@amdash/patients';
+import { Hospital, HospitalService } from '@amdash/auth';
 import { ActiveLocation } from '../../../classes/active-location';
 import { EmsLocationService } from '../../../services/ems-location.service';
 
 const DEFAULT_MARKER_POSITION: google.maps.LatLngLiteral = { lat: 40.7128, lng: -74.006 };
+
+const EARTH_RADIUS_M = 6371000;
+
+// Matches EMS's own publish cadence (see ems-tracking.service.ts) — a new
+// fix can't have actually changed the route sooner than that, so requesting
+// Directions any faster would just re-query the same origin. The distance
+// check is a secondary trigger for the (rare) case a fix arrives sooner than
+// this floor with a meaningfully different position.
+const DIRECTIONS_REFRESH_MS = 15000;
+const DIRECTIONS_REFRESH_DISTANCE_M = 75;
+
+function toRadians(degrees: number): number {
+  return (degrees * Math.PI) / 180;
+}
+
+function distanceMeters(from: google.maps.LatLngLiteral, to: google.maps.LatLngLiteral): number {
+  const dLat = toRadians(to.lat - from.lat);
+  const dLng = toRadians(to.lng - from.lng);
+  const lat1 = toRadians(from.lat);
+  const lat2 = toRadians(to.lat);
+
+  const a = Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+  return EARTH_RADIUS_M * 2 * Math.asin(Math.sqrt(a));
+}
 
 @Component({
   selector: 'app-patient-viewer',
@@ -19,6 +44,8 @@ const DEFAULT_MARKER_POSITION: google.maps.LatLngLiteral = { lat: 40.7128, lng: 
 })
 export class PatientViewerComponent {
   private readonly emsLocationService = inject(EmsLocationService);
+  private readonly hospitalService = inject(HospitalService);
+  private readonly mapDirectionsService = inject(MapDirectionsService);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly patient = input<Patient>();
@@ -51,6 +78,25 @@ export class PatientViewerComponent {
     };
   }
 
+  // The destination hospital marker — see vehicleMarkerOptions above for
+  // why this is a getter rather than a field initializer.
+  get hospitalMarkerOptions(): google.maps.MarkerOptions {
+    return {
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 8,
+        fillColor: '#16a34a',
+        fillOpacity: 1,
+        strokeColor: '#ffffff',
+        strokeWeight: 2,
+      },
+    };
+  }
+
+  readonly directionsRendererOptions: google.maps.DirectionsRendererOptions = {
+    suppressMarkers: true,
+  };
+
   // EMS only publishes a fresh fix every 15s (see ems-tracking.service.ts),
   // which would otherwise make the marker visibly jump on every update.
   // This holds the animation's current on-screen position, eased between
@@ -59,7 +105,20 @@ export class PatientViewerComponent {
   readonly activeLocation = computed(() => this.emsLocationService.activeLocation(this.patient()?.id));
   readonly animatedVehiclePosition = signal<google.maps.LatLngLiteral | undefined>(undefined);
 
+  readonly destinationHospital = computed<Hospital | undefined>(() =>
+    this.hospitalService.findHospital(this.patient()?.destination),
+  );
+
+  readonly destinationPosition = computed<google.maps.LatLngLiteral | undefined>(() => {
+    const hospital = this.destinationHospital();
+    return hospital ? { lat: hospital.latitude, lng: hospital.longitude } : undefined;
+  });
+
+  readonly directionsResult = signal<google.maps.DirectionsResult | undefined>(undefined);
+
   private animationFrameId: number | undefined;
+  private lastDirectionsRequestAtMs: number | undefined;
+  private lastRequestedOrigin: google.maps.LatLngLiteral | undefined;
 
   constructor() {
     effect(() => {
@@ -72,6 +131,20 @@ export class PatientViewerComponent {
       }
 
       this.animateTo(location);
+    });
+
+    effect(() => {
+      const location = this.activeLocation();
+      const destination = this.destinationPosition();
+
+      if (!location || typeof location.latitude !== 'number' || typeof location.longitude !== 'number' || !destination) {
+        this.directionsResult.set(undefined);
+        this.lastDirectionsRequestAtMs = undefined;
+        this.lastRequestedOrigin = undefined;
+        return;
+      }
+
+      this.maybeRequestDirections({ lat: location.latitude, lng: location.longitude }, destination);
     });
 
     this.destroyRef.onDestroy(() => this.stopAnimation());
@@ -160,5 +233,36 @@ export class PatientViewerComponent {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = undefined;
     }
+  }
+
+  // Directions is a billed API call — only re-request when the origin has
+  // actually had time to change (DIRECTIONS_REFRESH_MS, matched to EMS's own
+  // publish cadence) or has moved meaningfully (DIRECTIONS_REFRESH_DISTANCE_M),
+  // rather than on every activeLocation() change.
+  private maybeRequestDirections(origin: google.maps.LatLngLiteral, destination: google.maps.LatLngLiteral) {
+    const now = Date.now();
+    const dueByTime =
+      this.lastDirectionsRequestAtMs === undefined || now - this.lastDirectionsRequestAtMs >= DIRECTIONS_REFRESH_MS;
+    const dueByDistance =
+      !this.lastRequestedOrigin || distanceMeters(this.lastRequestedOrigin, origin) >= DIRECTIONS_REFRESH_DISTANCE_M;
+
+    if (!dueByTime && !dueByDistance) {
+      return;
+    }
+
+    this.lastDirectionsRequestAtMs = now;
+    this.lastRequestedOrigin = origin;
+
+    this.mapDirectionsService
+      .route({ origin, destination, travelMode: google.maps.TravelMode.DRIVING })
+      .subscribe({
+        next: (response) => {
+          this.directionsResult.set(response.status === google.maps.DirectionsStatus.OK ? response.result : undefined);
+        },
+        error: (error) => {
+          this.directionsResult.set(undefined);
+          console.error('Failed to fetch directions', error);
+        },
+      });
   }
 }

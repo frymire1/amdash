@@ -163,6 +163,20 @@
           }
         }
       }
+
+      .route-info {
+        margin-top: 8px;
+
+        p {
+          margin: 8px 0;
+          font-size: 14px;
+          color: #334155;
+
+          strong {
+            color: #1e293b;
+          }
+        }
+      }
     }
 
     .notes-card {

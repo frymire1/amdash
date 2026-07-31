@@ -99,6 +99,15 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
   await page.getByLabel('Full Name').fill(patientName);
   await page.getByLabel('Healthcare Number').fill(`E2E-TRACK-${runId}`);
 
+  // A destination hospital is required for PatientViewerComponent to
+  // resolve a route/ETA below — "General Hospital" is the seeded test-org
+  // hospital referenced elsewhere in this suite. force: true — an empty,
+  // never-focused mat-select rests its floating label directly over the
+  // trigger's click point (see selectMatOption in ems-e2e's
+  // patient-upload.spec.ts for the same, already-established fix).
+  await page.getByLabel('Destination Hospital').click({ force: true });
+  await page.getByRole('option', { name: 'General Hospital', exact: true }).click();
+
   // Explicitly ensure "Live-track this patient" is on — this is what
   // publishes a real location update through publishEmsLocation -> Pub/Sub ->
   // onEmsLocationEvent -> Firestore emsLocations/{patientId}. Checked/clicked
@@ -181,6 +190,12 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
   await card.click();
   await expect(page.locator('.live-position-indicator')).toBeVisible();
 
+  // Real Directions API call against the live deployed site (no mocking),
+  // matching this spec's existing "hit the real backend" style — confirms
+  // the route/ETA renders once both a live position and a destination
+  // hospital (selected above) are available.
+  await expect(page.locator('.route-info')).toBeVisible({ timeout: 15000 });
+
   // --- Mock further forward past STALE_AFTER_MS (35s, see ems-location.service.ts)
   // without waiting that long in real time, and confirm it goes stale.
   await mockElapsedTimeSincePublish(page, publishedAtMs, 40_000);
@@ -193,4 +208,5 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
   // the same now-stale freshness signal, not just the list's dot.
   await card.click();
   await expect(page.locator('.live-position-indicator')).toHaveCount(0);
+  await expect(page.locator('.route-info')).toHaveCount(0);
 });
