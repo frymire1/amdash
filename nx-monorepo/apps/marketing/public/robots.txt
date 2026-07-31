@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://amdash-marketing-dev.web.app/sitemap.xml

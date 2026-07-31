@@ -1,0 +1,234 @@
+:host {
+  display: block;
+}
+
+// Matches the accent blue already used across the product (see e.g.
+// apps/physician's patient-viewer.component.scss) for brand consistency.
+$accent: #0284c7;
+$accent-dark: #075985;
+$text-muted: #64748b;
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid #e2e8f0;
+
+  &__inner {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
+.brand {
+  font-size: 20px;
+  font-weight: 700;
+  color: $accent-dark;
+}
+
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+
+  a {
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    color: #334155;
+
+    &:hover {
+      color: $accent;
+    }
+  }
+
+  &__cta {
+    padding: 8px 16px;
+    border-radius: 6px;
+    background: $accent;
+    color: #ffffff !important;
+
+    &:hover {
+      background: $accent-dark;
+      color: #ffffff !important;
+    }
+  }
+}
+
+main {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.hero {
+  padding: 96px 0 64px;
+  text-align: center;
+  max-width: 720px;
+  margin: 0 auto;
+
+  h1 {
+    font-size: 44px;
+    font-weight: 800;
+    color: #0f172a;
+  }
+
+  &__subhead {
+    margin-top: 20px;
+    font-size: 18px;
+    color: $text-muted;
+  }
+
+  .button {
+    margin-top: 32px;
+  }
+}
+
+.button {
+  display: inline-block;
+  padding: 12px 28px;
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 15px;
+
+  &--primary {
+    background: $accent;
+    color: #ffffff;
+
+    &:hover {
+      background: $accent-dark;
+    }
+  }
+}
+
+section h2 {
+  font-size: 30px;
+  font-weight: 700;
+  color: #0f172a;
+  text-align: center;
+}
+
+.how-it-works {
+  padding: 64px 0;
+
+  .steps {
+    list-style: none;
+    margin: 40px 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 32px;
+  }
+
+  .step {
+    text-align: center;
+
+    &__number {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: $accent;
+      color: #ffffff;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+
+    h3 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    p {
+      color: $text-muted;
+      font-size: 15px;
+    }
+  }
+}
+
+.features {
+  padding: 64px 0;
+  background: #f8fafc;
+  border-radius: 16px;
+
+  .feature-grid {
+    margin-top: 40px;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+  }
+
+  .feature {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 24px;
+
+    h3 {
+      font-size: 17px;
+      font-weight: 600;
+      color: $accent-dark;
+      margin-bottom: 8px;
+    }
+
+    p {
+      color: $text-muted;
+      font-size: 15px;
+    }
+  }
+}
+
+.contact {
+  padding: 80px 0;
+  text-align: center;
+
+  p {
+    margin-top: 12px;
+    color: $text-muted;
+    font-size: 16px;
+  }
+
+  .button {
+    margin-top: 24px;
+  }
+}
+
+.site-footer {
+  border-top: 1px solid #e2e8f0;
+  padding: 24px;
+  text-align: center;
+
+  p {
+    color: $text-muted;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 720px) {
+  .hero h1 {
+    font-size: 32px;
+  }
+
+  .how-it-works .steps,
+  .features .feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .site-nav {
+    gap: 12px;
+
+    a:not(.site-nav__cta) {
+      display: none;
+    }
+  }
+}

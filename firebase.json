@@ -63,6 +63,21 @@
           "destination": "/index.html"
         }
       ]
+    },
+    {
+      "target": "marketing",
+      "public": "nx-monorepo/dist/apps/marketing/browser",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ]
     }
   ],
   "storage": {

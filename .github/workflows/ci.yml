@@ -92,8 +92,8 @@ jobs:
       # `build` job above), so the production build has to happen again here
       # too — deploy needs the actual dist/ output on disk, not just proof
       # that it built successfully.
-      - name: Build physician/ems/admin
-        run: npx nx run-many -t build -p physician,ems,admin
+      - name: Build physician/ems/admin/marketing
+        run: npx nx run-many -t build -p physician,ems,admin,marketing
         working-directory: nx-monorepo
 
       - name: Install Firebase CLI
