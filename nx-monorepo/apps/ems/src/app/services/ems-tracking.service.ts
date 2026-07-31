@@ -6,10 +6,10 @@ import { StopLocationRequest } from '../classes/stop-location-request';
 
 const UPDATE_INTERVAL_MS = 15000;
 const FUNCTIONS_REGION = 'northamerica-northeast2';
+const STORAGE_KEY_PREFIX = 'amdash-ems-tracking:';
 
 @Injectable({ providedIn: 'root' })
 export class EmsTrackingService {
-  
   private readonly functions = getFunctions(getFirebaseApp(), FUNCTIONS_REGION);
   private readonly publishLocationFn = httpsCallable<PublishLocationRequest, { published: boolean }>(
     this.functions,
@@ -24,6 +24,23 @@ export class EmsTrackingService {
 
   readonly trackedPatientIds = signal<ReadonlySet<string>>(new Set());
   readonly error = signal<string | null>(null);
+
+  // This service's tracking state (the recurring interval, trackedPatientIds)
+  // is otherwise pure in-memory state, wiped by anything that tears down the
+  // page — a mobile browser discarding a backgrounded tab under memory
+  // pressure (very common once an EMS phone's screen locks mid-transport),
+  // an accidental refresh, a network blip that reloads the SPA. Without this,
+  // tracking would silently stop until someone notices the toggle reverted
+  // to "off" and manually turns it back on. localStorage survives a reload (it's
+  // per-device, which is the right scope: "this phone is currently
+  // live-tracking this patient" doesn't need to sync anywhere else), so on
+  // startup this resumes every patient this browser was tracking when it was
+  // last torn down, with no action needed from EMS.
+  constructor() {
+    for (const patientId of this.readPersistedPatientIds()) {
+      this.resumeTracking(patientId);
+    }
+  }
 
   isTracking(patientId: string): boolean {
     return this.trackedPatientIds().has(patientId);
@@ -59,32 +76,58 @@ export class EmsTrackingService {
       // isn't actually working — don't leave a stale "tracking" state or
       // a doomed interval (permission revoked mid-session would otherwise
       // keep silently failing every 15s forever) around.
-      this.clearTrackingInterval(patientId);
-      this.removeTrackedPatient(patientId);
+      this.deactivate(patientId);
       throw error;
     }
 
     if (!alreadyTracking) {
-      this.addTrackedPatient(patientId);
-      this.intervals.set(
-        patientId,
-        setInterval(() => {
-          this.publishCurrentPosition(patientId).catch(() => {
-            // Already recorded on `error` inside publishCurrentPosition —
-            // the interval just needs to not throw an unhandled rejection.
-          });
-        }, UPDATE_INTERVAL_MS),
-      );
+      this.activate(patientId);
     }
   }
 
   stopTracking(patientId: string) {
-    this.clearTrackingInterval(patientId);
-    this.removeTrackedPatient(patientId);
+    this.deactivate(patientId);
 
     this.stopLocationFn({ patientId }).catch((error) => {
       console.error('Failed to stop EMS location tracking', error);
     });
+  }
+
+  // Marks a patient tracked and starts its interval immediately —
+  // synchronously, before any network round trip — so a component reading
+  // isTracking() right after this service is constructed (e.g. the
+  // live-tracking toggle's initial state on the edit page) reflects "still
+  // tracking" without waiting on a publish confirmation. If the confirming
+  // publish below fails (location permission revoked while the tab was
+  // gone, say), this rolls back to "not tracking" the same way
+  // startTracking's own failure path does.
+  private resumeTracking(patientId: string) {
+    this.activate(patientId);
+
+    this.publishCurrentPosition(patientId).catch((error) => {
+      console.error('Failed to resume EMS location tracking', error);
+      this.deactivate(patientId);
+    });
+  }
+
+  private activate(patientId: string) {
+    this.addTrackedPatient(patientId);
+    this.persistTracking(patientId);
+    this.intervals.set(
+      patientId,
+      setInterval(() => {
+        this.publishCurrentPosition(patientId).catch(() => {
+          // Already recorded on `error` inside publishCurrentPosition —
+          // the interval just needs to not throw an unhandled rejection.
+        });
+      }, UPDATE_INTERVAL_MS),
+    );
+  }
+
+  private deactivate(patientId: string) {
+    this.clearTrackingInterval(patientId);
+    this.removeTrackedPatient(patientId);
+    this.clearPersistedTracking(patientId);
   }
 
   private clearTrackingInterval(patientId: string) {
@@ -105,6 +148,42 @@ export class EmsTrackingService {
       next.delete(patientId);
       return next;
     });
+  }
+
+  // Persistence is a resume-on-reload convenience, not core to tracking
+  // itself (the interval + Firestore publish work fine without it) — if
+  // localStorage is unavailable or throws (disabled storage, some private
+  // browsing modes), degrade to today's in-memory-only behavior rather than
+  // breaking tracking altogether.
+  private readPersistedPatientIds(): string[] {
+    try {
+      const ids: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith(STORAGE_KEY_PREFIX)) {
+          ids.push(key.slice(STORAGE_KEY_PREFIX.length));
+        }
+      }
+      return ids;
+    } catch {
+      return [];
+    }
+  }
+
+  private persistTracking(patientId: string) {
+    try {
+      localStorage.setItem(STORAGE_KEY_PREFIX + patientId, '1');
+    } catch {
+      // See readPersistedPatientIds above.
+    }
+  }
+
+  private clearPersistedTracking(patientId: string) {
+    try {
+      localStorage.removeItem(STORAGE_KEY_PREFIX + patientId);
+    } catch {
+      // See readPersistedPatientIds above.
+    }
   }
 
   private publishCurrentPosition(patientId: string): Promise<void> {

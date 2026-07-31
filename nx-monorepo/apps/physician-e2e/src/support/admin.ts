@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 
 export type UserRole = 'ems' | 'physician' | 'nurse' | 'admin' | 'super-admin';
 
@@ -135,6 +135,18 @@ export async function deleteAccountByEmail(email: string): Promise<void> {
   const user = await getAuth().getUserByEmail(email);
   await getFirestore().doc(`users/${user.uid}`).delete();
   await getAuth().deleteUser(user.uid);
+}
+
+// Reads `emsLocations/{patientId}`'s `updatedAt` off Firestore directly via
+// the Admin SDK — used to confirm a *new* publish actually landed after some
+// point in the test (e.g. a page reload on the EMS side), rather than just
+// checking the doc exists at all, which a single stale publish from before
+// that point would already satisfy.
+export async function getEmsLocationUpdatedAtMs(patientId: string): Promise<number | undefined> {
+  ensureInitialized();
+  const snapshot = await getFirestore().doc(`emsLocations/${patientId}`).get();
+  const updatedAt = snapshot.data()?.['updatedAt'] as Timestamp | undefined;
+  return updatedAt?.toMillis();
 }
 
 // Deletes the `patients/{patientId}` and `emsLocations/{patientId}` docs an

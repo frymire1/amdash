@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { E2eAccount, deleteAccount, signUpAndOnboard } from './support/auth';
-import { deletePatientData } from './support/admin';
+import { deletePatientData, getEmsLocationUpdatedAtMs } from './support/admin';
 
 // This is a genuine cross-app flow: EMS uploads + live-tracks a patient
 // through the real deployed Cloud Functions / Pub/Sub pipeline, and the
@@ -68,6 +68,10 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
   page,
   context,
 }) => {
+  // The reload-survival check below adds a real ~25s on top of this
+  // already-substantial test (see playwright.config.mts's 60s default).
+  test.setTimeout(120000);
+
   // Grant geolocation explicitly scoped to the EMS origin. A permission
   // granted via `test.use({ permissions: [...] })` at context-creation time
   // does not reliably carry over once the page navigates to a *different*
@@ -120,9 +124,10 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
   }
   await expect(liveTrackToggle).toHaveAttribute('aria-checked', 'true');
 
-  // Node-side wall clock (this test process, never touched by the browser-side
-  // Date mocking below) — an approximation of when EMS's publish fires.
-  const publishedAtMs = Date.now();
+  // Reassigned below, once the actual last real publish's server timestamp
+  // is known, to be the baseline the staleness mocking further down uses —
+  // see the comment there for why.
+  let publishedAtMs = Date.now();
   await page.getByRole('button', { name: 'Upload Patient' }).click();
   await expect(page.locator('.submit-button__spinner')).toBeVisible();
   await expect(page).toHaveURL(`${EMS_ORIGIN}/`);
@@ -147,6 +152,47 @@ test('a patient live-tracked by EMS shows as tracked on the physician app, then 
   // publishEmsLocation call goes out, meaning the location update is never
   // even sent, not just slow to arrive.
   await page.waitForTimeout(3000);
+
+  // The full publishEmsLocation -> Pub/Sub -> onEmsLocationEvent -> Firestore
+  // chain can take longer than a flat wait accounts for, especially on a
+  // cold Cloud Function start — poll rather than assuming 3s is enough,
+  // matching the generous timeouts the physician-side checks below already
+  // use for the same underlying round trip.
+  await expect
+    .poll(() => getEmsLocationUpdatedAtMs(createdPatientId as string), { timeout: 20000 })
+    .not.toBeUndefined();
+  const updatedAtBeforeReload = await getEmsLocationUpdatedAtMs(createdPatientId as string);
+
+  // EmsTrackingService's tracking state (the recurring publish interval,
+  // which patients are tracked) is otherwise pure in-memory, wiped by
+  // anything that tears down the page — a mobile browser discarding a
+  // backgrounded tab under memory pressure once the EMS phone's screen
+  // locks mid-transport, an accidental refresh, a network blip. Reloading
+  // here — while sitting on the EMS home route, not this patient's own
+  // edit page, since resuming shouldn't depend on which route happens to
+  // be open (see apps/ems's app.config.ts and its provideAppInitializer)
+  // — and then confirming a *newer* publish lands on its own proves
+  // tracking survives that with zero action from EMS.
+  await page.reload();
+  await expect(page).toHaveURL(`${EMS_ORIGIN}/`);
+
+  // Real time for at least one more 15s publish interval to fire on its own.
+  await page.waitForTimeout(20000);
+
+  const updatedAtAfterReload = await getEmsLocationUpdatedAtMs(createdPatientId as string);
+  expect(
+    updatedAtAfterReload,
+    'expected a newer publish to have landed after the reload, with no manual re-toggle',
+  ).toBeGreaterThan(updatedAtBeforeReload as number);
+
+  // The staleness mocking below assumes `publishedAtMs` is (close to) the
+  // real timestamp of the *last* actual publish — true before this test
+  // added a real reload+resume in the middle, but the reload/resume above
+  // pushes the real last-publish timestamp meaningfully later than the
+  // original upload. Re-baseline off the server timestamp just confirmed
+  // above so `+15_000`/`+40_000` below still land where they're supposed
+  // to relative to the actual last write, not the original one.
+  publishedAtMs = updatedAtAfterReload as number;
 
   // --- Physician side: the same patient should show up as actively tracked ---
   physicianAccount = await signUpAndOnboard(
