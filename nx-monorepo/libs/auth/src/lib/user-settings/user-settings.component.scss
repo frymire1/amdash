@@ -60,3 +60,45 @@
     display: inline-flex;
   }
 }
+
+.alerts-section {
+  margin: 8px 0 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+
+  &__title {
+    margin: 0 0 8px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #1e293b;
+  }
+
+  &__info {
+    margin: 0 0 12px;
+    font-size: 12px;
+    color: #64748b;
+  }
+
+  &__status {
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: #475569;
+  }
+
+  &__duration {
+    width: 100%;
+  }
+
+  &__blocked {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: #dc2626;
+  }
+
+  button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+}

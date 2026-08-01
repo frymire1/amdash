@@ -26,6 +26,50 @@
             <mat-error>Select a hospital from the list.</mat-error>
           }
         </mat-form-field>
+
+        <div class="alerts-section">
+          <h2 class="alerts-section__title">New Patient Alerts</h2>
+          <p class="alerts-section__info">Optional: select how long you would like to get notifications for.</p>
+          @if (alertsExpiresAt(); as expiresAt) {
+            <p class="alerts-section__status">Alerts active until {{ expiresAt.toDate() | date: 'shortTime' }}</p>
+            <button
+              mat-stroked-button
+              type="button"
+              [disabled]="disablingAlerts()"
+              (click)="onDisableAlerts()"
+            >
+              @if (disablingAlerts()) {
+                <mat-spinner diameter="18"></mat-spinner>
+              } @else {
+                Disable
+              }
+            </button>
+          } @else {
+            <mat-form-field appearance="outline" class="alerts-section__duration">
+              <mat-label>Duration</mat-label>
+              <mat-select [value]="selectedAlertHours()" (selectionChange)="selectedAlertHours.set($event.value)">
+                @for (hours of alertHours; track hours) {
+                  <mat-option [value]="hours">{{ hours }} hour{{ hours > 1 ? 's' : '' }}</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+            <button
+              mat-stroked-button
+              type="button"
+              [disabled]="enablingAlerts()"
+              (click)="onEnableAlerts()"
+            >
+              @if (enablingAlerts()) {
+                <mat-spinner diameter="18"></mat-spinner>
+              } @else {
+                Enable
+              }
+            </button>
+            @if (alertsBlockedMessage()) {
+              <p class="alerts-section__blocked">{{ alertsBlockedMessage() }}</p>
+            }
+          }
+        </div>
       }
 
       @if (errorMessage()) {

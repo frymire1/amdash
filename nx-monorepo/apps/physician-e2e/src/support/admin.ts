@@ -160,3 +160,18 @@ export async function deletePatientData(patientId: string): Promise<void> {
     getFirestore().doc(`emsLocations/${patientId}`).delete(),
   ]);
 }
+
+// Sets newPatientAlertsExpiresAt directly via the Admin SDK, bypassing the
+// real service-worker registration + FCM getToken() round trip
+// PatientAlertService.enableAlerts drives — headless Chromium's
+// Notification.permission getter doesn't reflect a CDP-granted permission
+// (see auth.spec.ts's alerts test), so getToken() can never actually
+// succeed under automation. This lets a test exercise the "already armed"
+// UI and the Disable button against a real Firestore read regardless.
+export async function armNewPatientAlerts(email: string, expiresAtMs: number): Promise<void> {
+  ensureInitialized();
+  const user = await getAuth().getUserByEmail(email);
+  await getFirestore()
+    .doc(`users/${user.uid}`)
+    .set({ newPatientAlertsExpiresAt: Timestamp.fromMillis(expiresAtMs) }, { merge: true });
+}

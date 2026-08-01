@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AbstractControl, FormBuilder, ReactiveFormsModule, ValidationErrors, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -6,9 +6,11 @@ import { MatAutocompleteModule } from '@angular/material/autocomplete';
 import { MatButtonModule } from '@angular/material/button';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
+import { MatSelectModule } from '@angular/material/select';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { HospitalService } from '../hospitals';
 import { UserProfileService } from '../services/user-profile.service';
+import { PatientAlertService } from '../services/patient-alert.service';
 import { TimeoutError, withTimeout } from '../with-timeout';
 
 @Component({
@@ -21,6 +23,7 @@ import { TimeoutError, withTimeout } from '../with-timeout';
     MatButtonModule,
     MatFormFieldModule,
     MatInputModule,
+    MatSelectModule,
     MatProgressSpinnerModule,
   ],
   templateUrl: './user-settings.component.html',
@@ -30,7 +33,9 @@ export class UserSettingsComponent {
   private readonly formBuilder = inject(FormBuilder);
   private readonly userProfileService = inject(UserProfileService);
   private readonly hospitalService = inject(HospitalService);
+  private readonly patientAlertService = inject(PatientAlertService);
   private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly submitting = signal(false);
   readonly errorMessage = signal<string | null>(null);
@@ -39,6 +44,23 @@ export class UserSettingsComponent {
   readonly showHospitalField = computed(() => {
     const roles = this.userProfileService.profile()?.role ?? [];
     return roles.includes('physician') || roles.includes('nurse');
+  });
+
+  readonly alertHours = Array.from({ length: 12 }, (_, index) => index + 1);
+  readonly selectedAlertHours = signal(4);
+  readonly enablingAlerts = signal(false);
+  readonly disablingAlerts = signal(false);
+  readonly alertsBlockedMessage = signal<string | null>(null);
+
+  // Ticks every 60s (matching EmsLocationService's own recheck-interval
+  // pattern) purely so alertsExpiresAt below flips itself back to "off" once
+  // the armed window elapses, with no reload needed.
+  private readonly now = signal(Date.now());
+
+  readonly alertsExpiresAt = computed(() => {
+    this.now();
+    const expiresAt = this.userProfileService.profile()?.newPatientAlertsExpiresAt;
+    return expiresAt && expiresAt.toMillis() > Date.now() ? expiresAt : null;
   });
 
   // See work-location.component.ts's identical validator for why this
@@ -85,6 +107,40 @@ export class UserSettingsComponent {
       this.hospitalService.hospitalNames();
       this.settingsForm.controls.hospital.updateValueAndValidity();
     });
+
+    const intervalId = setInterval(() => this.now.set(Date.now()), 60000);
+    this.destroyRef.onDestroy(() => clearInterval(intervalId));
+  }
+
+  async onEnableAlerts() {
+    this.enablingAlerts.set(true);
+    this.alertsBlockedMessage.set(null);
+
+    try {
+      const { granted } = await this.patientAlertService.enableAlerts(this.selectedAlertHours());
+      if (!granted) {
+        this.alertsBlockedMessage.set(
+          "Notifications are blocked in your browser — enable them in your browser's site settings for AmDash to receive alerts.",
+        );
+      }
+    } catch (error) {
+      this.alertsBlockedMessage.set('Failed to enable alerts. Please try again.');
+      console.error('Failed to enable new-patient alerts', error);
+    } finally {
+      this.enablingAlerts.set(false);
+    }
+  }
+
+  async onDisableAlerts() {
+    this.disablingAlerts.set(true);
+
+    try {
+      await this.patientAlertService.disableAlerts();
+    } catch (error) {
+      console.error('Failed to disable new-patient alerts', error);
+    } finally {
+      this.disablingAlerts.set(false);
+    }
   }
 
   async onSubmit() {

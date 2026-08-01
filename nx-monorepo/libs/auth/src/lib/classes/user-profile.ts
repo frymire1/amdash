@@ -1,3 +1,5 @@
+import { Timestamp } from 'firebase/firestore';
+
 export type UserRole = 'ems' | 'physician' | 'nurse' | 'admin' | 'super-admin';
 
 export interface UserProfile {
@@ -19,4 +21,16 @@ export interface UserProfile {
   // (createUser/createOrganization in functions/src/index.ts), same as
   // `role` — clients are blocked from touching this field too.
   organizationId?: string;
+  // Set (and refreshed) by PatientAlertService.enableAlerts when a
+  // physician/nurse arms new-patient push alerts for 1-12 hours; missing or
+  // in the past means alerts are off. A Timestamp rather than a plain
+  // boolean so the server-side sendNewPatientAlerts trigger can query for
+  // "currently armed" directly instead of needing a separate cleanup job to
+  // flip a boolean back off once the window elapses.
+  newPatientAlertsExpiresAt?: Timestamp;
+  // One FCM registration token per browser/device that has ever enabled
+  // alerts, appended via arrayUnion (never overwritten) so enabling on a
+  // second device doesn't drop the first's token. Stale tokens are pruned
+  // server-side by sendNewPatientAlerts when FCM reports one as dead.
+  fcmTokens?: string[];
 }

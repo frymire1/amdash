@@ -1,5 +1,5 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
-import { doc, getDoc, getFirestore, setDoc } from 'firebase/firestore';
+import { Timestamp, arrayUnion, deleteField, doc, getDoc, getFirestore, setDoc } from 'firebase/firestore';
 import { getFirebaseApp } from '../firebase-app';
 import { AuthService } from './auth.service';
 import { UserProfile } from '../classes/user-profile';
@@ -90,6 +90,38 @@ export class UserProfileService {
 
     // See saveProfile() above for why this re-reads rather than locally
     // splicing the new field into the signal.
+    const freshSnapshot = await getDoc(doc(this.firestore, 'users', user.uid));
+    this.profile.set(freshSnapshot.exists() ? (freshSnapshot.data() as UserProfile) : null);
+  }
+
+  // arrayUnion rather than overwriting fcmTokens wholesale — enabling alerts
+  // on a second device shouldn't drop the first device's still-valid token.
+  async enableNewPatientAlerts(expiresAt: Timestamp, fcmToken: string): Promise<void> {
+    const user = this.authService.user();
+    if (!user) {
+      throw new Error('Cannot enable alerts without an authenticated user.');
+    }
+
+    await setDoc(
+      doc(this.firestore, 'users', user.uid),
+      { newPatientAlertsExpiresAt: expiresAt, fcmTokens: arrayUnion(fcmToken) },
+      { merge: true },
+    );
+
+    const freshSnapshot = await getDoc(doc(this.firestore, 'users', user.uid));
+    this.profile.set(freshSnapshot.exists() ? (freshSnapshot.data() as UserProfile) : null);
+  }
+
+  // Leaves fcmTokens alone — harmless once the expiry is gone, since
+  // sendNewPatientAlerts' own query won't match this user regardless.
+  async disableNewPatientAlerts(): Promise<void> {
+    const user = this.authService.user();
+    if (!user) {
+      throw new Error('Cannot disable alerts without an authenticated user.');
+    }
+
+    await setDoc(doc(this.firestore, 'users', user.uid), { newPatientAlertsExpiresAt: deleteField() }, { merge: true });
+
     const freshSnapshot = await getDoc(doc(this.firestore, 'users', user.uid));
     this.profile.set(freshSnapshot.exists() ? (freshSnapshot.data() as UserProfile) : null);
   }

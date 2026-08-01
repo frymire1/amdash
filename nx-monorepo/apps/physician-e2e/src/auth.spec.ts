@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { E2eAccount, deleteAccount, generateE2eAccount, logOut, signUpAndOnboard } from './support/auth';
-import { createAccountWithPassword, createPasswordlessAccount, grantRole } from './support/admin';
+import { E2eAccount, deleteAccount, generateE2eAccount, logOut, signIn, signUpAndOnboard } from './support/auth';
+import { armNewPatientAlerts, createAccountWithPassword, createPasswordlessAccount, grantRole } from './support/admin';
 
 let createdAccount: E2eAccount | undefined;
 
@@ -194,5 +194,77 @@ test.describe('physician auth', () => {
     await expect(emsLink).toHaveAttribute('href', 'https://amdash-ems-dev.web.app');
     await expect(page.getByRole('link', { name: 'Physician app' })).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Admin app' })).toHaveCount(0);
+  });
+
+  // Real push delivery (an OS notification while the tab is backgrounded or
+  // fully closed) isn't something Playwright can drive at all — covered by
+  // the manual pass instead. Headless Chromium adds a second ceiling
+  // specific to this feature: its Notification.permission getter doesn't
+  // reflect a CDP-granted permission (requestPermission() itself still
+  // resolves 'granted', but the synchronous property — and therefore
+  // Firebase Messaging's getToken() — reads 'denied' regardless), so a real
+  // service-worker + FCM token round trip can never actually succeed under
+  // this suite's headless CI run. Confirmed via a throwaway script directly
+  // probing Notification.permission against the live site under both
+  // headless and headed Chromium.
+  test('clicking Enable without a real granted permission shows a clear message instead of failing silently', async ({
+    page,
+    context,
+  }) => {
+    const account = generateE2eAccount('alerts-blocked');
+    createdAccount = account;
+    await createAccountWithPassword(account.email, account.password, 'physician');
+    await context.grantPermissions(['notifications']);
+
+    await signIn(page, account);
+    // goto() below is a hard page navigation — wait for sign-in to actually
+    // land first, or it aborts the in-flight signInWithPassword call before
+    // Firebase Auth persists the session (authGuard then sees no session and
+    // bounces back to /login).
+    await page.waitForURL((url) => !url.pathname.endsWith('/login'), { timeout: 15000 });
+    await page.goto('/user-settings');
+    await expect(page.getByRole('heading', { name: 'User Settings' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Enable' }).click();
+
+    // enableAlerts() catches the getToken() failure and returns
+    // granted: false rather than throwing (see patient-alert.service.ts) —
+    // this is what proves that path, not a generic "Failed to enable
+    // alerts" fallback error.
+    await expect(page.locator('.alerts-section__blocked')).toContainText(
+      "Notifications are blocked in your browser",
+      { timeout: 15000 },
+    );
+  });
+
+  // Exercises the "already armed" UI and the Disable button against a real
+  // Firestore read — seeded directly (see armNewPatientAlerts) rather than
+  // through a real Enable click, since headless Chromium can't complete that
+  // round trip at all (see the test above).
+  test('a physician can see an armed alert and disable it, and that persists across a reload', async ({ page }) => {
+    const account = generateE2eAccount('alerts-armed');
+    createdAccount = account;
+    await createAccountWithPassword(account.email, account.password, 'physician');
+    await armNewPatientAlerts(account.email, Date.now() + 60 * 60 * 1000);
+
+    await signIn(page, account);
+    await page.waitForURL((url) => !url.pathname.endsWith('/login'), { timeout: 15000 });
+    await page.goto('/user-settings');
+    await expect(page.getByRole('heading', { name: 'User Settings' })).toBeVisible();
+
+    await expect(page.locator('.alerts-section__status')).toContainText('Alerts active until');
+
+    await page.getByRole('button', { name: 'Disable' }).click();
+    await expect(page.locator('.alerts-section__status')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Enable' })).toBeVisible();
+
+    // Reloading re-reads users/{uid} fresh from Firestore (see
+    // UserProfileService.disableNewPatientAlerts's own re-read) rather than
+    // any client-side cached/optimistic state — this is what actually
+    // proves the write landed.
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'User Settings' })).toBeVisible();
+    await expect(page.locator('.alerts-section__status')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Enable' })).toBeVisible();
   });
 });
