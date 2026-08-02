@@ -1,8 +1,38 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required for any network access in release builds — the debug
+         manifest already has this (Flutter's own hot-reload channel needs
+         it), but AmDash needs it in release too for Firebase. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Live-tracking's actual reason for existing: real background GPS,
+         which no PWA/browser tab can provide (see
+         ems_tracking_service.dart's own header comment). -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- flutter_foreground_task's persistent notification — this is what
+         keeps the process alive (and Android happy about it) while a
+         patient's location is being shared with the phone locked. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Lets EMS ask the user to exempt AmDash from battery optimization —
+         without it, some OEMs kill the foreground service anyway during a
+         long transport. Requested opportunistically, not required. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <application
-        android:label="ems"
+        android:label="AmDash"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- Warning: do not change the service name — flutter_foreground_task
+             looks for this exact class. -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="location"
+            android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -1,11 +1,11 @@
 {
-    "name": "ems",
-    "short_name": "ems",
+    "name": "AmDash — EMS",
+    "short_name": "AmDash",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#2563EB",
+    "theme_color": "#2563EB",
+    "description": "Upload patient details and share live GPS location with the receiving hospital.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

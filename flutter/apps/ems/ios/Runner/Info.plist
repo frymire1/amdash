@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Ems</string>
+	<string>AmDash</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -26,6 +26,26 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Live-tracking's actual reason for existing: real background GPS.
+	     "Always" (not just "when in use") is required so location keeps
+	     publishing with the app backgrounded/phone locked mid-transport —
+	     see ems_tracking_service.dart's own header comment. Not yet
+	     buildable/verifiable from this Windows machine (Xcode is
+	     Mac-only); wired now so it's ready whenever a Mac/CI picks this
+	     app up. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>AmDash shares this patient's location with the receiving hospital while you're actively using the app.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>AmDash shares this patient's location with the receiving hospital for the duration of the transport, even while your phone is locked.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.pravera.flutter_foreground_task.refresh</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

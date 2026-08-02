@@ -1,5 +1,6 @@
 export 'src/auth/auth_service.dart';
 export 'src/auth/user_profile_service.dart';
+export 'src/guards/app_guards.dart';
 export 'src/hospitals/hospital_service.dart';
 export 'src/models/account_status.dart';
 export 'src/models/hospital.dart';
@@ -7,3 +8,5 @@ export 'src/models/organization.dart';
 export 'src/models/patient.dart';
 export 'src/models/user_profile.dart';
 export 'src/theme/app_theme.dart';
+export 'src/widgets/dialogs.dart';
+export 'src/widgets/offline_banner.dart';
