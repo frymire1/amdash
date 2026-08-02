@@ -8,7 +8,6 @@ import '../classes/uploaded_patient.dart';
 import '../services/ems_tracking_service.dart';
 import '../services/patient_session_service.dart';
 import '../services/patient_upload_service.dart';
-import '../widgets/nav_bar.dart';
 
 // Standard peripheral IV catheter gauges, largest (trauma) to smallest
 // (pediatric/fragile veins) — mirrors patient-upload.component.ts's

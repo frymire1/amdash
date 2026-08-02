@@ -2,8 +2,6 @@ import 'package:amdash_core/amdash_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import 'login_screen.dart';
-import 'screens/access_denied_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/patient_upload_screen.dart';
 
@@ -20,11 +18,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) => AppRouteGuard.redirect(
       ref: ref,
       state: state,
-      requiredRole: UserRole.ems,
+      requiredRoles: const [UserRole.ems],
     ),
     routes: [
-      GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
-      GoRoute(path: '/access-denied', builder: (context, state) => const AccessDeniedScreen()),
+      GoRoute(path: '/login', builder: (context, state) => const LoginScreen(appName: 'AmDash — EMS')),
+      GoRoute(
+        path: '/access-denied',
+        builder: (context, state) => const AccessDeniedScreen(appName: 'EMS'),
+      ),
+      GoRoute(path: '/user-settings', builder: (context, state) => const UserSettingsScreen()),
       GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
       GoRoute(path: '/upload', builder: (context, state) => const PatientUploadScreen()),
       GoRoute(

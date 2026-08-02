@@ -1,9 +1,15 @@
-import 'package:amdash_core/amdash_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
-/// Mirrors `nav-bar.component.ts`/`.html`: brand, user-initials avatar,
-/// sign-out button.
+import '../auth/auth_service.dart';
+import '../auth/user_profile_service.dart';
+import '../theme/app_theme.dart';
+
+/// Mirrors `nav-bar.component.ts`/`.html`: brand, user-initials avatar
+/// (tapping it opens User Settings, same as the Angular `routerLink`), and
+/// sign-out. Shared across every app — the brand text is always "AmDash",
+/// never per-app.
 class NavBar extends ConsumerStatefulWidget implements PreferredSizeWidget {
   const NavBar({super.key});
 
@@ -43,12 +49,16 @@ class _NavBarState extends ConsumerState<NavBar> {
       actions: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: CircleAvatar(
-            radius: 16,
-            backgroundColor: initials.isEmpty ? AppColors.slate400 : AppColors.brand,
-            child: initials.isEmpty
-                ? const Icon(Icons.account_circle, color: Colors.white, size: 20)
-                : Text(initials, style: const TextStyle(color: Colors.white, fontSize: 13)),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: () => context.push('/user-settings'),
+            child: CircleAvatar(
+              radius: 16,
+              backgroundColor: initials.isEmpty ? AppColors.slate400 : AppColors.brand,
+              child: initials.isEmpty
+                  ? const Icon(Icons.account_circle, color: Colors.white, size: 20)
+                  : Text(initials, style: const TextStyle(color: Colors.white, fontSize: 13)),
+            ),
           ),
         ),
         IconButton(

@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../services/patient_session_service.dart';
-import '../widgets/nav_bar.dart';
 import '../widgets/patient_summary_card.dart';
 
 /// Mirrors `home.component.ts`/`.html`.

@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "577422583971",
+    "project_id": "amdash-dev",
+    "storage_bucket": "amdash-dev.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:577422583971:android:08f6795a6a9af1a84fb716",
+        "android_client_info": {
+          "package_name": "com.amdash.ems"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDGYah_IMtotFPXcFbSVMfwPs9n_YpOGOQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:577422583971:android:ce60869f534a4b5b4fb716",
+        "android_client_info": {
+          "package_name": "com.amdash.physician"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDGYah_IMtotFPXcFbSVMfwPs9n_YpOGOQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
