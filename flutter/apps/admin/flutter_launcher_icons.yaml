@@ -1,0 +1,12 @@
+# Generates the web icon set from the one AmDash Signal Blue source (see
+# assets/icon/), shared across every AmDash app — run via
+# `dart run flutter_launcher_icons`. Web-only — this app has no
+# Android/iOS target.
+flutter_launcher_icons:
+  android: false
+  ios: false
+  web:
+    generate: true
+    image_path: "assets/icon/icon.png"
+    background_color: "#2563EB"
+    theme_color: "#2563EB"
