@@ -62,9 +62,56 @@ jobs:
         run: npx nx run-many -t build
         working-directory: nx-monorepo
 
+  # physician/ems/admin are Flutter apps (native + web), not Nx projects —
+  # covered here instead of the Nx test/lint/build jobs above, which only
+  # see `marketing` (still Angular) now.
+  flutter-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Analyze amdash_core, physician, ems, admin
+        run: |
+          for dir in packages/amdash_core apps/physician apps/ems apps/admin; do
+            (cd "$dir" && flutter pub get && flutter analyze)
+          done
+        working-directory: flutter
+
+      - name: Run widget/unit tests
+        run: |
+          for dir in packages/amdash_core apps/physician apps/ems apps/admin; do
+            (cd "$dir" && flutter test)
+          done
+        working-directory: flutter
+
+  flutter-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      # Verifies each app's web build succeeds before deploy attempts the
+      # real thing on its own fresh runner. physician's DIRECTIONS_API_KEY
+      # is omitted here (no map rendering happens in a plain build step);
+      # deploy needs the real key so the deployed app can actually call the
+      # Directions API.
+      - name: Build physician/ems/admin (web)
+        run: |
+          for app in physician ems admin; do
+            (cd "apps/$app" && flutter build web --release)
+          done
+        working-directory: flutter
+
   deploy:
     runs-on: ubuntu-latest
-    needs: [test, lint, build]
+    needs: [test, lint, build, flutter-check, flutter-build]
     steps:
       - uses: actions/checkout@v4
 
@@ -75,6 +122,10 @@ jobs:
           cache-dependency-path: |
             nx-monorepo/package-lock.json
             functions/package-lock.json
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
 
       - name: Install nx-monorepo dependencies
         run: npm ci
@@ -89,12 +140,19 @@ jobs:
         working-directory: functions
 
       # This job runs on its own fresh runner (no filesystem shared with the
-      # `build` job above), so the production build has to happen again here
-      # too — deploy needs the actual dist/ output on disk, not just proof
-      # that it built successfully.
-      - name: Build physician/ems/admin/marketing
-        run: npx nx run-many -t build -p physician,ems,admin,marketing
+      # `build`/`flutter-build` jobs above), so the production build has to
+      # happen again here too — deploy needs the actual build output on
+      # disk, not just proof that it built successfully.
+      - name: Build marketing
+        run: npx nx run-many -t build -p marketing
         working-directory: nx-monorepo
+
+      - name: Build physician/ems/admin (web)
+        run: |
+          for app in physician ems admin; do
+            (cd "apps/$app" && flutter build web --release --dart-define=DIRECTIONS_API_KEY=${{ secrets.DIRECTIONS_API_KEY }})
+          done
+        working-directory: flutter
 
       - name: Install Firebase CLI
         run: npm install -g firebase-tools
@@ -123,43 +181,50 @@ jobs:
           cache: npm
           cache-dependency-path: nx-monorepo/package-lock.json
 
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install patrol_cli
+        run: |
+          dart pub global activate patrol_cli
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
       - name: Install dependencies
         run: npm ci
         working-directory: nx-monorepo
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
-        working-directory: nx-monorepo
-
-      # Used by the e2e suites' own Admin SDK calls (see
-      # apps/*-e2e/src/support/admin.ts) — the Admin SDK auto-detects this
-      # standard env var, no extra plumbing needed. Same secret as the
+      # Used by the run-*-patrol-test.mjs scripts' own Admin SDK calls (see
+      # scripts/lib/firebase-admin-cli.mjs) — the Admin SDK auto-detects
+      # this standard env var, no extra plumbing needed. Same secret as the
       # `deploy` job; jobs don't share environment state, so this repeats it.
       - name: Authenticate to Firebase
         run: |
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
 
-      - name: Run physician-e2e
-        run: npx playwright test --project=chromium
-        working-directory: nx-monorepo/apps/physician-e2e
+      # Each script creates its own throwaway Firebase account (+ hospital/
+      # patient for physician) via the Admin SDK, drives `patrol test`
+      # against a real Chrome instance, and tears its own state back down —
+      # see nx-monorepo/scripts/run-*-patrol-test.mjs.
+      #
+      # EMS has no Patrol web suite yet (its existing integration_test
+      # suite targets native background-GPS behavior, not the web build) —
+      # not covered by this job. Add one here once it exists.
+      - name: Run admin Patrol e2e
+        run: node scripts/run-admin-patrol-test.mjs
+        working-directory: nx-monorepo
 
-      - name: Run ems-e2e
-        run: npx playwright test --project=chromium
-        working-directory: nx-monorepo/apps/ems-e2e
+      - name: Run physician Patrol e2e
+        run: node scripts/run-physician-patrol-test.mjs
+        working-directory: nx-monorepo
 
-      # No admin fixture account/secrets needed: admin-e2e grants itself a
-      # throwaway 'admin' role via the Admin SDK the same way it grants
-      # ems/physician/nurse elsewhere, then deletes that account in its own
-      # afterEach — see role-assignment.spec.ts.
-      - name: Run admin-e2e
-        run: npx playwright test --project=chromium
-        working-directory: nx-monorepo/apps/admin-e2e
-
-      - name: Upload Playwright reports
+      - name: Upload Patrol reports
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-reports
-          path: nx-monorepo/dist/.playwright/apps/*/playwright-report
+          name: patrol-reports
+          path: |
+            flutter/apps/admin/playwright-report
+            flutter/apps/physician/playwright-report
           retention-days: 7

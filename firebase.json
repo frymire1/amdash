@@ -21,7 +21,7 @@
   "hosting": [
     {
       "target": "physician",
-      "public": "nx-monorepo/dist/apps/physician/browser",
+      "public": "flutter/apps/physician/build/web",
       "ignore": [
         "firebase.json",
         "**/.*",
@@ -36,7 +36,7 @@
     },
     {
       "target": "ems",
-      "public": "nx-monorepo/dist/apps/ems/browser",
+      "public": "flutter/apps/ems/build/web",
       "ignore": [
         "firebase.json",
         "**/.*",
@@ -51,7 +51,7 @@
     },
     {
       "target": "admin",
-      "public": "nx-monorepo/dist/apps/admin/browser",
+      "public": "flutter/apps/admin/build/web",
       "ignore": [
         "firebase.json",
         "**/.*",

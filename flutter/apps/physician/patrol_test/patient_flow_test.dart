@@ -22,6 +22,23 @@ import 'package:physician/firebase_options.dart';
 import 'package:physician/main.dart';
 import 'package:physician/screens/main_view_screen.dart';
 
+// Patrol's own `.tap()` requires a widget to pass its hit-testable check,
+// which — verified manually against a real browser, where every one of
+// these interactions works fine — proved unreliable against this app's
+// Material overlays (the hospital autocomplete's option list) on Flutter
+// Web/CanvasKit through Patrol's Playwright-backed web runner. Raw
+// $.tester.tap() (only requires the widget to exist, then simulates the
+// tap at its computed center) doesn't have this problem; see the admin
+// app's patrol_test/user_flow_test.dart for the same fix applied there.
+Future<void> tapFinder(PatrolIntegrationTester $, Finder finder) async {
+  await $.tester.ensureVisible(finder);
+  await $.pump(const Duration(milliseconds: 200));
+  await $.tester.tap(finder);
+  await $.pump(const Duration(milliseconds: 400));
+}
+
+Future<void> tapText(PatrolIntegrationTester $, String text) => tapFinder($, find.text(text));
+
 void main() {
   patrolTest(
     'signs in, sets work location, and views a patient with a live map',
@@ -39,11 +56,11 @@ void main() {
 
       // Sign in.
       await $(TextField).at(0).enterText(email);
-      await $('Continue').tap();
+      await tapText($, 'Continue');
 
       await $('Sign In').waitUntilVisible();
       await $(TextField).at(0).enterText(password);
-      await $('Sign In').tap();
+      await tapText($, 'Sign In');
 
       // Work location — only asked once; skip if this account already has
       // one from a previous run.
@@ -53,8 +70,21 @@ void main() {
         await $(hospitalName).waitUntilVisible();
         // The autocomplete overlay renders the option in its own overlay
         // route — the last match is the option, not the field's own text.
-        await $(hospitalName).at($(hospitalName).evaluate().length - 1).tap();
-        await $('Continue').tap();
+        await tapFinder($, find.text(hospitalName).at(find.text(hospitalName).evaluate().length - 1));
+        // The Autocomplete's options overlay stays mounted (a full-screen
+        // AbsorbPointer, confirmed via --show-flutter-logs's hit-test
+        // warning) as long as the field keeps focus and its query still
+        // has a match — which it does here, since the field's text
+        // already equals the selected option. A real click elsewhere
+        // normally unfocuses the field as a side effect and closes it,
+        // but a raw synthetic tap doesn't carry that browser-level focus
+        // semantics (confirmed: tapping the screen title first didn't
+        // help either — the very next tap on 'Continue' still got
+        // silently absorbed instead of reaching the button). Force the
+        // unfocus directly instead of relying on tap-outside-to-dismiss.
+        FocusManager.instance.primaryFocus?.unfocus();
+        await $.pump(const Duration(milliseconds: 300));
+        await tapText($, 'Continue');
       }
 
       // Self-heals a cache-flicker bounce back to /work-location, thanks
@@ -63,7 +93,7 @@ void main() {
 
       // The seeded patient should appear in the list.
       await $(patientName).waitUntilVisible(timeout: const Duration(seconds: 15));
-      await $(patientName).at(0).tap();
+      await tapFinder($, find.text(patientName).first);
 
       // Patient viewer should now show this patient's info/vitals, and a
       // real Google Map for its uploaded pickup location.

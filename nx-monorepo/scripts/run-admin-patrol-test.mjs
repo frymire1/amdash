@@ -6,50 +6,35 @@
 // each run. Creates a fresh smoke-admin-*@amdash-e2e.test account, runs
 // `patrol test`, and always cleans up (account + anything the test itself
 // creates: patrol-created-* users, "Patrol Test Hospital *" hospitals)
-// regardless of whether the test passed or failed.
+// regardless of whether the test passed or failed. Wired into
+// .github/workflows/ci.yml's e2e job — not a local-only dev tool.
+//
+// Written in Node/JS rather than Dart because it needs the Firebase
+// *Admin* SDK (elevated, server-side — creates/deletes real Auth users and
+// bypasses Firestore rules) to seed and tear down data around the actual
+// Dart-side Patrol test; nx-monorepo already has Node + firebase-admin set
+// up for exactly this, reusing the same pattern the old Playwright e2e
+// suites used before physician/ems/admin moved to Flutter.
 //
 // Usage: node scripts/run-admin-patrol-test.mjs
-// Requires: flutter + patrol_cli on PATH (or edit FLUTTER_BIN/PATROL_BIN
-// below to match your machine), a cached `firebase login` CLI session.
+// Requires: flutter + patrol_cli on PATH (or edit FLUTTER_BIN/PATROL_BIN in
+// scripts/lib/run-patrol.mjs to match your machine), a cached `firebase
+// login` CLI session (or GOOGLE_APPLICATION_CREDENTIALS set, e.g. in CI).
 
-import { spawn } from 'node:child_process';
-import { initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { findOrganizationId, initFirebaseAdmin } from './lib/firebase-admin-cli.mjs';
+import { runPatrolTest } from './lib/run-patrol.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const ADMIN_APP_DIR = path.join(REPO_ROOT, 'flutter', 'apps', 'admin');
 
-// Adjust these if your machine's Flutter/pub-cache locations differ.
-const FLUTTER_BIN = path.join(os.homedir(), 'flutter', 'bin');
-const PUB_CACHE_BIN = path.join(os.homedir(), 'AppData', 'Local', 'Pub', 'Cache', 'bin');
-
-function initFirebaseAdmin() {
-  const firebaseToolsConfigPath = path.join(os.homedir(), '.config/configstore/firebase-tools.json');
-  const { tokens } = JSON.parse(fs.readFileSync(firebaseToolsConfigPath, 'utf8'));
-  const credential = {
-    client_id: '563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com',
-    client_secret: 'j9iVZfS8kkCEFUPaAeJV0sAi',
-    refresh_token: tokens.refresh_token,
-    type: 'authorized_user',
-  };
-  const credentialPath = path.join(os.tmpdir(), `amdash-adminpatrol-adc-${process.pid}.json`);
-  fs.writeFileSync(credentialPath, JSON.stringify(credential));
-  process.env['GOOGLE_APPLICATION_CREDENTIALS'] = credentialPath;
-  initializeApp({ projectId: 'amdash-dev' });
-  return credentialPath;
-}
-
 async function createSmokeAdminAccount(db) {
-  const orgSnap = await db.collection('organizations').where('name', '==', 'test-org').get();
-  const organizationId = orgSnap.docs[0]?.id;
-  if (!organizationId) throw new Error('test-org not found — seed it before running this script.');
-
+  const organizationId = await findOrganizationId(db, 'test-org');
   const email = `smoke-admin-${Date.now()}@amdash-e2e.test`;
   const password = 'SmokeTest123';
   const user = await getAuth().createUser({ email, password });
@@ -88,38 +73,7 @@ async function cleanup(db, auth, smokeAccountUid) {
   console.log(`Cleanup: removed ${deletedUsers} throwaway user(s), ${hospSnap.size} leftover hospital(s).`);
 }
 
-function runPatrolTest(email, password) {
-  return new Promise((resolve) => {
-    const extraPath = [FLUTTER_BIN, PUB_CACHE_BIN, process.env.Path ?? process.env.PATH ?? ''].join(
-      path.delimiter,
-    );
-    // Set both casings — Git Bash's inherited env has PATH (POSIX
-    // convention); native Windows child-process resolution wants Path.
-    const env = { ...process.env, Path: extraPath, PATH: extraPath };
-    const args = [
-      'test',
-      '--device',
-      'chrome',
-      '--target',
-      'patrol_test/user_flow_test.dart',
-      '--dart-define',
-      `SMOKE_EMAIL=${email}`,
-      '--dart-define',
-      `SMOKE_PASSWORD=${password}`,
-    ];
-    // Absolute path, not relying on PATH resolution — Node's child_process
-    // spawn on Windows is unreliable about honoring a manually-constructed
-    // Path/PATH env var (case-sensitivity mismatch between Git Bash's
-    // POSIX-style PATH and Windows' native Path), so "patrol" alone
-    // resolves inconsistently depending on what shell launched this script.
-    const patrolBin = path.join(PUB_CACHE_BIN, 'patrol.bat');
-    console.log('Running:', patrolBin, args.join(' '));
-    const child = spawn(patrolBin, args, { cwd: ADMIN_APP_DIR, env, shell: true, stdio: 'inherit' });
-    child.on('close', (code) => resolve(code ?? 1));
-  });
-}
-
-const credentialPath = initFirebaseAdmin();
+const credentialPath = initFirebaseAdmin('adminpatrol');
 const db = getFirestore();
 const auth = getAuth();
 
@@ -128,10 +82,14 @@ let exitCode = 1;
 try {
   account = await createSmokeAdminAccount(db);
   console.log('Created throwaway admin account:', account.email);
-  exitCode = await runPatrolTest(account.email, account.password);
+  exitCode = await runPatrolTest({
+    appDir: ADMIN_APP_DIR,
+    target: 'patrol_test/user_flow_test.dart',
+    dartDefines: { SMOKE_EMAIL: account.email, SMOKE_PASSWORD: account.password },
+  });
 } finally {
   await cleanup(db, auth, account?.uid);
-  fs.unlinkSync(credentialPath);
+  if (credentialPath) fs.unlinkSync(credentialPath);
 }
 
 console.log(exitCode === 0 ? '\n✅ Patrol test passed.' : '\n❌ Patrol test failed.');
