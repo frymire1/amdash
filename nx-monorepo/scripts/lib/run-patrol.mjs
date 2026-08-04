@@ -55,7 +55,7 @@ function killOrphanedWebServer(appDir) {
 
 export function runPatrolTest({ appDir, target, dartDefines }) {
   return new Promise((resolve) => {
-    const args = ['test', '--device', 'chrome', '--show-flutter-logs', '--target', target];
+    const args = ['test', '--device', 'chrome', '--show-flutter-logs', '--verbose', '--target', target];
 
     if (IS_WINDOWS) {
       // With shell:true, spawn joins argv with plain spaces and hands the
