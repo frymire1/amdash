@@ -13,6 +13,9 @@
 // nx-monorepo already has that set up.
 //
 // Usage: node scripts/run-ems-patrol-test.mjs
+//   PATROL_DEVICE=android|ios overrides the default 'chrome' — 'android'/
+//   'ios' get resolved to the actual connected emulator/simulator device id
+//   at run time (see scripts/lib/run-patrol.mjs's resolveDeviceId).
 // Requires: flutter + patrol_cli on PATH (or edit scripts/lib/run-patrol.mjs
 // to match your machine), a cached `firebase login` CLI session (or
 // GOOGLE_APPLICATION_CREDENTIALS set, e.g. in CI).
@@ -71,6 +74,7 @@ try {
     appDir: EMS_APP_DIR,
     target: 'patrol_test/ems_test.dart',
     dartDefines: { SMOKE_EMAIL: account.email, SMOKE_PASSWORD: account.password },
+    device: process.env.PATROL_DEVICE || 'chrome',
   });
 } finally {
   if (account) await cleanup(db, auth, account.uid);

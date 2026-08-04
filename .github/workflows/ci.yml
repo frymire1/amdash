@@ -110,9 +110,64 @@ jobs:
           done
         working-directory: flutter
 
+  # admin is deliberately web-only (explicit earlier decision) — native
+  # builds/tests below cover physician and ems only.
+  flutter-android-build:
+    name: Flutter Android build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      # GitHub's hosted ubuntu-latest image ships the Android SDK
+      # preinstalled (ANDROID_HOME already set) — no separate SDK setup
+      # action needed, unlike a bare/self-hosted runner.
+      - name: Build physician/ems (Android debug APK)
+        run: |
+          for app in physician ems; do
+            (cd "apps/$app" && flutter build apk --debug)
+          done
+        working-directory: flutter
+
+  flutter-ios-build:
+    name: Flutter iOS build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      # --no-codesign: no signing identity/provisioning profile exists yet
+      # (deliberately out of scope this pass — see the plan) — this only
+      # verifies the app compiles for iOS, matching flutter-android-build's
+      # debug-APK-only scope. `flutter build ios` runs `pod install`
+      # itself; no Podfile is checked in yet (never resolved on macOS
+      # before), so this is also this repo's first real CocoaPods
+      # resolution for both apps.
+      - name: Build physician/ems (iOS, no codesign)
+        run: |
+          for app in physician ems; do
+            (cd "apps/$app" && flutter build ios --debug --no-codesign)
+          done
+        working-directory: flutter
+
   deploy:
     runs-on: ubuntu-latest
-    needs: [test, lint, build, flutter-unit-widget-tests, flutter-web-build]
+    needs:
+      [
+        test,
+        lint,
+        build,
+        flutter-unit-widget-tests,
+        flutter-web-build,
+        flutter-android-build,
+        flutter-ios-build,
+      ]
     steps:
       - uses: actions/checkout@v4
 
@@ -170,7 +225,8 @@ jobs:
       - name: Deploy to amdash-dev
         run: firebase deploy --only hosting,functions,firestore:rules,firestore:indexes --project amdash-dev --non-interactive
 
-  e2e:
+  web-e2e:
+    name: Web e2e (Chrome)
     runs-on: ubuntu-latest
     needs: deploy
     # Flutter Web's engine crashes on startup ("Error: Invalid argument:
@@ -268,3 +324,115 @@ jobs:
             flutter/apps/physician/playwright-report
             flutter/apps/ems/playwright-report
           retention-days: 7
+
+  # admin is web-only — native e2e below covers physician and ems only,
+  # same as flutter-android-build/flutter-ios-build.
+  android-e2e:
+    name: Android e2e (emulator)
+    runs-on: ubuntu-latest
+    needs: [deploy, flutter-android-build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: nx-monorepo/package-lock.json
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install patrol_cli
+        run: |
+          dart pub global activate patrol_cli
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: nx-monorepo
+
+      - name: Authenticate to Firebase
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+
+      # reactivecircus/android-emulator-runner needs /dev/kvm access, which
+      # ubuntu-latest supports but doesn't expose by default — this udev
+      # rule is that action's own documented way to enable it.
+      - name: Enable KVM group perms
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Boots a KVM-accelerated AVD for the duration of `script:` below,
+      # runs the same run-*-patrol-test.mjs scripts as web-e2e — resolved
+      # to the booted Android device id instead of Chrome (see
+      # scripts/lib/run-patrol.mjs's resolveDeviceId). No explicit
+      # runtime-permission-granting step: the current Patrol tests don't
+      # exercise EMS's live-tracking toggle (deliberately left off,
+      # same reason as web-e2e), so they shouldn't hit a location
+      # permission prompt — if a future test does, `adb install -g` /
+      # `pm grant` is the known fix, not yet needed.
+      - name: Run Android emulator + Patrol e2e
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            cd nx-monorepo
+            PATROL_DEVICE=android node scripts/run-physician-patrol-test.mjs
+            PATROL_DEVICE=android node scripts/run-ems-patrol-test.mjs
+
+  ios-e2e:
+    name: iOS e2e (Simulator)
+    runs-on: macos-latest
+    needs: [deploy, flutter-ios-build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: nx-monorepo/package-lock.json
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install patrol_cli
+        run: |
+          dart pub global activate patrol_cli
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: nx-monorepo
+
+      - name: Authenticate to Firebase
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+
+      # `flutter devices` (used by scripts/lib/run-patrol.mjs's
+      # resolveDeviceId) only lists already-booted devices — macos-latest
+      # ships several pre-created Simulators, but none are booted by
+      # default, so boot one explicitly first. No signing needed —
+      # Simulator builds are never code-signed.
+      - name: Boot an iOS Simulator
+        run: |
+          UDID=$(xcrun simctl list devices available --json | jq -r '.devices | to_entries[] | .value[] | select(.name | contains("iPhone")) | .udid' | head -1)
+          echo "Booting simulator $UDID"
+          xcrun simctl boot "$UDID"
+
+      - name: Run physician/EMS Patrol e2e (iOS Simulator)
+        run: |
+          PATROL_DEVICE=ios node scripts/run-physician-patrol-test.mjs
+          PATROL_DEVICE=ios node scripts/run-ems-patrol-test.mjs
+        working-directory: nx-monorepo

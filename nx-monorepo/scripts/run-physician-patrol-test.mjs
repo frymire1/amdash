@@ -11,6 +11,9 @@
 // nx-monorepo already has that set up.
 //
 // Usage: node scripts/run-physician-patrol-test.mjs
+//   PATROL_DEVICE=android|ios overrides the default 'chrome' — 'android'/
+//   'ios' get resolved to the actual connected emulator/simulator device id
+//   at run time (see scripts/lib/run-patrol.mjs's resolveDeviceId).
 // Requires: flutter + patrol_cli on PATH (or edit scripts/lib/run-patrol.mjs
 // to match your machine), a cached `firebase login` CLI session (or
 // GOOGLE_APPLICATION_CREDENTIALS set, e.g. in CI).
@@ -96,6 +99,7 @@ try {
       SMOKE_HOSPITAL: HOSPITAL_NAME,
       SMOKE_PATIENT_NAME: PATIENT_NAME,
     },
+    device: process.env.PATROL_DEVICE || 'chrome',
   });
 } finally {
   await cleanup(db, auth, account);

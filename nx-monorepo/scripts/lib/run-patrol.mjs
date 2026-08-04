@@ -5,22 +5,45 @@
 // for setup/teardown (see firebase-admin-cli.mjs) — no reason to split
 // that across two languages.
 //
-// Spawns `patrol test --device chrome` against a given Flutter app. Runs
-// both on a developer's Windows machine and in CI (a Linux GitHub Actions
-// runner), which need genuinely different handling — Windows requires a
-// shell to launch a .bat file at all, which then requires manual argv
-// quoting (cmd.exe doesn't quote for you); Linux needs neither.
-import { spawn } from 'node:child_process';
+// Spawns `patrol test --device <device>` against a given Flutter app.
+// Runs both on a developer's Windows machine and in CI (Linux/macOS
+// GitHub Actions runners), which need genuinely different handling —
+// Windows requires a shell to launch a .bat file at all, which then
+// requires manual argv quoting (cmd.exe doesn't quote for you); POSIX
+// needs neither.
+import { execFile, spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 const IS_WINDOWS = process.platform === 'win32';
 
 // Adjust these if your Windows machine's Flutter/pub-cache locations
-// differ. Not used on Linux — CI's flutter-action and `dart pub global`
-// already put both on PATH, so `patrol` resolves directly.
+// differ. Not used on Linux/macOS — CI's flutter-action and `dart pub
+// global` already put both on PATH, so `patrol`/`flutter` resolve directly.
 const FLUTTER_BIN = path.join(os.homedir(), 'flutter', 'bin');
 const PUB_CACHE_BIN = path.join(os.homedir(), 'AppData', 'Local', 'Pub', 'Cache', 'bin');
+
+// `device` is 'chrome' (default), 'android', 'ios', or an exact Flutter
+// device id. An Android emulator's or iOS Simulator's real device id isn't
+// known until CI boots it, so 'android'/'ios' are resolved dynamically
+// here via `flutter devices --machine` rather than hardcoded — pick the
+// first attached device of that platform type. Matched on `targetPlatform`
+// (e.g. "android-x64", "ios") — confirmed via a real `--machine` run on
+// this machine that there is no `platformType` field in this Flutter
+// version's output, only `targetPlatform`.
+async function resolveDeviceId(device) {
+  if (device !== 'android' && device !== 'ios') return device;
+  const { stdout } = await execFileAsync('flutter', ['devices', '--machine']);
+  const devices = JSON.parse(stdout);
+  const match = devices.find((d) => (d.targetPlatform ?? '').startsWith(device));
+  if (!match) {
+    throw new Error(`No connected '${device}' device found. flutter devices --machine returned: ${stdout}`);
+  }
+  return match.id;
+}
 
 // `patrol test` (via `flutter run -d web-server`) spawns its own dev
 // server as a grandchild process. By the time it's actually running, it's
@@ -53,9 +76,11 @@ function killOrphanedWebServer(appDir) {
   });
 }
 
-export function runPatrolTest({ appDir, target, dartDefines }) {
+export async function runPatrolTest({ appDir, target, dartDefines, device = 'chrome' }) {
+  const resolvedDevice = await resolveDeviceId(device);
+
   return new Promise((resolve) => {
-    const args = ['test', '--device', 'chrome', '--show-flutter-logs', '--verbose', '--target', target];
+    const args = ['test', '--device', resolvedDevice, '--show-flutter-logs', '--verbose', '--target', target];
 
     if (IS_WINDOWS) {
       // With shell:true, spawn joins argv with plain spaces and hands the
@@ -89,7 +114,7 @@ export function runPatrolTest({ appDir, target, dartDefines }) {
         resolve(code ?? 1);
       });
     } else {
-      // No shell involved on Linux — argv entries reach patrol as discrete
+      // No shell involved on POSIX — argv entries reach patrol as discrete
       // strings straight from execve, so spaces in dart-define values need
       // no special handling (and quoting them would be actively wrong:
       // with no shell to interpret the quote characters, they'd become part
@@ -97,17 +122,26 @@ export function runPatrolTest({ appDir, target, dartDefines }) {
       for (const [key, value] of Object.entries(dartDefines)) {
         args.push('--dart-define', `${key}=${value}`);
       }
-      // Patrol's underlying Playwright config launches Chromium headed
-      // (not headless) — fine on a dev machine with a real display, but a
-      // bare CI runner has no X server for it to attach to (confirmed:
-      // "browserType.launch: Target page, context or browser has been
-      // closed" / "Missing X server or $DISPLAY"). xvfb-run provides a
-      // virtual framebuffer so a headed browser can launch anyway — the
-      // standard fix Playwright's own error message suggests.
-      const xvfbArgs = ['-a', 'patrol', ...args];
-      console.log('Running: xvfb-run', xvfbArgs.join(' '));
-      const child = spawn('xvfb-run', xvfbArgs, { cwd: appDir, stdio: 'inherit' });
-      child.on('close', (code) => resolve(code ?? 1));
+
+      if (resolvedDevice === 'chrome') {
+        // Patrol's underlying Playwright config launches Chromium headed
+        // (not headless) — fine on a dev machine with a real display, but
+        // a bare CI runner has no X server for it to attach to (confirmed:
+        // "browserType.launch: Target page, context or browser has been
+        // closed" / "Missing X server or $DISPLAY"). xvfb-run provides a
+        // virtual framebuffer so a headed browser can launch anyway — the
+        // standard fix Playwright's own error message suggests. Android/iOS
+        // runs don't involve a browser at all (native instrumentation), so
+        // this wrapping is web-only.
+        const xvfbArgs = ['-a', 'patrol', ...args];
+        console.log('Running: xvfb-run', xvfbArgs.join(' '));
+        const child = spawn('xvfb-run', xvfbArgs, { cwd: appDir, stdio: 'inherit' });
+        child.on('close', (code) => resolve(code ?? 1));
+      } else {
+        console.log('Running: patrol', args.join(' '));
+        const child = spawn('patrol', args, { cwd: appDir, stdio: 'inherit' });
+        child.on('close', (code) => resolve(code ?? 1));
+      }
     }
   });
 }
