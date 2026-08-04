@@ -97,7 +97,7 @@ void main() {
 
       // Patient viewer should now show this patient's info/vitals, and a
       // real Google Map for its uploaded pickup location.
-      await $('Patient Information').waitUntilVisible();
+      await $('Destination Hospital').waitUntilVisible();
       expect($('Vital Signs'), findsOneWidget);
       expect($(GoogleMap), findsOneWidget, reason: 'patient has a location, so the map should render');
     },

@@ -160,6 +160,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # macos-latest's default Xcode (26.x) has a confirmed Apple bug in
+      # `xcodebuild test-without-building` against `.xctestrun` files
+      # targeting an iOS 26 Simulator runtime specifically — not
+      # reproducible on older iOS runtimes (see
+      # https://developer.apple.com/forums/thread/806461). It surfaces
+      # here as ios-e2e's `test-without-building` step reporting
+      # "Supported platforms for the buildables in the current scheme is
+      # empty" and failing to match ANY concrete Simulator destination.
+      # Pin the newest pre-26 Xcode instead — GitHub's macOS runner images
+      # ship several side by side — so both this build and ios-e2e's test
+      # run consistently avoid the buggy runtime pairing. Selected
+      # dynamically (not a hardcoded version) since exact versions
+      # installed on the runner image change over time.
+      - name: Select a pre-Xcode-26 toolchain (avoids a confirmed Xcode 26 xcodebuild bug)
+        run: |
+          XCODE_PATH=$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -v '^/Applications/Xcode_26' | sort -V | tail -1)
+          if [ -z "$XCODE_PATH" ]; then
+            echo "No pre-26 Xcode found on this runner image; continuing with the default."
+          else
+            echo "Selecting Xcode: $XCODE_PATH"
+            sudo xcode-select -s "$XCODE_PATH"
+          fi
+          xcodebuild -version
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -509,6 +533,24 @@ jobs:
     needs: [deploy, flutter-ios-build]
     steps:
       - uses: actions/checkout@v4
+
+      # See flutter-ios-build's identical step for why — a confirmed Xcode
+      # 26 bug in `xcodebuild test-without-building` against `.xctestrun`
+      # files targeting an iOS 26 Simulator runtime, which is exactly this
+      # job's failure mode. Must be pinned here too, not just in
+      # flutter-ios-build: this is a separate runner/job, and the Simulator
+      # boot + `patrol test` below both need to see the same pre-26
+      # toolchain that built the .xctestrun in the first place.
+      - name: Select a pre-Xcode-26 toolchain (avoids a confirmed Xcode 26 xcodebuild bug)
+        run: |
+          XCODE_PATH=$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -v '^/Applications/Xcode_26' | sort -V | tail -1)
+          if [ -z "$XCODE_PATH" ]; then
+            echo "No pre-26 Xcode found on this runner image; continuing with the default."
+          else
+            echo "Selecting Xcode: $XCODE_PATH"
+            sudo xcode-select -s "$XCODE_PATH"
+          fi
+          xcodebuild -version
 
       - uses: actions/setup-node@v4
         with:
