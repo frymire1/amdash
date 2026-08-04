@@ -48,3 +48,6 @@ app.*.map.json
 /playwright-report/
 /test-results/
 /test_bundle.dart
+
+# Local Dart/Flutter DevTools extension-enablement state — per-machine, not project config.
+devtools_options.yaml

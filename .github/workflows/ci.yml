@@ -64,7 +64,8 @@ jobs:
   # physician/ems/admin are Flutter apps (native + web), not Nx projects —
   # covered here instead of the Nx test/lint/build jobs above, which only
   # see `marketing` (still Angular) now.
-  flutter-check:
+  flutter-unit-widget-tests:
+    name: Flutter unit/widget tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,7 +88,8 @@ jobs:
           done
         working-directory: flutter
 
-  flutter-build:
+  flutter-web-build:
+    name: Flutter web build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -110,7 +112,7 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
-    needs: [test, lint, build, flutter-check, flutter-build]
+    needs: [test, lint, build, flutter-unit-widget-tests, flutter-web-build]
     steps:
       - uses: actions/checkout@v4
 
@@ -139,7 +141,7 @@ jobs:
         working-directory: functions
 
       # This job runs on its own fresh runner (no filesystem shared with the
-      # `build`/`flutter-build` jobs above), so the production build has to
+      # `build`/`flutter-web-build` jobs above), so the production build has to
       # happen again here too — deploy needs the actual build output on
       # disk, not just proof that it built successfully.
       - name: Build marketing

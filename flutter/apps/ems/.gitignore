@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local Dart/Flutter DevTools extension-enablement state — per-machine, not project config.
+devtools_options.yaml
