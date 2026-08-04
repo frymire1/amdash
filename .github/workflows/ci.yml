@@ -578,6 +578,18 @@ jobs:
           UDID=$(xcrun simctl list devices available --json | jq -r --arg RT "$LATEST_RUNTIME" '.devices[$RT][] | select(.name | contains("iPhone")) | .udid' | head -1)
           echo "Booting simulator $UDID"
           xcrun simctl boot "$UDID"
+          # `simctl boot` only boots the simulator at the CoreSimulator
+          # level and returns immediately — it never attaches the
+          # Simulator.app GUI process. Confirmed via a real failure: after
+          # the ~10-minute `build-for-testing` step, `xcodebuild
+          # test-without-building` reported *zero* available Simulator
+          # destinations for this exact UDID, even though `flutter devices`
+          # saw it fine moments earlier — a headless-booted device isn't
+          # reliably discoverable that long after boot. Launching
+          # Simulator.app anchors the booted state, and `bootstatus -b`
+          # blocks until it's actually ready instead of racing ahead.
+          open -a Simulator --args -CurrentDeviceUDID "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
 
       - name: Run physician/EMS Patrol e2e (iOS Simulator)
         run: |
