@@ -125,11 +125,22 @@ jobs:
       # GitHub's hosted ubuntu-latest image ships the Android SDK
       # preinstalled (ANDROID_HOME already set) — no separate SDK setup
       # action needed, unlike a bare/self-hosted runner.
+      # Builds every app even if an earlier one fails (bash's default `-e`
+      # would otherwise abort the whole loop on the first failure, hiding
+      # whether the *other* app has the same problem — cheaper to find out
+      # in one run than by pushing a fix and waiting for round two).
       - name: Build physician/ems (Android debug APK)
         run: |
+          failed=()
           for app in physician ems; do
-            (cd "apps/$app" && flutter build apk --debug)
+            echo "::group::$app"
+            (cd "apps/$app" && flutter build apk --debug) || failed+=("$app")
+            echo "::endgroup::"
           done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "Failed: ${failed[*]}"
+            exit 1
+          fi
         working-directory: flutter
 
   flutter-ios-build:
@@ -151,9 +162,16 @@ jobs:
       # resolution for both apps.
       - name: Build physician/ems (iOS, no codesign)
         run: |
+          failed=()
           for app in physician ems; do
-            (cd "apps/$app" && flutter build ios --debug --no-codesign)
+            echo "::group::$app"
+            (cd "apps/$app" && flutter build ios --debug --no-codesign) || failed+=("$app")
+            echo "::endgroup::"
           done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "Failed: ${failed[*]}"
+            exit 1
+          fi
         working-directory: flutter
 
   deploy:
