@@ -73,6 +73,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
 
       - name: Analyze amdash_core, physician, ems, admin
         run: |
@@ -97,6 +98,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
 
       # Verifies each app's web build succeeds before deploy attempts the
       # real thing on its own fresh runner. physician's DIRECTIONS_API_KEY
@@ -121,6 +123,15 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('flutter/apps/*/android/**/*.gradle*', 'flutter/apps/*/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
 
       # GitHub's hosted ubuntu-latest image ships the Android SDK
       # preinstalled (ANDROID_HOME already set) — no separate SDK setup
@@ -152,6 +163,21 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
+
+      # CocoaPods' spec-repo CDN cache + Xcode's resolved Swift Package
+      # Manager checkouts (DerivedData) — both are the slow parts of this
+      # job ("Xcode is fetching Swift Package Manager dependencies. This
+      # may take several minutes..." in the first real run). Keyed off
+      # pubspec.lock as a proxy for "the plugin set changed" — no
+      # Podfile.lock is committed (never resolved before this phase).
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            ~/Library/Developer/Xcode/DerivedData
+          key: cocoapods-${{ runner.os }}-${{ hashFiles('flutter/apps/physician/pubspec.lock', 'flutter/apps/ems/pubspec.lock') }}
+          restore-keys: cocoapods-${{ runner.os }}-
 
       # --no-codesign: no signing identity/provisioning profile exists yet
       # (deliberately out of scope this pass — see the plan) — this only
@@ -200,6 +226,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
 
       - name: Install nx-monorepo dependencies
         run: npm ci
@@ -282,6 +309,14 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
+
+      # `dart pub global activate` compiles patrol_cli from source — real
+      # time cost, repeated identically in all three e2e jobs every run.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-cache-${{ runner.os }}-patrol-cli
 
       - name: Install patrol_cli
         run: |
@@ -361,6 +396,22 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('flutter/apps/*/android/**/*.gradle*', 'flutter/apps/*/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      # `dart pub global activate` compiles patrol_cli from source — real
+      # time cost, repeated identically in all three e2e jobs every run.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-cache-${{ runner.os }}-patrol-cli
 
       - name: Install patrol_cli
         run: |
@@ -385,15 +436,43 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      # Boots a KVM-accelerated AVD for the duration of `script:` below,
-      # runs the same run-*-patrol-test.mjs scripts as web-e2e — resolved
-      # to the booted Android device id instead of Chrome (see
-      # scripts/lib/run-patrol.mjs's resolveDeviceId). No explicit
-      # runtime-permission-granting step: the current Patrol tests don't
-      # exercise EMS's live-tracking toggle (deliberately left off,
-      # same reason as web-e2e), so they shouldn't hit a location
-      # permission prompt — if a future test does, `adb install -g` /
-      # `pm grant` is the known fix, not yet needed.
+      # AVD cold boot (no snapshot) is one of the slowest parts of this
+      # job. This is the action's own documented caching recipe: cache
+      # ~/.android/avd + ~/.android/adb*, and on a cache miss, boot once
+      # with a no-op script just to create + snapshot the AVD before the
+      # real test run reuses it — subsequent runs boot from the cached
+      # snapshot instead of cold.
+      - name: AVD cache
+        uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-34-google_apis-x86_64
+
+      - name: Create AVD snapshot for caching
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: false
+          script: echo "Generated AVD snapshot for caching."
+
+      # Boots the (now cached) KVM-accelerated AVD for the duration of
+      # `script:` below, runs the same run-*-patrol-test.mjs scripts as
+      # web-e2e — resolved to the booted Android device id instead of
+      # Chrome (see scripts/lib/run-patrol.mjs's resolveDeviceId). No
+      # explicit runtime-permission-granting step: the current Patrol
+      # tests don't exercise EMS's live-tracking toggle (deliberately
+      # left off, same reason as web-e2e), so they shouldn't hit a
+      # location permission prompt — if a future test does, `adb install
+      # -g` / `pm grant` is the known fix, not yet needed.
       - name: Run Android emulator + Patrol e2e
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -401,11 +480,16 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_6
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: |
-            cd nx-monorepo
-            PATROL_DEVICE=android node scripts/run-physician-patrol-test.mjs
-            PATROL_DEVICE=android node scripts/run-ems-patrol-test.mjs
+          # reactivecircus/android-emulator-runner runs each *line* of
+          # `script:` as its own separate shell invocation — `cd` on one
+          # line does not persist to the next (confirmed: the first real
+          # run showed two unrelated `sh -c` calls, and the second one
+          # failed to resolve scripts/... because it never saw the `cd`).
+          # One &&-chained line keeps it all in a single shell.
+          script: cd nx-monorepo && PATROL_DEVICE=android node scripts/run-physician-patrol-test.mjs && PATROL_DEVICE=android node scripts/run-ems-patrol-test.mjs
 
   ios-e2e:
     name: iOS e2e (Simulator)
@@ -423,6 +507,22 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            ~/Library/Developer/Xcode/DerivedData
+          key: cocoapods-${{ runner.os }}-${{ hashFiles('flutter/apps/physician/pubspec.lock', 'flutter/apps/ems/pubspec.lock') }}
+          restore-keys: cocoapods-${{ runner.os }}-
+
+      # `dart pub global activate` compiles patrol_cli from source — real
+      # time cost, repeated identically in all three e2e jobs every run.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-cache-${{ runner.os }}-patrol-cli
 
       - name: Install patrol_cli
         run: |
@@ -443,9 +543,23 @@ jobs:
       # ships several pre-created Simulators, but none are booted by
       # default, so boot one explicitly first. No signing needed —
       # Simulator builds are never code-signed.
+      #
+      # Must pick a device from the *newest* installed iOS runtime
+      # specifically, not just any "iPhone" — confirmed via a real failure:
+      # patrol_cli's own generated `xcodebuild test-without-building`
+      # command targets the device by both id AND `OS=latest`, and if the
+      # booted device's actual runtime isn't literally the newest one
+      # available, that destination match fails outright ("Unable to find
+      # a device matching the provided destination specifier ... OS:latest
+      # ***", even though the exact same UDID was already confirmed
+      # connected moments earlier by `flutter devices`). macos-latest ships
+      # multiple iOS runtimes, and grabbing the first "iPhone" match across
+      # all of them isn't guaranteed to land on the newest one.
       - name: Boot an iOS Simulator
         run: |
-          UDID=$(xcrun simctl list devices available --json | jq -r '.devices | to_entries[] | .value[] | select(.name | contains("iPhone")) | .udid' | head -1)
+          LATEST_RUNTIME=$(xcrun simctl list runtimes --json | jq -r '[.runtimes[] | select(.platform == "iOS")] | max_by(.version) | .identifier')
+          echo "Latest iOS runtime: $LATEST_RUNTIME"
+          UDID=$(xcrun simctl list devices available --json | jq -r --arg RT "$LATEST_RUNTIME" '.devices[$RT][] | select(.name | contains("iPhone")) | .udid' | head -1)
           echo "Booting simulator $UDID"
           xcrun simctl boot "$UDID"
 
