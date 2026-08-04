@@ -242,19 +242,20 @@ jobs:
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
 
       # Each script creates its own throwaway Firebase account (+ hospital/
-      # patient for physician) via the Admin SDK, drives `patrol test`
-      # against a real Chrome instance, and tears its own state back down —
-      # see nx-monorepo/scripts/run-*-patrol-test.mjs.
-      #
-      # EMS has no Patrol web suite yet (its existing integration_test
-      # suite targets native background-GPS behavior, not the web build) —
-      # not covered by this job. Add one here once it exists.
+      # patient for physician; EMS creates/edits/deletes its own patient
+      # entirely through the app's own UI) via the Admin SDK, drives
+      # `patrol test` against a real Chrome instance, and tears its own
+      # state back down — see nx-monorepo/scripts/run-*-patrol-test.mjs.
       - name: Run admin Patrol e2e
         run: node scripts/run-admin-patrol-test.mjs
         working-directory: nx-monorepo
 
       - name: Run physician Patrol e2e
         run: node scripts/run-physician-patrol-test.mjs
+        working-directory: nx-monorepo
+
+      - name: Run EMS Patrol e2e
+        run: node scripts/run-ems-patrol-test.mjs
         working-directory: nx-monorepo
 
       - name: Upload Patrol reports
@@ -265,4 +266,5 @@ jobs:
           path: |
             flutter/apps/admin/playwright-report
             flutter/apps/physician/playwright-report
+            flutter/apps/ems/playwright-report
           retention-days: 7

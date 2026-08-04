@@ -351,6 +351,7 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton(
+                    key: const Key('patient_upload_submit'),
                     onPressed: _submitting ? null : _onSubmit,
                     child: _submitting
                         ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
