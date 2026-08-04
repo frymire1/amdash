@@ -36,7 +36,8 @@ class _PatientListState extends ConsumerState<PatientList> {
 
   @override
   Widget build(BuildContext context) {
-    final patients = ref.watch(physicianPatientsProvider).valueOrNull ?? const [];
+    final patientsAsync = ref.watch(physicianPatientsProvider);
+    final patients = patientsAsync.valueOrNull ?? const [];
     final hospitals = ref.watch(hospitalsProvider).valueOrNull ?? const [];
     final profile = ref.watch(userProfileProvider).valueOrNull;
 
@@ -107,7 +108,9 @@ class _PatientListState extends ConsumerState<PatientList> {
             ),
           ),
         Expanded(
-          child: filtered.isEmpty
+          child: !patientsAsync.hasValue
+              ? const Center(child: CircularProgressIndicator())
+              : filtered.isEmpty
               ? Center(
                   child: Text(
                     patients.isEmpty ? 'No patients uploaded yet.' : 'No patients match this filter.',

@@ -30,6 +30,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   _LoginStep _step = _LoginStep.email;
   bool _submitting = false;
   bool _resetSubmitting = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
   String? _errorMessage;
   String? _resetMessage;
 
@@ -236,8 +238,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           const SizedBox(height: 16),
           TextField(
             controller: _passwordController,
-            decoration: const InputDecoration(labelText: 'Password'),
-            obscureText: true,
+            decoration: InputDecoration(
+              labelText: 'Password',
+              suffixIcon: IconButton(
+                icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
+                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+              ),
+            ),
+            obscureText: _obscurePassword,
             autofillHints: const [AutofillHints.newPassword],
           ),
           if (showHints)
@@ -256,8 +264,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           const SizedBox(height: 12),
           TextField(
             controller: _confirmPasswordController,
-            decoration: const InputDecoration(labelText: 'Confirm Password'),
-            obscureText: true,
+            decoration: InputDecoration(
+              labelText: 'Confirm Password',
+              suffixIcon: IconButton(
+                icon: Icon(_obscureConfirmPassword ? Icons.visibility_off : Icons.visibility),
+                onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
+              ),
+            ),
+            obscureText: _obscureConfirmPassword,
             autofillHints: const [AutofillHints.newPassword],
             onSubmitted: (_) => _submitSetPassword(),
           ),
@@ -280,8 +294,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           const SizedBox(height: 16),
           TextField(
             controller: _passwordController,
-            decoration: const InputDecoration(labelText: 'Password'),
-            obscureText: true,
+            decoration: InputDecoration(
+              labelText: 'Password',
+              suffixIcon: IconButton(
+                icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
+                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+              ),
+            ),
+            obscureText: _obscurePassword,
             autofillHints: const [AutofillHints.password],
             onSubmitted: (_) => _submitSignIn(),
           ),

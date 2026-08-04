@@ -162,18 +162,32 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
             isProvidedValue(patient.name) ? patient.name : 'Not added by EMS yet',
             style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
           ),
+          Text.rich(
+            TextSpan(
+              style: TextStyle(color: AppColors.slate500),
+              children: [
+                if (isProvidedValue(patient.age))
+                  TextSpan(text: '${patient.age} years')
+                else ...[
+                  const TextSpan(text: 'Age: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const TextSpan(text: 'unknown'),
+                ],
+                const TextSpan(text: ' · '),
+                if (isProvidedValue(patient.gender))
+                  TextSpan(text: patient.gender)
+                else ...[
+                  const TextSpan(text: 'Gender: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const TextSpan(text: 'unknown'),
+                ],
+              ],
+            ),
+          ),
           Text(
             'Healthcare #: ${isProvidedValue(patient.healthcareNumber) ? patient.healthcareNumber : 'Not added by EMS yet'}',
             style: TextStyle(color: AppColors.slate500),
           ),
           const SizedBox(height: 16),
-          _infoCard('Patient Information', [
-            _infoRow('Gender', patient.gender),
-            _infoRow('Age', patient.age, suffix: 'years'),
-            _infoRow('Destination', patient.destination),
-            _infoRow('IV Size', patient.ivSize),
-            _infoRow('IV Placement', patient.ivPlacement),
-          ]),
+          _infoCard('Destination Hospital', [_infoRow('Destination', patient.destination)]),
           const SizedBox(height: 12),
           _infoCard('Vital Signs', [
             _infoRow('Heart Rate', patient.vitals.heartRate, suffix: 'bpm'),
@@ -184,10 +198,8 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
             _infoRow('GCS', patient.vitals.gcs),
           ], accent: true),
           const SizedBox(height: 12),
-          if (isProvidedValue(patient.treatment)) ...[
-            _textCard('Treatment / Medication Given', patient.treatment!),
-            const SizedBox(height: 12),
-          ],
+          _treatmentCard(patient),
+          const SizedBox(height: 12),
           if (isProvidedValue(patient.notes)) ...[
             _textCard('Patient Notes', patient.notes!),
             const SizedBox(height: 12),
@@ -238,6 +250,38 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
                 fontStyle: provided ? FontStyle.normal : FontStyle.italic,
                 color: provided ? AppColors.slate900 : AppColors.slate400,
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _treatmentCard(Patient patient) {
+    final treatmentProvided = isProvidedValue(patient.treatment);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Treatment / Medication Given', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text(
+              treatmentProvided ? patient.treatment! : 'Not added by EMS yet',
+              style: TextStyle(
+                fontStyle: treatmentProvided ? FontStyle.normal : FontStyle.italic,
+                color: treatmentProvided ? null : AppColors.slate400,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 16,
+              runSpacing: 12,
+              children: [
+                _infoRow('IV Size', patient.ivSize),
+                _infoRow('IV Placement', patient.ivPlacement),
+              ],
             ),
           ],
         ),

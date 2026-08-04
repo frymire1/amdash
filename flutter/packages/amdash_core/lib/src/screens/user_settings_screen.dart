@@ -12,7 +12,11 @@ import '../models/user_profile.dart';
 /// Mirrors `libs/auth/src/lib/user-settings/user-settings.component.ts` —
 /// name fields, an optional hospital field (physician/nurse only, for
 /// changing an already-set work location — the mandatory first pick is
-/// [WorkLocationScreen]'s job), and new-patient push-alert arming.
+/// [WorkLocationScreen]'s job), and new-patient push-alert arming. Profile
+/// and hospital are separate cards with their own Save action, each with
+/// its own loading/success/error state — this screen stays put after a
+/// save (no auto-navigate-away) so the confirmation is actually visible,
+/// and so saving one doesn't require re-touching the other.
 class UserSettingsScreen extends ConsumerStatefulWidget {
   const UserSettingsScreen({super.key});
 
@@ -31,8 +35,14 @@ class _UserSettingsScreenState extends ConsumerState<UserSettingsScreen> {
   bool _disablingAlerts = false;
   String? _alertsBlockedMessage;
 
-  bool _submitting = false;
-  String? _errorMessage;
+  bool _savingProfile = false;
+  String? _profileError;
+  String? _profileSuccess;
+
+  bool _savingHospital = false;
+  String? _hospitalError;
+  String? _hospitalSuccess;
+
   bool _prefilled = false;
 
   Timer? _tickTimer;
@@ -96,39 +106,59 @@ class _UserSettingsScreenState extends ConsumerState<UserSettingsScreen> {
     }
   }
 
-  Future<void> _submit(String uid, List<String> hospitalNames) async {
-    setState(() => _hospitalTouched = true);
+  Future<void> _submitProfile(String uid) async {
     final firstName = _firstNameController.text.trim();
     final lastName = _lastNameController.text.trim();
-    final hospitalInvalid = _typedHospital.isNotEmpty && !hospitalNames.contains(_typedHospital);
-    if (firstName.isEmpty || lastName.isEmpty || hospitalInvalid) return;
+    if (firstName.isEmpty || lastName.isEmpty) return;
 
     setState(() {
-      _submitting = true;
-      _errorMessage = null;
+      _savingProfile = true;
+      _profileError = null;
+      _profileSuccess = null;
     });
-
     try {
       await ref.read(userProfileServiceProvider).saveProfile(uid, firstName, lastName).timeout(
         const Duration(seconds: 15),
       );
-      // Optional — picking a hospital for the first time is handled by the
-      // mandatory work-location step; this field is just for changing an
-      // already-set one later.
-      if (_typedHospital.isNotEmpty) {
-        await ref.read(userProfileServiceProvider).saveWorkLocation(uid, _typedHospital).timeout(
-          const Duration(seconds: 15),
-        );
-      }
-      if (mounted) Navigator.of(context).maybePop();
+      if (mounted) setState(() => _profileSuccess = 'Saved.');
     } catch (error) {
-      setState(() {
-        _errorMessage = error.toString().contains('TimeoutException')
-            ? 'This is taking longer than expected. Check your connection and try again.'
-            : 'Failed to save your details. Please try again.';
-      });
+      if (mounted) {
+        setState(() {
+          _profileError = error.toString().contains('TimeoutException')
+              ? 'This is taking longer than expected. Check your connection and try again.'
+              : 'Failed to save your details. Please try again.';
+        });
+      }
     } finally {
-      if (mounted) setState(() => _submitting = false);
+      if (mounted) setState(() => _savingProfile = false);
+    }
+  }
+
+  Future<void> _submitHospital(String uid, List<String> hospitalNames) async {
+    setState(() => _hospitalTouched = true);
+    final hospitalInvalid = _typedHospital.isEmpty || !hospitalNames.contains(_typedHospital);
+    if (hospitalInvalid) return;
+
+    setState(() {
+      _savingHospital = true;
+      _hospitalError = null;
+      _hospitalSuccess = null;
+    });
+    try {
+      await ref.read(userProfileServiceProvider).saveWorkLocation(uid, _typedHospital).timeout(
+        const Duration(seconds: 15),
+      );
+      if (mounted) setState(() => _hospitalSuccess = 'Saved.');
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _hospitalError = error.toString().contains('TimeoutException')
+              ? 'This is taking longer than expected. Check your connection and try again.'
+              : 'Failed to save your hospital. Please try again.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _savingHospital = false);
     }
   }
 
@@ -168,6 +198,8 @@ class _UserSettingsScreenState extends ConsumerState<UserSettingsScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          const Text('Profile', style: TextStyle(fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 12),
                           TextField(
                             controller: _firstNameController,
                             decoration: const InputDecoration(labelText: 'First Name'),
@@ -177,7 +209,31 @@ class _UserSettingsScreenState extends ConsumerState<UserSettingsScreen> {
                             controller: _lastNameController,
                             decoration: const InputDecoration(labelText: 'Last Name'),
                           ),
-                          if (showHospitalField) ...[
+                          _StatusLine(error: _profileError, success: _profileSuccess),
+                          const SizedBox(height: 16),
+                          FilledButton(
+                            onPressed: _savingProfile ? null : () => _submitProfile(uid),
+                            child: _savingProfile
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                : const Text('Save'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (showHospitalField) ...[
+                    const SizedBox(height: 16),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const Text('Hospital', style: TextStyle(fontWeight: FontWeight.bold)),
                             const SizedBox(height: 12),
                             Autocomplete<String>(
                               initialValue: TextEditingValue(text: _typedHospital),
@@ -200,30 +256,23 @@ class _UserSettingsScreenState extends ConsumerState<UserSettingsScreen> {
                                 );
                               },
                             ),
-                          ],
-                          if (_errorMessage != null)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: Text(
-                                _errorMessage!,
-                                style: TextStyle(color: Theme.of(context).colorScheme.error),
-                              ),
+                            _StatusLine(error: _hospitalError, success: _hospitalSuccess),
+                            const SizedBox(height: 16),
+                            FilledButton(
+                              onPressed: _savingHospital ? null : () => _submitHospital(uid, hospitalNames),
+                              child: _savingHospital
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  : const Text('Save'),
                             ),
-                          const SizedBox(height: 16),
-                          FilledButton(
-                            onPressed: _submitting ? null : () => _submit(uid, hospitalNames),
-                            child: _submitting
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  )
-                                : const Text('Save'),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                   const SizedBox(height: 16),
                   Card(
                     child: Padding(
@@ -290,5 +339,36 @@ class _UserSettingsScreenState extends ConsumerState<UserSettingsScreen> {
         ),
       ),
     );
+  }
+}
+
+class _StatusLine extends StatelessWidget {
+  const _StatusLine({this.error, this.success});
+
+  final String? error;
+  final String? success;
+
+  @override
+  Widget build(BuildContext context) {
+    if (error != null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+      );
+    }
+    if (success != null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.check_circle, color: Colors.green, size: 18),
+            const SizedBox(width: 6),
+            Text(success!, style: const TextStyle(color: Colors.green)),
+          ],
+        ),
+      );
+    }
+    return const SizedBox.shrink();
   }
 }
