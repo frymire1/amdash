@@ -195,6 +195,20 @@ jobs:
         run: npm ci
         working-directory: nx-monorepo
 
+      # `patrol test` bootstraps its own Node/Playwright setup inside each
+      # app dir on demand ("Installing Playwright dependencies..." in its
+      # own output) but that only downloads the browser binary, not the
+      # OS-level shared libraries (libnss3, libatk, etc.) a fresh
+      # ubuntu-latest runner doesn't have preinstalled — without them,
+      # Chromium fails to launch at all and patrol exits after ~4s with no
+      # test output ("Playwright process exited unexpectedly with code 1").
+      # Playwright caches the downloaded browser globally
+      # (~/.cache/ms-playwright), so installing it once here up front means
+      # patrol's own later install step just finds it already present.
+      - name: Install Playwright browser + OS dependencies
+        run: npx playwright install --with-deps chromium
+        working-directory: nx-monorepo
+
       # Used by the run-*-patrol-test.mjs scripts' own Admin SDK calls (see
       # scripts/lib/firebase-admin-cli.mjs) — the Admin SDK auto-detects
       # this standard env var, no extra plumbing needed. Same secret as the
