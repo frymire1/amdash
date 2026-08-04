@@ -173,8 +173,24 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     needs: deploy
+    # Flutter Web's engine crashes on startup ("Error: Invalid argument:
+    # Incorrect locale information provided", thrown from
+    # parseBrowserLanguages) when the headless Chromium Patrol/Playwright
+    # launches reports a locale list the engine can't parse — which is what
+    # happens on a bare ubuntu-latest runner, where LANG/LC_ALL default to
+    # C/POSIX rather than a real locale. Setting a real one job-wide fixes
+    # it; the runner has en_US.UTF-8 pre-generated already, just not active.
+    env:
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
     steps:
       - uses: actions/checkout@v4
+
+      # Belt-and-suspenders alongside the job-level LANG/LC_ALL above:
+      # locale-gen is a no-op if en_US.UTF-8 is already generated, so this
+      # doesn't assume anything about what the runner image ships with.
+      - name: Ensure en_US.UTF-8 locale is generated
+        run: sudo locale-gen en_US.UTF-8
 
       - uses: actions/setup-node@v4
         with:
