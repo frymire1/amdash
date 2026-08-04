@@ -165,19 +165,31 @@ jobs:
           channel: stable
           cache: true
 
-      # CocoaPods' spec-repo CDN cache + Xcode's resolved Swift Package
-      # Manager checkouts (DerivedData) — both are the slow parts of this
-      # job ("Xcode is fetching Swift Package Manager dependencies. This
-      # may take several minutes..." in the first real run). Keyed off
-      # pubspec.lock as a proxy for "the plugin set changed" — no
-      # Podfile.lock is committed (never resolved before this phase).
+      # CocoaPods' spec-repo CDN cache + Xcode's system-wide Swift Package
+      # Manager checkout cache — both are the slow parts of this job ("Xcode
+      # is fetching Swift Package Manager dependencies. This may take
+      # several minutes..." in the first real run). Keyed off pubspec.lock
+      # as a proxy for "the plugin set changed" — no Podfile.lock is
+      # committed (never resolved before this phase).
+      #
+      # Deliberately NOT caching ~/Library/Developer/Xcode/DerivedData:
+      # this job's plain `flutter build ios --no-codesign` and ios-e2e's
+      # `xcodebuild build-for-testing`/`test-without-building` would share
+      # that cache key, and a real run proved that's unsafe — ios-e2e
+      # restored DerivedData from this job's non-test build, and
+      # xcodebuild's incremental build then considered the RunnerUITests
+      # product already up to date and never actually produced it
+      # ("Missing test product at (null)" from `test-without-building`).
+      # DerivedData is fragile to share across different build
+      # invocations/schemes; the SPM checkout cache below is Xcode's own
+      # dedicated, safe-to-share cache and isn't tied to build output.
       - uses: actions/cache@v4
         with:
           path: |
             ~/Library/Caches/CocoaPods
-            ~/Library/Developer/Xcode/DerivedData
-          key: cocoapods-${{ runner.os }}-${{ hashFiles('flutter/apps/physician/pubspec.lock', 'flutter/apps/ems/pubspec.lock') }}
-          restore-keys: cocoapods-${{ runner.os }}-
+            ~/Library/Caches/org.swift.swiftpm
+          key: cocoapods-v2-${{ runner.os }}-${{ hashFiles('flutter/apps/physician/pubspec.lock', 'flutter/apps/ems/pubspec.lock') }}
+          restore-keys: cocoapods-v2-${{ runner.os }}-
 
       # --no-codesign: no signing identity/provisioning profile exists yet
       # (deliberately out of scope this pass — see the plan) — this only
@@ -509,13 +521,17 @@ jobs:
           channel: stable
           cache: true
 
+      # See flutter-ios-build's identical cache step for why DerivedData
+      # itself is deliberately excluded (mixing a plain build's DerivedData
+      # with this job's testing build silently broke `test-without-building`
+      # — "Missing test product at (null)").
       - uses: actions/cache@v4
         with:
           path: |
             ~/Library/Caches/CocoaPods
-            ~/Library/Developer/Xcode/DerivedData
-          key: cocoapods-${{ runner.os }}-${{ hashFiles('flutter/apps/physician/pubspec.lock', 'flutter/apps/ems/pubspec.lock') }}
-          restore-keys: cocoapods-${{ runner.os }}-
+            ~/Library/Caches/org.swift.swiftpm
+          key: cocoapods-v2-${{ runner.os }}-${{ hashFiles('flutter/apps/physician/pubspec.lock', 'flutter/apps/ems/pubspec.lock') }}
+          restore-keys: cocoapods-v2-${{ runner.os }}-
 
       # `dart pub global activate` compiles patrol_cli from source — real
       # time cost, repeated identically in all three e2e jobs every run.
