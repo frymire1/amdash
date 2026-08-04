@@ -61,6 +61,15 @@ final userProfileServiceProvider = Provider<UserProfileService>((ref) {
 /// yields `null`).
 final userProfileProvider = StreamProvider<UserProfile?>((ref) async* {
   final authState = ref.watch(authStateProvider);
+
+  // While a recomputation is in flight, authState.hasValue can still be
+  // true — Riverpod carries the *previous* value forward during a
+  // rebuild — so `isLoading` alone is the reliable "don't trust this yet"
+  // signal (see physicianPatientsProvider's identical check for the real
+  // failure this guards against: a stale value read as if it were
+  // settled).
+  if (authState.isLoading) return;
+
   final user = authState.valueOrNull;
 
   if (user == null) {
@@ -68,10 +77,26 @@ final userProfileProvider = StreamProvider<UserProfile?>((ref) async* {
     return;
   }
 
+  // A freshly (re)attached listener — e.g. after an auth token refresh
+  // recreates this provider (see RouterRefreshNotifier/AppRouteGuard,
+  // which has to work around the same thing) — emits its first snapshot
+  // from the local cache before the server-confirmed one, and that first
+  // cached read can transiently miss a since-added field (confirmed via a
+  // real run: organizationId read as null from the cached snapshot, then
+  // correctly populated moments later from the server-confirmed one).
+  // Only trust a server-confirmed snapshot. Requires
+  // `includeMetadataChanges: true`: with the default `false`, Firestore
+  // only fires a new event when the *data* changes, and a fresh sign-in's
+  // cached copy is often already identical to what the server goes on to
+  // confirm — no data change means no second event ever fires, and a
+  // plain `.where((s) => !s.metadata.isFromCache)` then blocks forever
+  // (confirmed the hard way: this exact bug, on this exact line, minus
+  // `includeMetadataChanges: true`, broke fresh sign-in outright).
   yield* FirebaseFirestore.instance
       .collection('users')
       .doc(user.uid)
-      .snapshots()
+      .snapshots(includeMetadataChanges: true)
+      .where((snapshot) => !snapshot.metadata.isFromCache)
       .map((snapshot) {
         final data = snapshot.data();
         return data == null ? null : UserProfile.fromFirestore(data);

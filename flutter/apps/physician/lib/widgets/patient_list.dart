@@ -26,6 +26,11 @@ class _PatientListState extends ConsumerState<PatientList> {
   bool _sortByDistance = false;
   String _selectedDestination = kAllDestinations;
 
+  // Latches true the first time the (now guaranteed server-confirmed, see
+  // physicianPatientsProvider) patients stream produces a value, and stays
+  // true from then on — gates the loading spinner below.
+  bool _loadedOnce = false;
+
   Hospital? _findHospital(List<Hospital> hospitals, String? name) {
     if (name == null) return null;
     for (final hospital in hospitals) {
@@ -37,6 +42,7 @@ class _PatientListState extends ConsumerState<PatientList> {
   @override
   Widget build(BuildContext context) {
     final patientsAsync = ref.watch(physicianPatientsProvider);
+    if (patientsAsync.hasValue) _loadedOnce = true;
     final patients = patientsAsync.valueOrNull ?? const [];
     final hospitals = ref.watch(hospitalsProvider).valueOrNull ?? const [];
     final profile = ref.watch(userProfileProvider).valueOrNull;
@@ -108,7 +114,7 @@ class _PatientListState extends ConsumerState<PatientList> {
             ),
           ),
         Expanded(
-          child: !patientsAsync.hasValue
+          child: !_loadedOnce
               ? const Center(child: CircularProgressIndicator())
               : filtered.isEmpty
               ? Center(
