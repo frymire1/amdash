@@ -97,8 +97,16 @@ export function runPatrolTest({ appDir, target, dartDefines }) {
       for (const [key, value] of Object.entries(dartDefines)) {
         args.push('--dart-define', `${key}=${value}`);
       }
-      console.log('Running: patrol', args.join(' '));
-      const child = spawn('patrol', args, { cwd: appDir, stdio: 'inherit' });
+      // Patrol's underlying Playwright config launches Chromium headed
+      // (not headless) — fine on a dev machine with a real display, but a
+      // bare CI runner has no X server for it to attach to (confirmed:
+      // "browserType.launch: Target page, context or browser has been
+      // closed" / "Missing X server or $DISPLAY"). xvfb-run provides a
+      // virtual framebuffer so a headed browser can launch anyway — the
+      // standard fix Playwright's own error message suggests.
+      const xvfbArgs = ['-a', 'patrol', ...args];
+      console.log('Running: xvfb-run', xvfbArgs.join(' '));
+      const child = spawn('xvfb-run', xvfbArgs, { cwd: appDir, stdio: 'inherit' });
       child.on('close', (code) => resolve(code ?? 1));
     }
   });

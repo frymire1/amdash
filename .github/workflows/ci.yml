@@ -192,6 +192,13 @@ jobs:
       - name: Ensure en_US.UTF-8 locale is generated
         run: sudo locale-gen en_US.UTF-8
 
+      # Patrol launches Chromium headed, which needs a (virtual) display —
+      # see scripts/lib/run-patrol.mjs's xvfb-run wrapping. apt-get install
+      # is a no-op if xvfb is already present, so this doesn't assume
+      # anything about the runner image either.
+      - name: Ensure xvfb is installed
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
