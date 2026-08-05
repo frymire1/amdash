@@ -46,7 +46,13 @@ dependencies:
   go_router: ^16.2.4
   google_maps_flutter: ^2.13.1
   http: ^1.6.0
-  connectivity_plus: ^7.0.0
+  # Pinned below 7.1.0: that release added an unguarded reference to
+  # NWPath.isUltraConstrained (a Network framework API introduced in the
+  # iOS 26 SDK), which fails to compile on Xcode < 26.1.1 ("Value of type
+  # 'NWPath' has no member 'isUltraConstrained'") — confirmed via a real
+  # CI failure on the Xcode 16.4 toolchain this repo is pinned to (see
+  # ci.yml's macos-15 pin, itself working around a different Xcode 26 bug).
+  connectivity_plus: ">=7.0.0 <7.1.0"
   intl: ^0.20.2
   web: ^1.1.0
 

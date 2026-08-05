@@ -46,7 +46,9 @@ dependencies:
   geolocator: ^14.0.2
   flutter_foreground_task: ^9.1.0
   shared_preferences: ^2.5.3
-  connectivity_plus: ^7.0.0
+  # See physician/pubspec.yaml's identical pin — 7.1.0+ fails to compile
+  # on Xcode < 26.1.1.
+  connectivity_plus: ">=7.0.0 <7.1.0"
   intl: ^0.20.2
 
 dev_dependencies:
