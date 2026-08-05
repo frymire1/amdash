@@ -33,10 +33,15 @@
   <title>AmDash — Physician</title>
   <link rel="manifest" href="manifest.json">
 
-  <!-- Google Maps JS API — replace with a real key restricted to this
-       app's web origin (HTTP referrer) in Google Cloud Console. Loaded
-       globally, same as the Angular app's own index.html. -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAVw6VdBrfJ36MRP4-7qBhLDOPJ-fYg-s0"></script>
+  <!-- Google Maps JS API. Was pointing at the iOS Maps SDK key
+       (AppDelegate.swift's GMSServices.provideAPIKey) by mistake — an
+       iOS-app-restricted key can't serve a web request at all, regardless
+       of HTTP referrer, hence ApiTargetBlockedMapError. Using the web
+       Firebase API key (firebase_options.dart's web block) instead; if
+       Maps JavaScript API isn't already enabled for it, enable it (and
+       add an HTTP referrer restriction for this app's origin) in Google
+       Cloud Console. -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDHOpM_Mi9NcMeZS8sD42olEMyN_MjVl5k"></script>
 </head>
 <body>
   <!--

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:intl/intl.dart';
 
 import '../classes/active_location.dart';
 import '../services/directions_service.dart';
@@ -13,29 +14,43 @@ const _defaultMarkerPosition = LatLng(40.7128, -74.006);
 const _directionsRefreshMs = 15000;
 const _directionsRefreshDistanceM = 75.0;
 
+// Google's own DirectionsRenderer default route color so this just approximates what its
+// default styling looked like; google_maps_flutter's Polyline has no
+// "use the default" option, so the values have to be picked explicitly).
+const _routeColor = Color(0xFF1A73E8);
+const _routeWidth = 6;
+
 /// Mirrors `patient-viewer.component.ts`/`.html` — the core screen: patient
 /// info/vitals cards, a live map with the static pickup location, the
 /// animated EMS vehicle marker (lerped between Firestore fixes over the
 /// real elapsed wall-clock gap — not a fixed-duration Tween), the
 /// destination hospital, and a throttled Directions route overlay.
 class PatientViewer extends ConsumerStatefulWidget {
-  const PatientViewer({required this.patient, required this.directionsApiKey, super.key});
+  const PatientViewer({required this.patient, super.key});
 
   final Patient? patient;
-  final String directionsApiKey;
 
   @override
   ConsumerState<PatientViewer> createState() => _PatientViewerState();
 }
 
 class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProviderStateMixin {
-  late final DirectionsService _directionsService = DirectionsService(widget.directionsApiKey);
+  final DirectionsService _directionsService = DirectionsService();
 
+  GoogleMapController? _mapController;
   Ticker? _ticker;
   LatLng? _animatedVehiclePosition;
   DirectionsResult? _directionsResult;
   int? _lastDirectionsRequestAtMs;
   LatLng? _lastRequestedOrigin;
+
+  // Whether EMS is *currently* actively publishing a fix for this patient.
+  // The vehicle position/route themselves are deliberately NOT cleared when
+  // this goes false — a patient briefly going inactive shouldn't erase
+  // useful context — this flag just gates the "Live position"/"Last
+  // updated at" wording near the bottom of the map card.
+  bool _isLive = false;
+  int? _lastFixUpdatedAtMs;
 
   @override
   void dispose() {
@@ -49,29 +64,35 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
     _ticker = null;
 
     if (location?.latitude == null || location?.longitude == null) {
-      setState(() => _animatedVehiclePosition = null);
-      _resetDirections();
+      // Deliberately don't clear _animatedVehiclePosition/_directionsResult
+      // here — keep showing the last known position/route until a new fix
+      // arrives, per the design above.
+      setState(() => _isLive = false);
       return;
     }
 
-    final hasPreviousFix = location!.previousLatitude != null &&
-        location.previousLongitude != null &&
-        location.previousUpdatedAtMs != null &&
-        location.previousUpdatedAtMs! < location.updatedAtMs;
+    final fix = location!;
+    setState(() => _isLive = true);
+    _lastFixUpdatedAtMs = fix.updatedAtMs;
+
+    final hasPreviousFix = fix.previousLatitude != null &&
+        fix.previousLongitude != null &&
+        fix.previousUpdatedAtMs != null &&
+        fix.previousUpdatedAtMs! < fix.updatedAtMs;
 
     if (!hasPreviousFix) {
-      final position = LatLng(location.latitude!, location.longitude!);
+      final position = LatLng(fix.latitude!, fix.longitude!);
       setState(() => _animatedVehiclePosition = position);
       _maybeRequestDirections(position, destinationHospital);
       return;
     }
 
-    final startLat = location.previousLatitude!;
-    final startLng = location.previousLongitude!;
-    final endLat = location.latitude!;
-    final endLng = location.longitude!;
-    final startMs = location.previousUpdatedAtMs!;
-    final durationMs = location.updatedAtMs - startMs;
+    final startLat = fix.previousLatitude!;
+    final startLng = fix.previousLongitude!;
+    final endLat = fix.latitude!;
+    final endLng = fix.longitude!;
+    final startMs = fix.previousUpdatedAtMs!;
+    final durationMs = fix.updatedAtMs - startMs;
 
     _ticker = createTicker((_) {
       final nowMs = DateTime.now().millisecondsSinceEpoch;
@@ -116,10 +137,36 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
 
     try {
       final result = await _directionsService.fetchDirections(origin: origin, destination: destination);
+      // A transient failure or an empty result (e.g. a momentary Directions
+      // API hiccup) shouldn't erase an already-good route — only replace it
+      // once a genuinely new one arrives.
+      if (result == null) return;
       if (mounted) setState(() => _directionsResult = result);
+      // Mirrors DirectionsRenderer's default auto-fit-to-route behavior
+      // (Angular never set preserveViewport, so this was always on).
+      if (result.polylinePoints.isNotEmpty) {
+        _mapController?.animateCamera(
+          CameraUpdate.newLatLngBounds(_boundsFromPoints(result.polylinePoints), 40),
+        );
+      }
     } catch (_) {
-      if (mounted) setState(() => _directionsResult = null);
+      // Same reasoning — keep showing the last known route rather than
+      // clearing it on a transient fetch failure.
     }
+  }
+
+  LatLngBounds _boundsFromPoints(List<LatLng> points) {
+    var minLat = points.first.latitude;
+    var maxLat = points.first.latitude;
+    var minLng = points.first.longitude;
+    var maxLng = points.first.longitude;
+    for (final point in points) {
+      if (point.latitude < minLat) minLat = point.latitude;
+      if (point.latitude > maxLat) maxLat = point.latitude;
+      if (point.longitude < minLng) minLng = point.longitude;
+      if (point.longitude > maxLng) maxLng = point.longitude;
+    }
+    return LatLngBounds(southwest: LatLng(minLat, minLng), northeast: LatLng(maxLat, maxLng));
   }
 
   @override
@@ -308,6 +355,7 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
   Widget _mapCard(LatLng markerPosition, LatLng? hospitalPosition, Patient patient, Hospital? destinationHospital) {
     final map = GoogleMap(
       initialCameraPosition: CameraPosition(target: markerPosition, zoom: 15),
+      onMapCreated: (controller) => _mapController = controller,
       markers: {
         Marker(markerId: const MarkerId('pickup'), position: markerPosition),
         if (_animatedVehiclePosition != null)
@@ -328,8 +376,8 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
           Polyline(
             polylineId: const PolylineId('route'),
             points: _directionsResult!.polylinePoints,
-            color: AppColors.trackingAccent,
-            width: 4,
+            color: _routeColor,
+            width: _routeWidth,
           ),
       },
     );
@@ -370,11 +418,19 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
             if (_animatedVehiclePosition != null)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  'Live position: ${_animatedVehiclePosition!.latitude.toStringAsFixed(4)}, '
-                  '${_animatedVehiclePosition!.longitude.toStringAsFixed(4)}',
-                  style: TextStyle(color: AppColors.trackingAccent, fontSize: 12),
-                ),
+                child: _isLive
+                    ? Text(
+                        'Live position: ${_animatedVehiclePosition!.latitude.toStringAsFixed(4)}, '
+                        '${_animatedVehiclePosition!.longitude.toStringAsFixed(4)}',
+                        style: TextStyle(color: AppColors.trackingAccent, fontSize: 12),
+                      )
+                    : Text(
+                        _lastFixUpdatedAtMs == null
+                            ? 'Not currently live-tracked'
+                            : 'Last updated at: '
+                                '${DateFormat('h:mm:ss a').format(DateTime.fromMillisecondsSinceEpoch(_lastFixUpdatedAtMs!))}',
+                        style: TextStyle(color: AppColors.slate500, fontSize: 12, fontStyle: FontStyle.italic),
+                      ),
               ),
             if (_directionsResult != null && destinationHospital != null)
               Padding(

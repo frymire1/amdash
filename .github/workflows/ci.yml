@@ -101,10 +101,7 @@ jobs:
           cache: true
 
       # Verifies each app's web build succeeds before deploy attempts the
-      # real thing on its own fresh runner. physician's DIRECTIONS_API_KEY
-      # is omitted here (no map rendering happens in a plain build step);
-      # deploy needs the real key so the deployed app can actually call the
-      # Directions API.
+      # real thing on its own fresh runner.
       - name: Build physician/ems/admin (web)
         run: |
           for app in physician ems admin; do
@@ -293,7 +290,7 @@ jobs:
       - name: Build physician/ems/admin (web)
         run: |
           for app in physician ems admin; do
-            (cd "apps/$app" && flutter build web --release --dart-define=DIRECTIONS_API_KEY=${{ secrets.DIRECTIONS_API_KEY }})
+            (cd "apps/$app" && flutter build web --release)
           done
         working-directory: flutter
 

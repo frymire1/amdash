@@ -1,8 +1,8 @@
 // Phase 2 verification: runs via `patrol test --device chrome` against real
 // Chrome (through Patrol's Playwright-backed web runner), real Firebase
-// Auth/Firestore on amdash-dev, and (with a real Maps/Directions API key
-// passed via --dart-define=DIRECTIONS_API_KEY=...) the real Google Maps JS
-// API. Unlike the raw flutter_driver/integration_test approach this
+// Auth/Firestore on amdash-dev, and the real Google Maps JS API (Directions
+// data comes from the `fetchDirections` Cloud Function, not a client-side
+// key). Unlike the raw flutter_driver/integration_test approach this
 // replaced, Patrol's `$` finder actions (tap/enterText/waitUntilVisible)
 // use a bounded `trySettle` policy (10s default) rather than
 // pumpAndSettle()'s "wait for zero pending frames" — which would otherwise

@@ -1,7 +1,6 @@
 import 'package:amdash_core/amdash_core.dart';
 import 'package:flutter/material.dart';
 
-import '../config.dart';
 import '../widgets/patient_list.dart';
 import '../widgets/patient_viewer.dart';
 
@@ -46,7 +45,7 @@ class _MainViewScreenState extends State<MainViewScreen> {
                 ),
                 const VerticalDivider(width: 1),
                 Expanded(
-                  child: PatientViewer(patient: _selectedPatient, directionsApiKey: directionsApiKey),
+                  child: PatientViewer(patient: _selectedPatient),
                 ),
               ],
             );
@@ -54,7 +53,7 @@ class _MainViewScreenState extends State<MainViewScreen> {
 
           return Stack(
             children: [
-              PatientViewer(patient: _selectedPatient, directionsApiKey: directionsApiKey),
+              PatientViewer(patient: _selectedPatient),
               Positioned(
                 left: 12,
                 top: 12,
