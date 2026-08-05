@@ -1,16 +1,18 @@
 import 'package:amdash_core/amdash_core.dart';
 import 'package:flutter/material.dart';
 
+import '../services/ems_location_service.dart';
+
 /// Mirrors `patient-card.component.ts`/`.html`/`.scss`: a clickable patient
 /// summary card with a live-tracking status badge (pulsing dot when
 /// online) and a vitals grid, each field falling back to "Not added yet"
 /// via [isProvidedValue] (EMS leaves required fields as the literal
 /// string `'Unknown'` when left blank on upload).
 class PatientCard extends StatelessWidget {
-  const PatientCard({required this.patient, required this.isTracked, required this.onTap, super.key});
+  const PatientCard({required this.patient, required this.trackingStatus, required this.onTap, super.key});
 
   final Patient patient;
-  final bool isTracked;
+  final EmsTrackingStatus trackingStatus;
   final VoidCallback onTap;
 
   @override
@@ -25,7 +27,7 @@ class PatientCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Align(alignment: Alignment.centerRight, child: _TrackingBadge(isTracked: isTracked)),
+              Align(alignment: Alignment.centerRight, child: _TrackingBadge(status: trackingStatus)),
               Text(
                 isProvidedValue(patient.name) ? patient.name : 'Not added yet',
                 style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
@@ -88,9 +90,9 @@ class PatientCard extends StatelessWidget {
 }
 
 class _TrackingBadge extends StatefulWidget {
-  const _TrackingBadge({required this.isTracked});
+  const _TrackingBadge({required this.status});
 
-  final bool isTracked;
+  final EmsTrackingStatus status;
 
   @override
   State<_TrackingBadge> createState() => _TrackingBadgeState();
@@ -113,16 +115,21 @@ class _TrackingBadgeState extends State<_TrackingBadge> with SingleTickerProvide
 
   @override
   Widget build(BuildContext context) {
-    final color = widget.isTracked ? AppColors.success : AppColors.danger;
+    final (color, label, pulsing) = switch (widget.status) {
+      EmsTrackingStatus.active => (AppColors.success, 'Tracking Online', true),
+      EmsTrackingStatus.stale => (AppColors.warning, 'Lost Connection', false),
+      EmsTrackingStatus.noData => (AppColors.danger, 'Tracking Offline', false),
+      // Normally sub-second (first Firestore snapshot) — shouldn't flash
+      // "Offline" before the real answer is known.
+      EmsTrackingStatus.loading => (AppColors.slate400, 'Tracking…', false),
+    };
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          widget.isTracked ? 'Tracking Online' : 'Tracking Offline',
-          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color),
-        ),
+        Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
         const SizedBox(width: 6),
-        if (widget.isTracked)
+        if (pulsing)
           AnimatedBuilder(
             animation: _controller,
             builder: (context, _) {

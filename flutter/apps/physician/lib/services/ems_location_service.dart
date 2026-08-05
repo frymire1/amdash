@@ -12,11 +12,46 @@ import '../classes/active_location.dart';
 /// as stale. Mirrors `ems-location.service.ts`'s `STALE_AFTER_MS`.
 const _staleAfterMs = 35000;
 
-class EmsLocationState {
-  const EmsLocationState({this.activeLocations = const {}, this.trackedPatientIds = const {}});
+/// One property driving every "is this patient being tracked" decision
+/// across the app (the patient list's status badge, `PatientViewer`'s map) —
+/// replacing several rounds of ad hoc, per-widget booleans that each had to
+/// rediscover the same distinctions.
+enum EmsTrackingStatus {
+  /// Haven't received the first Firestore snapshot for this org yet — not
+  /// the same as [noData]: don't treat "don't know yet" as "confirmed empty".
+  loading,
 
-  final Map<String, ActiveLocation> activeLocations;
-  final Set<String> trackedPatientIds;
+  /// Snapshot(s) received; this patient has never had a location recorded.
+  noData,
+
+  /// A location is known, but it's older than [_staleAfterMs] — EMS likely
+  /// went away without an explicit stop signal.
+  stale,
+
+  /// A location is known and within the freshness window.
+  active,
+}
+
+class EmsTrackingInfo {
+  const EmsTrackingInfo({required this.status, this.location});
+
+  final EmsTrackingStatus status;
+
+  /// The last known fix, if one has ever been recorded — populated for
+  /// [EmsTrackingStatus.stale] and [EmsTrackingStatus.active] alike, so
+  /// consumers can keep showing a patient's last known position/route
+  /// while stale instead of losing it.
+  final ActiveLocation? location;
+}
+
+class EmsLocationState {
+  const EmsLocationState({this.info = const {}, this.hasLoadedOnce = false});
+
+  final Map<String, EmsTrackingInfo> info;
+
+  /// Whether the first Firestore snapshot (or the determination that there's
+  /// no org to query at all) has been received — see [EmsTrackingStatus.loading].
+  final bool hasLoadedOnce;
 }
 
 /// Mirrors `apps/physician/src/app/services/ems-location.service.ts`:
@@ -28,6 +63,12 @@ class EmsLocationState {
 class EmsLocationController extends Notifier<EmsLocationState> {
   StreamSubscription<QuerySnapshot<Map<String, Object?>>>? _subscription;
   Timer? _staleTimer;
+
+  // Every fix ever seen this session, keyed by patientId — deliberately
+  // never pruned just because a patient drops out of the live query
+  // (explicit stop, or simply going stale) so a last-known position/route
+  // is always available. Firestore's own `where('active', ...)` filter, not
+  // this map, is what limits how much this can grow in practice.
   Map<String, ActiveLocation> _latest = {};
 
   @override
@@ -50,9 +91,14 @@ class EmsLocationController extends Notifier<EmsLocationState> {
     _subscription?.cancel();
     _staleTimer?.cancel();
     _latest = {};
-    state = const EmsLocationState();
 
-    if (organizationId == null) return;
+    if (organizationId == null) {
+      // No org to query — that *is* the answer, not still-loading.
+      state = const EmsLocationState(hasLoadedOnce: true);
+      return;
+    }
+
+    state = const EmsLocationState();
 
     _subscription = FirebaseFirestore.instance
         .collection('emsLocations')
@@ -61,21 +107,18 @@ class EmsLocationController extends Notifier<EmsLocationState> {
         .snapshots()
         .listen(_onSnapshot);
 
-    _staleTimer = Timer.periodic(const Duration(seconds: 5), (_) => _recomputeFresh());
+    _staleTimer = Timer.periodic(const Duration(seconds: 5), (_) => _recompute());
   }
 
   void _onSnapshot(QuerySnapshot<Map<String, Object?>> snapshot) {
-    final previous = _latest;
-    final next = <String, ActiveLocation>{};
-
     for (final doc in snapshot.docs) {
       final data = doc.data();
       final updatedAt = data['updatedAt'] as Timestamp?;
       if (updatedAt == null) continue;
 
       final patientId = doc.id;
-      final previousFix = previous[patientId];
-      next[patientId] = ActiveLocation(
+      final previousFix = _latest[patientId];
+      _latest[patientId] = ActiveLocation(
         patientId: patientId,
         updatedAtMs: updatedAt.millisecondsSinceEpoch,
         latitude: (data['latitude'] as num?)?.toDouble(),
@@ -85,18 +128,26 @@ class EmsLocationController extends Notifier<EmsLocationState> {
         previousUpdatedAtMs: previousFix?.updatedAtMs,
       );
     }
+    // Deliberately not removing entries whose doc is missing from this
+    // snapshot (explicit stop, or aged out of the `active == true` query) —
+    // that's exactly the "was tracked, now stale/stopped" case this state
+    // model exists to represent, not something to silently forget.
 
-    _latest = next;
-    _recomputeFresh();
+    _recompute();
   }
 
-  void _recomputeFresh() {
+  void _recompute() {
     final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final fresh = <String, ActiveLocation>{
+    final info = <String, EmsTrackingInfo>{
       for (final entry in _latest.entries)
-        if (nowMs - entry.value.updatedAtMs <= _staleAfterMs) entry.key: entry.value,
+        entry.key: EmsTrackingInfo(
+          status: nowMs - entry.value.updatedAtMs <= _staleAfterMs
+              ? EmsTrackingStatus.active
+              : EmsTrackingStatus.stale,
+          location: entry.value,
+        ),
     };
-    state = EmsLocationState(activeLocations: fresh, trackedPatientIds: fresh.keys.toSet());
+    state = EmsLocationState(info: info, hasLoadedOnce: true);
   }
 }
 
@@ -104,10 +155,10 @@ final emsLocationProvider = NotifierProvider<EmsLocationController, EmsLocationS
   EmsLocationController.new,
 );
 
-bool isPatientTracked(WidgetRef ref, String patientId) {
-  return ref.watch(emsLocationProvider.select((s) => s.trackedPatientIds.contains(patientId)));
-}
-
-ActiveLocation? patientActiveLocation(WidgetRef ref, String patientId) {
-  return ref.watch(emsLocationProvider.select((s) => s.activeLocations[patientId]));
+EmsTrackingInfo emsTrackingInfo(WidgetRef ref, String? patientId) {
+  if (patientId == null) return const EmsTrackingInfo(status: EmsTrackingStatus.noData);
+  final state = ref.watch(emsLocationProvider);
+  final info = state.info[patientId];
+  if (info != null) return info;
+  return EmsTrackingInfo(status: state.hasLoadedOnce ? EmsTrackingStatus.noData : EmsTrackingStatus.loading);
 }

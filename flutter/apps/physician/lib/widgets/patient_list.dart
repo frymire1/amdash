@@ -130,7 +130,7 @@ class _PatientListState extends ConsumerState<PatientList> {
                     final patient = filtered[index];
                     return PatientCard(
                       patient: patient,
-                      isTracked: patient.id != null && isPatientTracked(ref, patient.id!),
+                      trackingStatus: emsTrackingInfo(ref, patient.id).status,
                       onTap: () => widget.onSelected(patient),
                     );
                   },

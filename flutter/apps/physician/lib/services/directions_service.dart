@@ -1,4 +1,5 @@
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 const _functionsRegion = 'northamerica-northeast2';
@@ -14,6 +15,43 @@ class DirectionsResult {
   final String durationText;
   final String distanceText;
 }
+
+/// A cached route, keyed by patientId, plus the throttling bookkeeping
+/// `PatientViewer` needs (when it was last requested, from where) — see
+/// [directionsCacheProvider] for why this lives here instead of as local
+/// widget state.
+class DirectionsCacheEntry {
+  const DirectionsCacheEntry({required this.result, required this.requestedAtMs, required this.origin});
+
+  final DirectionsResult result;
+  final int requestedAtMs;
+  final LatLng origin;
+}
+
+/// Caches the last known route per patient, surviving `PatientViewer`
+/// disposal/recreation — confirmed via a real report: keying `PatientViewer`
+/// by patientId (so switching between *different* patients doesn't show a
+/// stale leftover route) correctly disposes its state on every patient
+/// switch, but that also destroyed the cached route for the *same* patient
+/// when navigating away and back, with no way to re-fetch it once that
+/// patient goes stale (fetching only happens while actively tracked). This
+/// mirrors `EmsLocationController`'s own "never tracked" vs. "was tracked,
+/// now stale" distinction — the route is tracking-derived data, so it
+/// belongs in the same kind of persistent, patient-keyed cache.
+class DirectionsCacheController extends Notifier<Map<String, DirectionsCacheEntry>> {
+  @override
+  Map<String, DirectionsCacheEntry> build() => {};
+
+  DirectionsCacheEntry? entryFor(String? patientId) => patientId == null ? null : state[patientId];
+
+  void store(String patientId, DirectionsCacheEntry entry) {
+    state = {...state, patientId: entry};
+  }
+}
+
+final directionsCacheProvider = NotifierProvider<DirectionsCacheController, Map<String, DirectionsCacheEntry>>(
+  DirectionsCacheController.new,
+);
 
 /// Calls the `fetchDirections` Cloud Function rather than the Directions
 /// REST API directly — that REST endpoint never sends CORS headers (it was
