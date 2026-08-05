@@ -156,23 +156,29 @@ jobs:
 
   flutter-ios-build:
     name: Flutter iOS build
-    runs-on: macos-latest
+    # Pinned below macos-latest (now macos-26, Xcode 26.x only — see the
+    # Xcode-selection step below) — macos-15 still ships Xcode 16.4 as its
+    # default alongside some 26.x betas, so the selection step below has
+    # an actual older Xcode to land on.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
-      # macos-latest's default Xcode (26.x) has a confirmed Apple bug in
-      # `xcodebuild test-without-building` against `.xctestrun` files
-      # targeting an iOS 26 Simulator runtime specifically — not
-      # reproducible on older iOS runtimes (see
-      # https://developer.apple.com/forums/thread/806461). It surfaces
-      # here as ios-e2e's `test-without-building` step reporting
-      # "Supported platforms for the buildables in the current scheme is
-      # empty" and failing to match ANY concrete Simulator destination.
-      # Pin the newest pre-26 Xcode instead — GitHub's macOS runner images
-      # ship several side by side — so both this build and ios-e2e's test
-      # run consistently avoid the buggy runtime pairing. Selected
-      # dynamically (not a hardcoded version) since exact versions
-      # installed on the runner image change over time.
+      # Xcode 26.x has a confirmed Apple bug in `xcodebuild
+      # test-without-building` against `.xctestrun` files targeting an iOS
+      # 26 Simulator runtime specifically — not reproducible on older iOS
+      # runtimes (see https://developer.apple.com/forums/thread/806461).
+      # It surfaces here as ios-e2e's `test-without-building` step
+      # reporting "Supported platforms for the buildables in the current
+      # scheme is empty" and failing to match ANY concrete Simulator
+      # destination. Pinning `runs-on: macos-15` above is the real fix —
+      # confirmed the hard way that macos-latest (now macos-26) has *no*
+      # older Xcode installed to fall back to at all, so this step's
+      # `ls`-based selection silently found nothing there and the bug
+      # still fired. macos-15 does ship several versions side by side
+      # (16.0–16.4 plus some 26.x betas), so this step both pins
+      # explicitly (rather than trusting whichever the image defaults to)
+      # and keeps working if that default ever changes.
       - name: Select a pre-Xcode-26 toolchain (avoids a confirmed Xcode 26 xcodebuild bug)
         run: |
           XCODE_PATH=$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -v '^/Applications/Xcode_26' | sort -V | tail -1)
@@ -529,7 +535,10 @@ jobs:
 
   ios-e2e:
     name: iOS e2e (Simulator)
-    runs-on: macos-latest
+    # See flutter-ios-build's identical pin — must match its runner image
+    # (and thus its Xcode) since this job needs the same toolchain that
+    # built the .xctestrun it runs against.
+    runs-on: macos-15
     needs: [deploy, flutter-ios-build]
     steps:
       - uses: actions/checkout@v4
