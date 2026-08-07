@@ -11,7 +11,6 @@ export 'src/models/patient.dart';
 export 'src/models/user_profile.dart';
 export 'src/screens/access_denied_screen.dart';
 export 'src/screens/login_screen.dart';
-export 'src/screens/user_settings_screen.dart';
 export 'src/screens/work_location_screen.dart';
 export 'src/theme/app_theme.dart';
 export 'src/widgets/dialogs.dart';

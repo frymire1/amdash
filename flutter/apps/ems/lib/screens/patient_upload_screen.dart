@@ -237,10 +237,10 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     _maybePrefill(ref.watch(uploadedPatientsProvider).valueOrNull ?? const []);
     final hospitalNames = ref.watch(hospitalNamesProvider);
 
-    return Scaffold(
-      appBar: const NavBar(),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+    // No Scaffold/NavBar of its own — this screen lives inside the app's
+    // ShellRoute now, which owns those.
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 720),
@@ -388,8 +388,7 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 
   Widget _section(String title, List<Widget> fields) {

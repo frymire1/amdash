@@ -7,6 +7,8 @@ import 'screens/hospital_management_screen.dart';
 import 'screens/organization_management_screen.dart';
 import 'screens/organization_settings_screen.dart';
 import 'screens/user_management_screen.dart';
+import 'screens/user_settings_screen.dart';
+import 'widgets/nav_bar.dart';
 
 /// Mirrors `apps/admin/src/app/app.routes.ts`'s route table and guard
 /// chain — genuinely different shape from EMS/physician's single
@@ -73,7 +75,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/access-denied',
         builder: (context, state) => const AccessDeniedScreen(appName: 'Admin'),
       ),
-      GoRoute(path: '/user-settings', builder: (context, state) => const UserSettingsScreen()),
       // Pure redirect target, same as `landing.guard.ts` — never renders
       // its real content. While the profile is still loading,
       // _adminRedirect returns null (stays put) rather than redirecting
@@ -82,15 +83,25 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // async initState fetch, and then get disposed moments later once
       // the profile resolves and redirects onward — a real
       // "setState() called after dispose()" this app hit during
-      // verification.
+      // verification. Kept outside the shell below since it's never
+      // actually seen — no navbar needed for an instant redirect.
       GoRoute(
         path: '/',
         builder: (context, state) => const Scaffold(body: Center(child: CircularProgressIndicator())),
       ),
-      GoRoute(path: '/users', builder: (context, state) => const UserManagementScreen()),
-      GoRoute(path: '/hospitals', builder: (context, state) => const HospitalManagementScreen()),
-      GoRoute(path: '/settings', builder: (context, state) => const OrganizationSettingsScreen()),
-      GoRoute(path: '/organizations', builder: (context, state) => const OrganizationManagementScreen()),
+      // A persistent Scaffold+AdminNavBar shell — kept outside GoRouter's
+      // normal per-route page transition, so the navbar no longer visibly
+      // unmounts/re-animates on every in-app navigation.
+      ShellRoute(
+        builder: (context, state, child) => Scaffold(appBar: const AdminNavBar(), body: child),
+        routes: [
+          GoRoute(path: '/user-settings', builder: (context, state) => const UserSettingsScreen()),
+          GoRoute(path: '/users', builder: (context, state) => const UserManagementScreen()),
+          GoRoute(path: '/hospitals', builder: (context, state) => const HospitalManagementScreen()),
+          GoRoute(path: '/settings', builder: (context, state) => const OrganizationSettingsScreen()),
+          GoRoute(path: '/organizations', builder: (context, state) => const OrganizationManagementScreen()),
+        ],
+      ),
     ],
   );
 });

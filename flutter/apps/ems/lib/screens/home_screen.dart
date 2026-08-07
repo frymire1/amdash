@@ -14,10 +14,10 @@ class HomeScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final uploadedPatients = ref.watch(uploadedPatientsProvider);
 
-    return Scaffold(
-      appBar: const NavBar(),
-      body: Column(
-        children: [
+    // No Scaffold/NavBar of its own — this screen lives inside the app's
+    // ShellRoute now, which owns those.
+    return Column(
+      children: [
           const OfflineBanner(),
           Expanded(
             child: SingleChildScrollView(
@@ -82,7 +82,6 @@ class HomeScreen extends ConsumerWidget {
             ),
           ),
         ],
-      ),
-    );
+      );
   }
 }

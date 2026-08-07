@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 
-import 'nav_bar.dart';
-
 /// Shared layout for every admin management screen — mirrors the
 /// `max-width: 960px` centered container repeated (copy-pasted, per the
 /// Angular source) across `user-management`/`hospital-management`/
 /// `organization-management`/`organization-settings`'s `.scss` files.
+///
+/// No `Scaffold`/`AdminNavBar` of its own — every route that uses this
+/// lives inside the admin app's `ShellRoute` now, which owns those.
 class AdminPage extends StatelessWidget {
   const AdminPage({required this.children, super.key});
 
@@ -13,15 +14,12 @@ class AdminPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: const AdminNavBar(),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 960),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
-          ),
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 960),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
         ),
       ),
     );

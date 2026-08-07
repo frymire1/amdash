@@ -30,9 +30,9 @@ class _MainViewScreenState extends State<MainViewScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: const NavBar(),
-      body: LayoutBuilder(
+    // No Scaffold/NavBar of its own — this screen lives inside the app's
+    // ShellRoute now, which owns those.
+    return LayoutBuilder(
         builder: (context, constraints) {
           final isDesktop = constraints.maxWidth >= 768;
 
@@ -90,7 +90,6 @@ class _MainViewScreenState extends State<MainViewScreen> {
             ],
           );
         },
-      ),
-    );
+      );
   }
 }
