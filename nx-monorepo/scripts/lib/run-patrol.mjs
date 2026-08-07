@@ -6,11 +6,18 @@
 // that across two languages.
 //
 // Spawns `patrol test --device <device>` against a given Flutter app.
-// Runs both on a developer's Windows machine and in CI (Linux/macOS
-// GitHub Actions runners), which need genuinely different handling —
-// Windows requires a shell to launch a .bat file at all, which then
-// requires manual argv quoting (cmd.exe doesn't quote for you); POSIX
-// needs neither.
+// Runs both on a developer's Windows machine and in CI (a Codemagic Linux
+// runner), which need genuinely different handling — Windows requires a
+// shell to launch a .bat file at all, which then requires manual argv
+// quoting (cmd.exe doesn't quote for you); POSIX needs neither.
+//
+// Android/iOS e2e no longer go through this file — they run on Firebase
+// Test Lab via `patrol build` + `gcloud firebase test ... run` instead
+// (see the Codemagic android-e2e/ios-e2e workflows), since `patrol test`
+// against a local emulator/simulator device id has no equivalent on Test
+// Lab's own device pool. `device` here is effectively always 'chrome' now
+// (or a real device id when running this locally against a plugged-in
+// phone/booted simulator for manual dev testing).
 import { execFile, spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';

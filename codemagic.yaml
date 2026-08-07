@@ -1,0 +1,484 @@
+# Codemagic pipeline for the Flutter apps (physician, ems, admin) and their
+# Firebase deploy — replaces the flutter-* jobs that used to live in
+# .github/workflows/ci.yml (see the migration plan). GitHub Actions now
+# covers only the Angular `marketing` site.
+#
+# TO VERIFY DURING SETUP (written from documentation/training knowledge,
+# not validated against a live Codemagic account — check these against
+# https://docs.codemagic.io before trusting this file to actually run):
+#   - Built-in env var names ($CM_BUILD_DIR, $CM_BRANCH, $CM_PROJECT_ID,
+#     $CM_ENV) — confirm current names in Codemagic's "Environment variables"
+#     reference.
+#   - Whether `publishing.scripts` really does run regardless of build
+#     success/failure (relied on below for guaranteed teardown of seeded
+#     Firebase test data) — confirm in the current YAML reference before
+#     trusting it the way this file's `android-e2e`/`ios-e2e` do.
+#   - Whether a workflow with no `triggering:` block truly never
+#     auto-builds on push (relied on so only flutter-unit-tests reacts to
+#     push, and everything downstream only runs via the API-triggering
+#     chain below).
+#   - `ios_signing` with two separate Xcode projects (physician + ems) in
+#     one workflow — this file calls `xcode-project use-profiles --project
+#     <path>` per app rather than relying on a single top-level
+#     `ios_signing.bundle_identifier`, since that key looks like it only
+#     supports one bundle id; confirm this is the right pattern for a
+#     multi-app workflow in docs.codemagic.io/yaml-code-signing/.
+#   - The UI-test target Patrol builds against isn't in the committed
+#     project.pbxproj at all: checked both apps' project.pbxproj directly —
+#     the only committed test target is a stock Flutter-template
+#     `RunnerTests` (bundle id `com.amdash.{physician,ems}.RunnerTests`),
+#     nothing named `RunnerUITests` anywhere on disk. `patrol build ios`
+#     must generate that target at build time (the CI logs from local-
+#     Simulator debugging this session showed xcodebuild operating on a
+#     "RunnerUITests" target that doesn't exist in git). This means the
+#     bundle id to register in the Apple Developer portal can't be
+#     confirmed by reading the repo — run `patrol build ios --release`
+#     once (locally or in an early Codemagic run) and inspect what it
+#     actually generates before registering anything.
+#   - Device/OS strings passed to `gcloud firebase test android/ios run`
+#     below are placeholders — run `gcloud firebase test android models
+#     list` / `gcloud firebase test ios models list` against amdash-dev and
+#     pick real, current values.
+#   - Whether Codemagic's linux images ship `gcloud`/`jq` preinstalled —
+#     add an explicit install step if not.
+#
+# Cross-workflow chaining: Codemagic has no native `needs:`-style
+# dependency graph between workflows, and no native "wait for N parallel
+# predecessors" primitive either. Each workflow below ends with a script
+# step that calls Codemagic's own REST API (POST /builds) to start the
+# next workflow — see https://docs.codemagic.io/rest-api/builds/. This
+# chains flutter-unit-tests -> flutter-web-build -> flutter-android-build
+# -> flutter-ios-build -> flutter-deploy LINEARLY (today's GitHub Actions
+# build-stage parallelism is traded for zero coordination complexity —
+# revisit with Codemagic's Dynamic Workflows API or a shared status marker
+# if the added wall-clock time becomes a real problem). flutter-deploy then
+# FANS OUT to web-e2e/android-e2e/ios-e2e in parallel — fan-out from one
+# predecessor needs no coordination, unlike the fan-in the build stage
+# would need.
+#
+# Env var groups referenced below (create in Codemagic -> Team settings ->
+# Environment variables):
+#   - codemagic_api: CM_API_TOKEN (a Codemagic personal API token, used only
+#     for the workflow-chaining calls)
+#   - firebase_deploy: FIREBASE_SERVICE_ACCOUNT_KEY (same key used by the
+#     old GitHub Actions `deploy` job — reused here for `firebase deploy`
+#     and for the seed/teardown scripts' Admin SDK calls)
+#   - firebase_testlab: GCLOUD_TESTLAB_SERVICE_ACCOUNT_KEY (a separate,
+#     least-privilege service account with roles/cloudtestservice.testAdmin
+#     — do not widen firebase_deploy's key instead)
+
+workflows:
+  flutter-unit-tests:
+    name: Flutter unit/widget tests
+    instance_type: linux_x2
+    max_build_duration: 30
+    environment:
+      flutter: stable
+      groups:
+        - codemagic_api
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: '*'
+          include: true
+    scripts:
+      - name: Analyze amdash_core, physician, ems, admin
+        script: |
+          set -e
+          cd flutter
+          for dir in packages/amdash_core apps/physician apps/ems apps/admin; do
+            (cd "$dir" && flutter pub get && flutter analyze)
+          done
+      - name: Run widget/unit tests
+        script: |
+          set -e
+          cd flutter
+          for dir in packages/amdash_core apps/physician apps/ems apps/admin; do
+            (cd "$dir" && flutter test)
+          done
+      - name: Trigger flutter-web-build
+        script: |
+          curl -sf -X POST https://api.codemagic.io/builds \
+            -H "x-auth-token: $CM_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"appId\": \"$CM_PROJECT_ID\", \"workflowId\": \"flutter-web-build\", \"branch\": \"$CM_BRANCH\"}"
+
+  # Not triggered directly on push — only via the API call above, to avoid
+  # double-triggering the same commit through two paths.
+  flutter-web-build:
+    name: Flutter web build
+    instance_type: linux_x2
+    max_build_duration: 30
+    environment:
+      flutter: stable
+      groups:
+        - codemagic_api
+    scripts:
+      - name: Build physician/ems/admin (web)
+        script: |
+          set -e
+          cd flutter
+          for app in physician ems admin; do
+            (cd "apps/$app" && flutter build web --release)
+          done
+      - name: Trigger flutter-android-build
+        script: |
+          curl -sf -X POST https://api.codemagic.io/builds \
+            -H "x-auth-token: $CM_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"appId\": \"$CM_PROJECT_ID\", \"workflowId\": \"flutter-android-build\", \"branch\": \"$CM_BRANCH\"}"
+
+  flutter-android-build:
+    name: Flutter Android build
+    instance_type: linux_x2
+    max_build_duration: 30
+    environment:
+      flutter: stable
+      groups:
+        - codemagic_api
+    cache:
+      cache_paths:
+        - $HOME/.gradle/caches
+        - $HOME/.gradle/wrapper
+    scripts:
+      - name: Build physician/ems (Android debug APK)
+        script: |
+          cd flutter
+          failed=()
+          for app in physician ems; do
+            (cd "apps/$app" && flutter build apk --debug) || failed+=("$app")
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "Failed: ${failed[*]}"
+            exit 1
+          fi
+      - name: Trigger flutter-ios-build
+        script: |
+          curl -sf -X POST https://api.codemagic.io/builds \
+            -H "x-auth-token: $CM_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"appId\": \"$CM_PROJECT_ID\", \"workflowId\": \"flutter-ios-build\", \"branch\": \"$CM_BRANCH\"}"
+
+  flutter-ios-build:
+    name: Flutter iOS build
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      # This job only runs a plain `flutter build ios --no-codesign`, never
+      # `xcodebuild test-without-building` — the GitHub Actions Xcode-26 pin
+      # (see the old ci.yml history) worked around a bug specific to that
+      # command against a Simulator .xctestrun, so it may simply not apply
+      # here. Re-verify once this runs for real before assuming a pin is
+      # needed.
+      xcode: latest
+      groups:
+        - codemagic_api
+    cache:
+      cache_paths:
+        - $HOME/Library/Caches/CocoaPods
+        - $HOME/Library/Caches/org.swift.swiftpm
+    scripts:
+      - name: Build physician/ems (iOS, no codesign)
+        script: |
+          cd flutter
+          failed=()
+          for app in physician ems; do
+            (cd "apps/$app" && flutter build ios --debug --no-codesign) || failed+=("$app")
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "Failed: ${failed[*]}"
+            exit 1
+          fi
+      - name: Trigger flutter-deploy
+        script: |
+          curl -sf -X POST https://api.codemagic.io/builds \
+            -H "x-auth-token: $CM_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"appId\": \"$CM_PROJECT_ID\", \"workflowId\": \"flutter-deploy\", \"branch\": \"$CM_BRANCH\"}"
+
+  flutter-deploy:
+    name: Deploy Flutter apps + functions + firestore rules
+    instance_type: linux_x2
+    max_build_duration: 30
+    environment:
+      flutter: stable
+      node: latest
+      groups:
+        - firebase_deploy
+        - codemagic_api
+    scripts:
+      - name: Install functions dependencies
+        script: npm ci
+        working_directory: functions
+      - name: Build functions
+        script: npm run build
+        working_directory: functions
+      - name: Build physician/ems/admin (web)
+        script: |
+          set -e
+          cd flutter
+          for app in physician ems admin; do
+            (cd "apps/$app" && flutter build web --release)
+          done
+      - name: Install Firebase CLI
+        script: npm install -g firebase-tools
+      - name: Authenticate to Firebase
+        script: |
+          echo "$FIREBASE_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$CM_BUILD_DIR/firebase-service-account.json" >> $CM_ENV
+      # Only the Flutter apps' hosting + functions + firestore rules —
+      # `marketing` hosting stays on GitHub Actions (see ci.yml's
+      # deploy-marketing job) since it's not a Flutter app and has no
+      # reason to depend on Codemagic. This is a deliberate split from the
+      # old single atomic `firebase deploy` call — see the migration plan
+      # for the accepted trade-off (marketing and functions/Flutter-hosting
+      # deploys are no longer guaranteed to land together).
+      - name: Deploy to amdash-dev
+        script: |
+          firebase deploy --only hosting:physician,hosting:ems,hosting:admin,functions,firestore:rules,firestore:indexes --project amdash-dev --non-interactive
+      # e2e tests seed data and call *live* Functions/Firestore even though
+      # the app under test runs on Chrome/Test Lab, not the deployed
+      # hosting URL — so all three of these have to wait for this deploy,
+      # same as the old `needs: deploy` dependency in GitHub Actions.
+      - name: Trigger web-e2e, android-e2e, ios-e2e
+        script: |
+          for workflow in web-e2e android-e2e ios-e2e; do
+            curl -sf -X POST https://api.codemagic.io/builds \
+              -H "x-auth-token: $CM_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"appId\": \"$CM_PROJECT_ID\", \"workflowId\": \"$workflow\", \"branch\": \"$CM_BRANCH\"}"
+          done
+
+  web-e2e:
+    name: Web e2e (Chrome)
+    instance_type: linux_x2
+    max_build_duration: 30
+    environment:
+      flutter: stable
+      node: latest
+      vars:
+        # Flutter Web's engine crashes on startup parsing an unparseable
+        # locale list on a bare runner where LANG/LC_ALL default to
+        # C/POSIX — same fix as the old GitHub Actions job.
+        LANG: en_US.UTF-8
+        LC_ALL: en_US.UTF-8
+      groups:
+        - firebase_deploy
+    cache:
+      cache_paths:
+        - $HOME/.pub-cache
+    scripts:
+      - name: Ensure en_US.UTF-8 locale is generated
+        script: sudo locale-gen en_US.UTF-8
+      - name: Ensure xvfb is installed
+        script: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Install patrol_cli
+        script: |
+          dart pub global activate patrol_cli
+          echo "PATH=$HOME/.pub-cache/bin:$PATH" >> $CM_ENV
+      - name: Install nx-monorepo dependencies
+        script: npm ci
+        working_directory: nx-monorepo
+      - name: Install Playwright browser + OS dependencies
+        script: npx playwright install --with-deps chromium
+        working_directory: nx-monorepo
+      - name: Authenticate to Firebase
+        script: |
+          echo "$FIREBASE_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$CM_BUILD_DIR/firebase-service-account.json" >> $CM_ENV
+      # Unchanged seed -> patrol test -> teardown shape, same scripts as
+      # before — only the CI system underneath changed.
+      - name: Run admin Patrol e2e
+        script: node scripts/run-admin-patrol-test.mjs
+        working_directory: nx-monorepo
+      - name: Run physician Patrol e2e
+        script: node scripts/run-physician-patrol-test.mjs
+        working_directory: nx-monorepo
+      - name: Run EMS Patrol e2e
+        script: node scripts/run-ems-patrol-test.mjs
+        working_directory: nx-monorepo
+    artifacts:
+      - flutter/apps/admin/playwright-report/**
+      - flutter/apps/physician/playwright-report/**
+      - flutter/apps/ems/playwright-report/**
+
+  # No local emulator anymore — physician/ems run on Firebase Test Lab's
+  # real device pool instead. admin stays out of native e2e (web-only, see
+  # web-e2e above), same as before.
+  android-e2e:
+    name: Android e2e (Firebase Test Lab)
+    instance_type: linux_x2
+    max_build_duration: 45
+    environment:
+      flutter: stable
+      node: latest
+      groups:
+        - firebase_deploy
+        - firebase_testlab
+    scripts:
+      - name: Authenticate to Firebase Admin SDK
+        script: |
+          echo "$FIREBASE_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$CM_BUILD_DIR/firebase-service-account.json" >> $CM_ENV
+      - name: Authenticate gcloud to Test Lab
+        script: |
+          echo "$GCLOUD_TESTLAB_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/testlab-service-account.json"
+          gcloud auth activate-service-account --key-file="$CM_BUILD_DIR/testlab-service-account.json"
+          gcloud config set project amdash-dev
+      - name: Install patrol_cli
+        script: |
+          dart pub global activate patrol_cli
+          echo "PATH=$HOME/.pub-cache/bin:$PATH" >> $CM_ENV
+      - name: Install nx-monorepo dependencies
+        script: npm ci
+        working_directory: nx-monorepo
+      # Seeding and teardown are split across separate steps (unlike
+      # web-e2e's single-process seed->test->teardown) because
+      # `patrol build` + `gcloud ... run` doesn't fit that shape — see
+      # run-physician-patrol-test.mjs / run-ems-patrol-test.mjs's
+      # --seed-only/--teardown modes.
+      - name: Seed physician + ems smoke accounts
+        script: |
+          node scripts/run-physician-patrol-test.mjs --seed-only --account-json="$CM_BUILD_DIR/physician-account.json"
+          node scripts/run-ems-patrol-test.mjs --seed-only --account-json="$CM_BUILD_DIR/ems-account.json"
+        working_directory: nx-monorepo
+      - name: Build + run physician Test Lab suite (Android)
+        script: |
+          set -e
+          ACCOUNT="$CM_BUILD_DIR/physician-account.json"
+          cd flutter/apps/physician
+          patrol build android --target patrol_test/patient_flow_test.dart \
+            --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
+            --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")" \
+            --dart-define SMOKE_HOSPITAL="$(jq -r .hospitalName "$ACCOUNT")" \
+            --dart-define SMOKE_PATIENT_NAME="$(jq -r .patientName "$ACCOUNT")"
+          gcloud firebase test android run \
+            --type instrumentation --use-orchestrator \
+            --app build/app/outputs/apk/debug/app-debug.apk \
+            --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            --device model=MediumPhone.arm,version=34,locale=en,orientation=portrait
+      - name: Build + run ems Test Lab suite (Android)
+        script: |
+          set -e
+          ACCOUNT="$CM_BUILD_DIR/ems-account.json"
+          cd flutter/apps/ems
+          patrol build android --target patrol_test/ems_test.dart \
+            --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
+            --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")"
+          gcloud firebase test android run \
+            --type instrumentation --use-orchestrator \
+            --app build/app/outputs/apk/debug/app-debug.apk \
+            --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            --device model=MediumPhone.arm,version=34,locale=en,orientation=portrait
+    publishing:
+      # Relies on publishing.scripts running regardless of build
+      # success/failure (see the TODO at the top of this file) — this is
+      # what gives teardown the same guarantee the old single-process
+      # try/finally had, now that seed/build/run/teardown are separate
+      # steps. `|| true` on each so one app's teardown failing doesn't
+      # skip the other's.
+      scripts:
+        - name: Teardown physician + ems smoke accounts
+          script: |
+            cd nx-monorepo
+            node scripts/run-physician-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/physician-account.json" || true
+            node scripts/run-ems-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/ems-account.json" || true
+
+  ios-e2e:
+    name: iOS e2e (Firebase Test Lab)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+      node: latest
+      ios_signing:
+        distribution_type: development
+        bundle_identifier: com.amdash.physician
+      groups:
+        - firebase_deploy
+        - firebase_testlab
+        # If you connected the App Store Connect API key via Codemagic's
+        # team-level Developer Portal integration (Team settings ->
+        # Developer Portal -> Manage keys) rather than raw env vars, no
+        # group is needed here at all — `ios_signing` above taps that
+        # integration automatically. Only add an `app_store_connect` group
+        # back (holding APP_STORE_CONNECT_KEY_IDENTIFIER/_ISSUER_ID/
+        # _PRIVATE_KEY) if you went the raw-env-var route instead.
+    scripts:
+      - name: Authenticate to Firebase Admin SDK
+        script: |
+          echo "$FIREBASE_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$CM_BUILD_DIR/firebase-service-account.json" >> $CM_ENV
+      - name: Authenticate gcloud to Test Lab
+        script: |
+          echo "$GCLOUD_TESTLAB_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/testlab-service-account.json"
+          gcloud auth activate-service-account --key-file="$CM_BUILD_DIR/testlab-service-account.json"
+          gcloud config set project amdash-dev
+      # Two separate Xcode projects in this one workflow — fetch profiles
+      # for each explicitly rather than relying on the single
+      # ios_signing.bundle_identifier above (see the TODO at the top of
+      # this file).
+      - name: Fetch signing profiles (physician)
+        script: xcode-project use-profiles --project flutter/apps/physician/ios/Runner.xcodeproj
+      - name: Fetch signing profiles (ems)
+        script: xcode-project use-profiles --project flutter/apps/ems/ios/Runner.xcodeproj
+      - name: Install patrol_cli
+        script: |
+          dart pub global activate patrol_cli
+          echo "PATH=$HOME/.pub-cache/bin:$PATH" >> $CM_ENV
+      - name: Install nx-monorepo dependencies
+        script: npm ci
+        working_directory: nx-monorepo
+      - name: Seed physician + ems smoke accounts
+        script: |
+          node scripts/run-physician-patrol-test.mjs --seed-only --account-json="$CM_BUILD_DIR/physician-account.json"
+          node scripts/run-ems-patrol-test.mjs --seed-only --account-json="$CM_BUILD_DIR/ems-account.json"
+        working_directory: nx-monorepo
+      # Must be --release and properly signed — Test Lab's iOS tier is real
+      # devices only, no simulator, unlike the old (broken) local-Simulator
+      # ios-e2e job. This is what actually retires the patrol_cli
+      # arch-ambiguity bug: no local `xcodebuild test-without-building`
+      # destination resolution happens at all here, since `patrol build`
+      # only builds artifacts and Test Lab's own device farm runs them.
+      - name: Build + run physician Test Lab suite (iOS)
+        script: |
+          set -e
+          ACCOUNT="$CM_BUILD_DIR/physician-account.json"
+          cd flutter/apps/physician
+          patrol build ios --target patrol_test/patient_flow_test.dart --release \
+            --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
+            --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")" \
+            --dart-define SMOKE_HOSPITAL="$(jq -r .hospitalName "$ACCOUNT")" \
+            --dart-define SMOKE_PATIENT_NAME="$(jq -r .patientName "$ACCOUNT")"
+          cd build/ios_integ/Build/Products
+          # Filename embeds the SDK version used to build it — glob for it,
+          # don't hardcode a version.
+          XCTESTRUN=$(ls Runner_iphoneos*-arm64.xctestrun)
+          zip -r ios_tests.zip Release-iphoneos "$XCTESTRUN"
+          gcloud firebase test ios run \
+            --test ios_tests.zip \
+            --device model=iphone14pro,version=17.0,locale=en_US,orientation=portrait
+      - name: Build + run ems Test Lab suite (iOS)
+        script: |
+          set -e
+          ACCOUNT="$CM_BUILD_DIR/ems-account.json"
+          cd flutter/apps/ems
+          patrol build ios --target patrol_test/ems_test.dart --release \
+            --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
+            --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")"
+          cd build/ios_integ/Build/Products
+          XCTESTRUN=$(ls Runner_iphoneos*-arm64.xctestrun)
+          zip -r ios_tests.zip Release-iphoneos "$XCTESTRUN"
+          gcloud firebase test ios run \
+            --test ios_tests.zip \
+            --device model=iphone14pro,version=17.0,locale=en_US,orientation=portrait
+    publishing:
+      scripts:
+        - name: Teardown physician + ems smoke accounts
+          script: |
+            cd nx-monorepo
+            node scripts/run-physician-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/physician-account.json" || true
+            node scripts/run-ems-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/ems-account.json" || true

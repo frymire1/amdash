@@ -12,10 +12,25 @@
 // down real Auth + Firestore state around the Dart-side Patrol test, and
 // nx-monorepo already has that set up.
 //
-// Usage: node scripts/run-ems-patrol-test.mjs
-//   PATROL_DEVICE=android|ios overrides the default 'chrome' — 'android'/
-//   'ios' get resolved to the actual connected emulator/simulator device id
-//   at run time (see scripts/lib/run-patrol.mjs's resolveDeviceId).
+// Usage:
+//   node scripts/run-ems-patrol-test.mjs
+//     Default: seed, run `patrol test`, teardown, all in one process — used
+//     by web-e2e (Chrome). PATROL_DEVICE=android|ios overrides the default
+//     'chrome' device — 'android'/'ios' get resolved to the actual connected
+//     emulator/simulator device id at run time (see
+//     scripts/lib/run-patrol.mjs's resolveDeviceId).
+//   node scripts/run-ems-patrol-test.mjs --seed-only [--account-json=<path>]
+//     Seeds only, writes the seeded account to --account-json (default: an
+//     os.tmpdir() path) and exits 0 without running patrol or tearing down.
+//     Used ahead of `patrol build` in the Firebase Test Lab
+//     (android-e2e/ios-e2e) workflows, where the app is built once with
+//     these values baked in as --dart-define flags rather than run locally
+//     via `patrol test`.
+//   node scripts/run-ems-patrol-test.mjs --teardown [--account-json=<path>]
+//     Reads --account-json, tears the seeded state down, deletes the file,
+//     and exits. Used after the `gcloud firebase test ... run` step in the
+//     Test Lab workflows — a separate step from seeding, so it must be
+//     invoked independently rather than via the try/finally below.
 // Requires: flutter + patrol_cli on PATH (or edit scripts/lib/run-patrol.mjs
 // to match your machine), a cached `firebase login` CLI session (or
 // GOOGLE_APPLICATION_CREDENTIALS set, e.g. in CI).
@@ -23,6 +38,7 @@
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findOrganizationId, initFirebaseAdmin } from './lib/firebase-admin-cli.mjs';
@@ -31,6 +47,16 @@ import { runPatrolTest } from './lib/run-patrol.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const EMS_APP_DIR = path.join(REPO_ROOT, 'flutter', 'apps', 'ems');
+const DEFAULT_ACCOUNT_JSON_PATH = path.join(os.tmpdir(), 'amdash-ems-smoke-account.json');
+
+function parseArgs(argv) {
+  const seedOnly = argv.includes('--seed-only');
+  const teardown = argv.includes('--teardown');
+  if (seedOnly && teardown) throw new Error('--seed-only and --teardown are mutually exclusive.');
+  const accountJsonArg = argv.find((arg) => arg.startsWith('--account-json='));
+  const accountJsonPath = accountJsonArg ? accountJsonArg.slice('--account-json='.length) : DEFAULT_ACCOUNT_JSON_PATH;
+  return { seedOnly, teardown, accountJsonPath };
+}
 
 async function createSmokeEmsAccount(db) {
   const organizationId = await findOrganizationId(db, 'test-org');
@@ -61,25 +87,51 @@ async function cleanup(db, auth, smokeAccountUid) {
   console.log(`Cleanup: removed throwaway EMS account, ${patientSnap.size} leftover patient(s).`);
 }
 
+const { seedOnly, teardown, accountJsonPath } = parseArgs(process.argv.slice(2));
+
 const credentialPath = initFirebaseAdmin('emspatrol');
 const db = getFirestore();
 const auth = getAuth();
+
+if (teardown) {
+  const account = JSON.parse(fs.readFileSync(accountJsonPath, 'utf8'));
+  await cleanup(db, auth, account.uid);
+  fs.unlinkSync(accountJsonPath);
+  if (credentialPath) fs.unlinkSync(credentialPath);
+  console.log('Teardown complete.');
+  process.exit(0);
+}
 
 let account;
 let exitCode = 1;
 try {
   account = await createSmokeEmsAccount(db);
   console.log('Created throwaway EMS account:', account.email);
-  exitCode = await runPatrolTest({
-    appDir: EMS_APP_DIR,
-    target: 'patrol_test/ems_test.dart',
-    dartDefines: { SMOKE_EMAIL: account.email, SMOKE_PASSWORD: account.password },
-    device: process.env.PATROL_DEVICE || 'chrome',
-  });
+
+  if (seedOnly) {
+    fs.writeFileSync(accountJsonPath, JSON.stringify(account));
+    console.log('Wrote seeded account to', accountJsonPath);
+    exitCode = 0;
+  } else {
+    exitCode = await runPatrolTest({
+      appDir: EMS_APP_DIR,
+      target: 'patrol_test/ems_test.dart',
+      dartDefines: { SMOKE_EMAIL: account.email, SMOKE_PASSWORD: account.password },
+      device: process.env.PATROL_DEVICE || 'chrome',
+    });
+  }
 } finally {
-  if (account) await cleanup(db, auth, account.uid);
+  // --seed-only intentionally skips cleanup — teardown happens in a later,
+  // separately-invoked `--teardown` run (see the Test Lab workflows), after
+  // `patrol build` + `gcloud firebase test ... run` have both used this
+  // seeded state.
+  if (!seedOnly && account) await cleanup(db, auth, account.uid);
   if (credentialPath) fs.unlinkSync(credentialPath);
 }
 
-console.log(exitCode === 0 ? '\n✅ Patrol test passed.' : '\n❌ Patrol test failed.');
+if (seedOnly) {
+  console.log(exitCode === 0 ? '\n✅ Seed complete.' : '\n❌ Seed failed.');
+} else {
+  console.log(exitCode === 0 ? '\n✅ Patrol test passed.' : '\n❌ Patrol test failed.');
+}
 process.exit(exitCode);
