@@ -67,6 +67,20 @@
 # flutter-unit-tests (the actual correctness gate: analyze + widget/unit
 # tests) still runs first and still gates everything.
 #
+# Every workflow below runs on mac_mini_m2, including the ones that don't
+# need macOS at all (web builds, Android builds, Chrome e2e). This is not
+# a design choice — it's a real account constraint: this Codemagic plan
+# has no Linux minutes at all (linux and linux_x2 both came back "not
+# available with the current billing plan" when tested), only mac_mini_m2.
+# If Linux minutes are ever added to the plan, switching the non-iOS
+# workflows back to a linux instance_type would be cheaper/faster and is
+# the more natural fit. web-e2e's script steps were adjusted for this too
+# — its old locale-gen/apt-get-install-xvfb steps were Linux-only fixes
+# for a bare CI box with no display, which a real Mac already has; see
+# nx-monorepo/scripts/lib/run-patrol.mjs's matching IS_MACOS check, which
+# skips xvfb-run (also Linux-only, not installed on macOS) for the same
+# reason.
+#
 # Env var groups referenced below (create in Codemagic -> Team settings ->
 # Environment variables):
 #   - codemagic_api: CM_API_TOKEN (a Codemagic personal API token, used only
@@ -81,7 +95,7 @@
 workflows:
   flutter-unit-tests:
     name: Flutter unit/widget tests
-    instance_type: linux_x2
+    instance_type: mac_mini_m2
     max_build_duration: 30
     environment:
       flutter: stable
@@ -121,7 +135,7 @@ workflows:
   # double-triggering the same commit through two paths.
   flutter-web-build:
     name: Flutter web build
-    instance_type: linux_x2
+    instance_type: mac_mini_m2
     max_build_duration: 30
     environment:
       flutter: stable
@@ -139,7 +153,7 @@ workflows:
 
   flutter-android-build:
     name: Flutter Android build
-    instance_type: linux_x2
+    instance_type: mac_mini_m2
     max_build_duration: 30
     environment:
       flutter: stable
@@ -194,7 +208,7 @@ workflows:
 
   flutter-deploy:
     name: Deploy Flutter apps + functions + firestore rules
-    instance_type: linux_x2
+    instance_type: mac_mini_m2
     max_build_duration: 30
     environment:
       flutter: stable
@@ -255,15 +269,19 @@ workflows:
 
   web-e2e:
     name: Web e2e (Chrome)
-    instance_type: linux_x2
+    # Forced onto a Mac instance — this account's plan doesn't include any
+    # Linux minutes at all (linux/linux_x2 both came back "not available
+    # with the current billing plan"), only mac_mini_m2. A real Mac has
+    # its own full display session, unlike a bare Linux CI box, so the
+    # locale-gen/xvfb workarounds below (needed on Linux) don't apply —
+    # see lib/run-patrol.mjs's matching platform check for the same reason
+    # xvfb-run itself (Linux-only, not installed on macOS) is skipped now.
+    instance_type: mac_mini_m2
     max_build_duration: 30
     environment:
       flutter: stable
       node: latest
       vars:
-        # Flutter Web's engine crashes on startup parsing an unparseable
-        # locale list on a bare runner where LANG/LC_ALL default to
-        # C/POSIX — same fix as the old GitHub Actions job.
         LANG: en_US.UTF-8
         LC_ALL: en_US.UTF-8
       groups:
@@ -276,10 +294,6 @@ workflows:
         # `npx playwright install` below re-downloads it every run.
         - $HOME/.cache/ms-playwright
     scripts:
-      - name: Ensure en_US.UTF-8 locale is generated
-        script: sudo locale-gen en_US.UTF-8
-      - name: Ensure xvfb is installed
-        script: sudo apt-get update && sudo apt-get install -y xvfb
       - name: Install patrol_cli
         script: |
           dart pub global activate patrol_cli
@@ -315,7 +329,7 @@ workflows:
   # web-e2e above), same as before.
   android-e2e:
     name: Android e2e (Firebase Test Lab)
-    instance_type: linux_x2
+    instance_type: mac_mini_m2
     max_build_duration: 45
     environment:
       flutter: stable

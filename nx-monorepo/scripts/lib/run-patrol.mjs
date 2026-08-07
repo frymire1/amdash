@@ -26,6 +26,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 const IS_WINDOWS = process.platform === 'win32';
+const IS_MACOS = process.platform === 'darwin';
 
 // Adjust these if your Windows machine's Flutter/pub-cache locations
 // differ. Not used on Linux/macOS — CI's flutter-action and `dart pub
@@ -130,16 +131,19 @@ export async function runPatrolTest({ appDir, target, dartDefines, device = 'chr
         args.push('--dart-define', `${key}=${value}`);
       }
 
-      if (resolvedDevice === 'chrome') {
+      if (resolvedDevice === 'chrome' && !IS_MACOS) {
         // Patrol's underlying Playwright config launches Chromium headed
         // (not headless) — fine on a dev machine with a real display, but
-        // a bare CI runner has no X server for it to attach to (confirmed:
-        // "browserType.launch: Target page, context or browser has been
-        // closed" / "Missing X server or $DISPLAY"). xvfb-run provides a
-        // virtual framebuffer so a headed browser can launch anyway — the
-        // standard fix Playwright's own error message suggests. Android/iOS
-        // runs don't involve a browser at all (native instrumentation), so
-        // this wrapping is web-only.
+        // a bare Linux CI runner has no X server for it to attach to
+        // (confirmed: "browserType.launch: Target page, context or browser
+        // has been closed" / "Missing X server or $DISPLAY"). xvfb-run
+        // provides a virtual framebuffer so a headed browser can launch
+        // anyway — the standard fix Playwright's own error message
+        // suggests. Not needed (and not installed) on macOS CI runners,
+        // which have a real display session unlike a bare Linux box — see
+        // the `!IS_MACOS` guard above. Android/iOS runs don't involve a
+        // browser at all (native instrumentation), so this wrapping is
+        // web-only regardless of platform.
         const xvfbArgs = ['-a', 'patrol', ...args];
         console.log('Running: xvfb-run', xvfbArgs.join(' '));
         const child = spawn('xvfb-run', xvfbArgs, { cwd: appDir, stdio: 'inherit' });
