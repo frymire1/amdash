@@ -46,15 +46,26 @@
 # dependency graph between workflows, and no native "wait for N parallel
 # predecessors" primitive either. Each workflow below ends with a script
 # step that calls Codemagic's own REST API (POST /builds) to start the
-# next workflow — see https://docs.codemagic.io/rest-api/builds/. This
-# chains flutter-unit-tests -> flutter-web-build -> flutter-android-build
-# -> flutter-ios-build -> flutter-deploy LINEARLY (today's GitHub Actions
-# build-stage parallelism is traded for zero coordination complexity —
-# revisit with Codemagic's Dynamic Workflows API or a shared status marker
-# if the added wall-clock time becomes a real problem). flutter-deploy then
-# FANS OUT to web-e2e/android-e2e/ios-e2e in parallel — fan-out from one
-# predecessor needs no coordination, unlike the fan-in the build stage
-# would need.
+# next workflow — see https://docs.codemagic.io/rest-api/builds/.
+# flutter-unit-tests FANS OUT to flutter-web-build, flutter-android-build,
+# flutter-ios-build, AND flutter-deploy all at once — a first version of
+# this file chained them linearly instead (unit-tests -> web-build ->
+# android-build -> ios-build -> deploy), which was simple but genuinely
+# slow: total time was the SUM of all four stages instead of the slowest
+# one. None of the three build-sanity workflows produce anything deploy
+# consumes (deploy does its own web build + functions build inline), so
+# there's no real dependency forcing them to wait on each other — only
+# flutter-unit-tests passing matters as a gate. Fan-out from one
+# predecessor needs no coordination (unlike a fan-in would), same pattern
+# flutter-deploy already uses below to kick off web-e2e/android-e2e/
+# ios-e2e in parallel once it finishes.
+#
+# Trade-off: deploy no longer waits on flutter-android-build/flutter-ios-
+# build succeeding first, so a currently-broken native build no longer
+# blocks a web/functions deploy. Given deploy doesn't touch native build
+# output at all, this seemed like the right trade for the wall-clock win —
+# flutter-unit-tests (the actual correctness gate: analyze + widget/unit
+# tests) still runs first and still gates everything.
 #
 # Env var groups referenced below (create in Codemagic -> Team settings ->
 # Environment variables):
@@ -97,14 +108,16 @@ workflows:
           for dir in packages/amdash_core apps/physician apps/ems apps/admin; do
             (cd "$dir" && flutter test)
           done
-      - name: Trigger flutter-web-build
+      - name: Trigger flutter-web-build, flutter-android-build, flutter-ios-build, flutter-deploy
         script: |
-          curl -sf -X POST https://api.codemagic.io/builds \
-            -H "x-auth-token: $CM_API_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{\"appId\": \"$CM_PROJECT_ID\", \"workflowId\": \"flutter-web-build\", \"branch\": \"$CM_BRANCH\"}"
+          for workflow in flutter-web-build flutter-android-build flutter-ios-build flutter-deploy; do
+            curl -sf -X POST https://api.codemagic.io/builds \
+              -H "x-auth-token: $CM_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"appId\": \"$CM_PROJECT_ID\", \"workflowId\": \"$workflow\", \"branch\": \"$CM_BRANCH\"}"
+          done
 
-  # Not triggered directly on push — only via the API call above, to avoid
+  # Not triggered directly on push — only via the fan-out above, to avoid
   # double-triggering the same commit through two paths.
   flutter-web-build:
     name: Flutter web build
@@ -112,8 +125,9 @@ workflows:
     max_build_duration: 30
     environment:
       flutter: stable
-      groups:
-        - codemagic_api
+    cache:
+      cache_paths:
+        - $HOME/.pub-cache
     scripts:
       - name: Build physician/ems/admin (web)
         script: |
@@ -122,12 +136,6 @@ workflows:
           for app in physician ems admin; do
             (cd "apps/$app" && flutter build web --release)
           done
-      - name: Trigger flutter-android-build
-        script: |
-          curl -sf -X POST https://api.codemagic.io/builds \
-            -H "x-auth-token: $CM_API_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{\"appId\": \"$CM_PROJECT_ID\", \"workflowId\": \"flutter-android-build\", \"branch\": \"$CM_BRANCH\"}"
 
   flutter-android-build:
     name: Flutter Android build
@@ -135,12 +143,11 @@ workflows:
     max_build_duration: 30
     environment:
       flutter: stable
-      groups:
-        - codemagic_api
     cache:
       cache_paths:
         - $HOME/.gradle/caches
         - $HOME/.gradle/wrapper
+        - $HOME/.pub-cache
     scripts:
       - name: Build physician/ems (Android debug APK)
         script: |
@@ -153,12 +160,6 @@ workflows:
             echo "Failed: ${failed[*]}"
             exit 1
           fi
-      - name: Trigger flutter-ios-build
-        script: |
-          curl -sf -X POST https://api.codemagic.io/builds \
-            -H "x-auth-token: $CM_API_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{\"appId\": \"$CM_PROJECT_ID\", \"workflowId\": \"flutter-ios-build\", \"branch\": \"$CM_BRANCH\"}"
 
   flutter-ios-build:
     name: Flutter iOS build
@@ -173,12 +174,11 @@ workflows:
       # here. Re-verify once this runs for real before assuming a pin is
       # needed.
       xcode: latest
-      groups:
-        - codemagic_api
     cache:
       cache_paths:
         - $HOME/Library/Caches/CocoaPods
         - $HOME/Library/Caches/org.swift.swiftpm
+        - $HOME/.pub-cache
     scripts:
       - name: Build physician/ems (iOS, no codesign)
         script: |
@@ -191,12 +191,6 @@ workflows:
             echo "Failed: ${failed[*]}"
             exit 1
           fi
-      - name: Trigger flutter-deploy
-        script: |
-          curl -sf -X POST https://api.codemagic.io/builds \
-            -H "x-auth-token: $CM_API_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{\"appId\": \"$CM_PROJECT_ID\", \"workflowId\": \"flutter-deploy\", \"branch\": \"$CM_BRANCH\"}"
 
   flutter-deploy:
     name: Deploy Flutter apps + functions + firestore rules
@@ -208,6 +202,14 @@ workflows:
       groups:
         - firebase_deploy
         - codemagic_api
+    cache:
+      cache_paths:
+        - $HOME/.pub-cache
+        # `npm ci` (used below) always wipes and reinstalls node_modules
+        # from scratch, so caching node_modules itself wouldn't help —
+        # npm's own download cache is what actually avoids re-fetching
+        # packages from the registry on every run.
+        - $HOME/.npm
     scripts:
       - name: Install functions dependencies
         script: npm ci
@@ -269,6 +271,10 @@ workflows:
     cache:
       cache_paths:
         - $HOME/.pub-cache
+        - $HOME/.npm
+        # Playwright's own downloaded Chromium binary — without this,
+        # `npx playwright install` below re-downloads it every run.
+        - $HOME/.cache/ms-playwright
     scripts:
       - name: Ensure en_US.UTF-8 locale is generated
         script: sudo locale-gen en_US.UTF-8
@@ -317,6 +323,15 @@ workflows:
       groups:
         - firebase_deploy
         - firebase_testlab
+    cache:
+      cache_paths:
+        # $HOME/.pub-cache matters a lot here specifically — without it,
+        # `dart pub global activate patrol_cli` below recompiles patrol_cli
+        # from source on every single run.
+        - $HOME/.pub-cache
+        - $HOME/.npm
+        - $HOME/.gradle/caches
+        - $HOME/.gradle/wrapper
     scripts:
       - name: Authenticate to Firebase Admin SDK
         script: |
@@ -407,6 +422,15 @@ workflows:
         # integration automatically. Only add an `app_store_connect` group
         # back (holding APP_STORE_CONNECT_KEY_IDENTIFIER/_ISSUER_ID/
         # _PRIVATE_KEY) if you went the raw-env-var route instead.
+    cache:
+      cache_paths:
+        # $HOME/.pub-cache matters a lot here specifically — without it,
+        # `dart pub global activate patrol_cli` below recompiles patrol_cli
+        # from source on every single run.
+        - $HOME/.pub-cache
+        - $HOME/.npm
+        - $HOME/Library/Caches/CocoaPods
+        - $HOME/Library/Caches/org.swift.swiftpm
     scripts:
       - name: Authenticate to Firebase Admin SDK
         script: |
