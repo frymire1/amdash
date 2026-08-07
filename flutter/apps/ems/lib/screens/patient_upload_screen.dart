@@ -1,13 +1,14 @@
 import 'package:amdash_core/amdash_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 
 import '../classes/uploaded_patient.dart';
 import '../services/ems_tracking_service.dart';
 import '../services/patient_session_service.dart';
 import '../services/patient_upload_service.dart';
+import '../widgets/location_tracking_section.dart';
 
 // Standard peripheral IV catheter gauges, largest (trauma) to smallest
 // (pediatric/fragile veins) — mirrors patient-upload.component.ts's
@@ -43,7 +44,9 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
   final _healthcareNumberController = TextEditingController();
   final _ageController = TextEditingController();
   final _heartRateController = TextEditingController();
-  final _bloodPressureController = TextEditingController();
+  final _systolicController = TextEditingController();
+  final _diastolicController = TextEditingController();
+  final _diastolicFocusNode = FocusNode();
   final _oxygenController = TextEditingController();
   final _temperatureController = TextEditingController();
   final _respiratoryRateController = TextEditingController();
@@ -66,8 +69,6 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
   bool _submitting = false;
   String? _errorMessage;
 
-  String? _locationError;
-  bool _locationShared = false;
   bool _liveTrackingEnabled = true;
 
   @override
@@ -75,12 +76,6 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     super.initState();
     _isEditing = widget.patientId != null;
     _editingId = widget.patientId;
-
-    if (_isEditing) {
-      _liveTrackingEnabled = ref.read(emsTrackingProvider.notifier).isTracking(widget.patientId!);
-    } else {
-      _useCurrentLocation();
-    }
   }
 
   @override
@@ -89,7 +84,9 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     _healthcareNumberController.dispose();
     _ageController.dispose();
     _heartRateController.dispose();
-    _bloodPressureController.dispose();
+    _systolicController.dispose();
+    _diastolicController.dispose();
+    _diastolicFocusNode.dispose();
     _oxygenController.dispose();
     _temperatureController.dispose();
     _respiratoryRateController.dispose();
@@ -97,28 +94,6 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     _treatmentController.dispose();
     _notesController.dispose();
     super.dispose();
-  }
-
-  Future<void> _useCurrentLocation() async {
-    setState(() => _locationError = null);
-
-    try {
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, timeLimit: Duration(seconds: 10)),
-      );
-      if (!mounted) return;
-      setState(() {
-        _latitude = position.latitude;
-        _longitude = position.longitude;
-        _locationShared = true;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _locationShared = false;
-        _locationError = 'Could not get your current location. Please allow location access and try again.';
-      });
-    }
   }
 
   // The patient list is loaded asynchronously from Firestore, so keep
@@ -143,7 +118,14 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     _healthcareNumberController.text = patient.healthcareNumber;
     _destination = patient.destination;
     _heartRateController.text = patient.vitals.heartRate is num ? '${patient.vitals.heartRate}' : '';
-    _bloodPressureController.text = isProvidedValue(patient.vitals.bloodPressure) ? patient.vitals.bloodPressure : '';
+    if (isProvidedValue(patient.vitals.bloodPressure)) {
+      final parts = patient.vitals.bloodPressure.split('/');
+      _systolicController.text = parts[0];
+      _diastolicController.text = parts.length > 1 ? parts[1] : '';
+    } else {
+      _systolicController.text = '';
+      _diastolicController.text = '';
+    }
     _oxygenController.text = patient.vitals.oxygen is num ? '${patient.vitals.oxygen}' : '';
     _temperatureController.text = patient.vitals.temperature is num ? '${patient.vitals.temperature}' : '';
     _respiratoryRateController.text = patient.vitals.respiratoryRate?.toString() ?? '';
@@ -154,11 +136,21 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     _ivPlacement = patient.ivPlacement;
     _treatmentController.text = patient.treatment ?? '';
     _notesController.text = patient.notes ?? '';
-    _locationShared = patient.location != null;
   }
 
   num? _parseNum(String text) => text.isEmpty ? null : num.tryParse(text);
   int? _parseInt(String text) => text.isEmpty ? null : int.tryParse(text);
+
+  // Joins the two separate systolic/diastolic fields back into the single
+  // "120/80" string the rest of the app (Firestore, physician's vitals
+  // display) expects — matches isProvidedValue's blank check when both are
+  // empty, rather than submitting a bare "/".
+  String _bloodPressureValue() {
+    final systolic = _systolicController.text.trim();
+    final diastolic = _diastolicController.text.trim();
+    if (systolic.isEmpty && diastolic.isEmpty) return '';
+    return '$systolic/$diastolic';
+  }
 
   Future<void> _onSubmit() async {
     // Guards against a double-submit even if two tap events land before the
@@ -174,7 +166,7 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
       healthcareNumber: _healthcareNumberController.text.trim(),
       destination: _destination ?? '',
       heartRate: _parseNum(_heartRateController.text),
-      bloodPressure: _bloodPressureController.text.trim(),
+      bloodPressure: _bloodPressureValue(),
       oxygen: _parseNum(_oxygenController.text),
       temperature: _parseNum(_temperatureController.text),
       respiratoryRate: _parseInt(_respiratoryRateController.text),
@@ -255,9 +247,13 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  _isEditing ? 'Edit Patient Information' : 'Upload Patient Information',
-                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+                SizedBox(
+                  width: double.infinity,
+                  child: Text(
+                    _isEditing ? 'Edit Patient Information' : 'Upload Patient Information',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+                  ),
                 ),
                 const SizedBox(height: 20),
                 _section('Patient Details', [
@@ -279,30 +275,59 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
                     controller: _heartRateController,
                     decoration: const InputDecoration(labelText: 'Heart Rate (bpm)'),
                     keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   ),
-                  TextField(
-                    controller: _bloodPressureController,
-                    decoration: const InputDecoration(labelText: 'Blood Pressure', hintText: '120/80'),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _systolicController,
+                          decoration: const InputDecoration(labelText: 'Systolic BP'),
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          textInputAction: TextInputAction.next,
+                          onSubmitted: (_) => _diastolicFocusNode.requestFocus(),
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Text('/', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: _diastolicController,
+                          focusNode: _diastolicFocusNode,
+                          decoration: const InputDecoration(labelText: 'Diastolic BP'),
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        ),
+                      ),
+                    ],
                   ),
                   TextField(
                     controller: _oxygenController,
                     decoration: const InputDecoration(labelText: 'Oxygen (%)'),
                     keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   ),
                   TextField(
                     controller: _temperatureController,
                     decoration: const InputDecoration(labelText: 'Temperature (°C)'),
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*$'))],
                   ),
                   TextField(
                     controller: _respiratoryRateController,
                     decoration: const InputDecoration(labelText: 'Respiratory Rate (breaths/min)'),
                     keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   ),
                   TextField(
                     controller: _gcsController,
                     decoration: const InputDecoration(labelText: 'GCS', hintText: '3-15'),
                     keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   ),
                 ]),
                 _section('IV Access', [
@@ -327,20 +352,20 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
                   ),
                 ]),
                 _section('Location', [
-                  if (_locationError != null)
-                    Text(_locationError!, style: TextStyle(color: Theme.of(context).colorScheme.error))
-                  else if (!_liveTrackingEnabled)
-                    const _LocationStatus(icon: Icons.location_off, text: 'Location sharing is off')
-                  else if (_locationShared)
-                    _LocationStatus(icon: Icons.check_circle, text: 'Location is being shared', color: AppColors.success)
-                  else
-                    const _LocationStatus(icon: Icons.location_searching, text: 'Locating…'),
-                  const SizedBox(height: 8),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Live-track this patient'),
-                    value: _liveTrackingEnabled,
-                    onChanged: (value) => setState(() => _liveTrackingEnabled = value),
+                  LocationTrackingSection(
+                    patientId: widget.patientId,
+                    initialLatitude: _latitude,
+                    initialLongitude: _longitude,
+                    // Mirrors the section's current values for _onSubmit to
+                    // read — no setState needed, nothing in this parent's
+                    // build() depends on these beyond submit time, and the
+                    // section is already the one rebuilding to reflect its
+                    // own status/toggle changes.
+                    onChanged: (value) {
+                      _latitude = value.latitude;
+                      _longitude = value.longitude;
+                      _liveTrackingEnabled = value.liveTrackingEnabled;
+                    },
                   ),
                 ]),
                 if (_errorMessage != null) ...[
@@ -391,26 +416,6 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
       decoration: InputDecoration(labelText: label),
       items: [for (final option in options) DropdownMenuItem(value: option, child: Text(option))],
       onChanged: onChanged,
-    );
-  }
-}
-
-class _LocationStatus extends StatelessWidget {
-  const _LocationStatus({required this.icon, required this.text, this.color});
-
-  final IconData icon;
-  final String text;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 18, color: color),
-        const SizedBox(width: 6),
-        Text(text, style: TextStyle(color: color)),
-      ],
     );
   }
 }
