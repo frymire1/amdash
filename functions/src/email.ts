@@ -5,15 +5,16 @@ import { AssignableRole } from './classes/assignable-role';
 
 export const RESEND_API_KEY = defineSecret('RESEND_API_KEY');
 
-// NOTE: gmail.com isn't a domain you can verify ownership of in Resend
-// (Google owns it), so sends from this address will likely be rejected by
-// Resend outright, or at best flagged as spoofed by SPF/DKIM/DMARC checks
-// on the receiving end. Swap for a verified custom domain's address once
-// one's set up in the Resend dashboard (Domains -> Add Domain -> add the
-// DNS records shown), or use Resend's shared sandbox sender
-// ('AmDash <onboarding@resend.dev>') for zero-setup testing in the
-// meantime.
-const FROM_ADDRESS = 'AmDash <frymire1@gmail.com>';
+// Resend's shared sandbox sender — works immediately with zero setup, but
+// Resend restricts it to only deliver to the email address the Resend
+// account itself was signed up with (an anti-abuse limit on the shared
+// domain, not something this code can work around). So createUser's welcome
+// email will only actually land when testing with that one address; any
+// other new user's email will get the same silent-looking (now logged)
+// rejection this sender was swapped in to fix. Swap for a verified custom
+// domain's address once one's set up in the Resend dashboard (Domains ->
+// Add Domain -> add the DNS records shown) to send to arbitrary recipients.
+const FROM_ADDRESS = 'AmDash <onboarding@resend.dev>';
 
 // ems -> the EMS app; physician/nurse -> the physician app (nurses use the
 // same app as physicians, see physician/lib/router.dart's requiredRoles).
@@ -43,7 +44,11 @@ export async function sendWelcomeEmail({
   const loginUrl = loginUrlForRole(role);
 
   try {
-    await resend.emails.send({
+    // The Resend SDK does NOT reject/throw on an API-level failure (e.g. a
+    // rejected From address) — it resolves normally with `error` populated
+    // instead, so that has to be checked explicitly or a failed send goes
+    // completely unlogged.
+    const { error } = await resend.emails.send({
       from: FROM_ADDRESS,
       to: email,
       subject: 'Your AmDash account is ready',
@@ -53,6 +58,9 @@ export async function sendWelcomeEmail({
         <p><a href="${loginUrl}">Sign in to get started</a> — since this is your first time signing in, you'll be asked to set a password after entering your email.</p>
       `,
     });
+    if (error) {
+      logger.error('Failed to send welcome email', { email, error });
+    }
   } catch (error) {
     logger.error('Failed to send welcome email', { email, error });
   }
