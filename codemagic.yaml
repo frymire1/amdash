@@ -35,10 +35,12 @@
 #     confirmed by reading the repo — run `patrol build ios --release`
 #     once (locally or in an early Codemagic run) and inspect what it
 #     actually generates before registering anything.
-#   - Device/OS strings passed to `gcloud firebase test android/ios run`
-#     below are placeholders — run `gcloud firebase test android models
-#     list` / `gcloud firebase test ios models list` against amdash-dev and
-#     pick real, current values.
+#   - Android device string is confirmed real: model=t2q (Samsung Galaxy
+#     S21+ 5G), version 34 — verified against `gcloud firebase test
+#     android models list` for amdash-dev. The iOS device string
+#     (model=iphone14pro,version=17.0) is STILL an unverified placeholder
+#     — run `gcloud firebase test ios models list` against amdash-dev
+#     before trusting it.
 #   - Whether Codemagic's linux images ship `gcloud`/`jq` preinstalled —
 #     add an explicit install step if not.
 #
@@ -387,7 +389,7 @@ workflows:
             --type instrumentation --use-orchestrator \
             --app build/app/outputs/apk/debug/app-debug.apk \
             --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
-            --device model=MediumPhone.arm,version=34,locale=en,orientation=portrait \
+            --device model=t2q,version=34,locale=en,orientation=portrait \
             --results-bucket=gs://amdash-dev-test-lab-results
       - name: Build + run ems Test Lab suite (Android)
         script: |
@@ -401,7 +403,7 @@ workflows:
             --type instrumentation --use-orchestrator \
             --app build/app/outputs/apk/debug/app-debug.apk \
             --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
-            --device model=MediumPhone.arm,version=34,locale=en,orientation=portrait \
+            --device model=t2q,version=34,locale=en,orientation=portrait \
             --results-bucket=gs://amdash-dev-test-lab-results
     # Saved regardless of whether the workflow ultimately succeeds or
     # fails (e.g. at the gcloud Test Lab step) — lets you grab a real APK
