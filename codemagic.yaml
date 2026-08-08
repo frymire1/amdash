@@ -392,8 +392,16 @@ workflows:
             --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")" \
             --dart-define SMOKE_HOSPITAL="$(jq -r .hospitalName "$ACCOUNT")" \
             --dart-define SMOKE_PATIENT_NAME="$(jq -r .patientName "$ACCOUNT")"
+          # No --use-orchestrator: the matrix errored immediately with zero
+          # logs/artifacts across two different devices (one low-capacity,
+          # one high) — pointing at the test config itself rather than
+          # device availability. AndroidX Test Orchestrator requires the
+          # androidTest APK to be specifically built for it; Patrol's
+          # generated instrumentation APK likely isn't, so requesting it
+          # explicitly may have caused Test Lab to reject the submission
+          # outright before ever dispatching to a device.
           gcloud firebase test android run \
-            --type instrumentation --use-orchestrator \
+            --type instrumentation \
             --app build/app/outputs/apk/debug/app-debug.apk \
             --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
             --device model=tokay,version=35,locale=en,orientation=portrait \
@@ -407,7 +415,7 @@ workflows:
             --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
             --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")"
           gcloud firebase test android run \
-            --type instrumentation --use-orchestrator \
+            --type instrumentation \
             --app build/app/outputs/apk/debug/app-debug.apk \
             --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
             --device model=tokay,version=35,locale=en,orientation=portrait \
