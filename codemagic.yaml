@@ -97,9 +97,19 @@
 #   - firebase_deploy: FIREBASE_SERVICE_ACCOUNT_KEY (same key used by the
 #     old GitHub Actions `deploy` job — reused here for `firebase deploy`
 #     and for the seed/teardown scripts' Admin SDK calls)
-#   - firebase_testlab: GCLOUD_TESTLAB_SERVICE_ACCOUNT_KEY (a separate,
-#     least-privilege service account with roles/cloudtestservice.testAdmin
-#     — do not widen firebase_deploy's key instead)
+#   - firebase_testlab: GCLOUD_TESTLAB_SERVICE_ACCOUNT_KEY (a separate
+#     service account — do not widen firebase_deploy's key instead). NOT
+#     currently least-privilege: roles/cloudtestservice.testAdmin +
+#     roles/storage.admin alone produced "Matrix unexpectedly reached
+#     final status ERROR" with zero logs/artifacts ever written, for every
+#     android-e2e run, regardless of device/bucket/orchestrator-flag
+#     changes — granting the account the broad Editor role was what
+#     actually fixed it, confirming it was a permissions gap somewhere
+#     Test Lab's result-writing path needs beyond those two roles. TODO:
+#     narrow Editor back down (try roles/firebase.admin alongside the
+#     existing two next, re-test, only settle for Editor if that still
+#     isn't enough) — deferred to a future pass rather than blocking on it
+#     now.
 
 workflows:
   flutter-unit-tests:
