@@ -247,13 +247,28 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SizedBox(
-                  width: double.infinity,
-                  child: Text(
-                    _isEditing ? 'Edit Patient Information' : 'Upload Patient Information',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
-                  ),
+                Row(
+                  children: [
+                    // NavBar (the shell's fixed appBar) has no back button
+                    // by design — this screen provides its own way back to
+                    // the dashboard.
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back),
+                      tooltip: 'Back',
+                      onPressed: () => context.canPop() ? context.pop() : context.go('/'),
+                    ),
+                    Expanded(
+                      child: Text(
+                        _isEditing ? 'Edit Patient Information' : 'Upload Patient Information',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    // Balances the leading IconButton's width so the title
+                    // is actually centered, not just centered within the
+                    // remaining space after it.
+                    const SizedBox(width: 48),
+                  ],
                 ),
                 const SizedBox(height: 20),
                 _section('Patient Details', [
