@@ -387,7 +387,8 @@ workflows:
             --type instrumentation --use-orchestrator \
             --app build/app/outputs/apk/debug/app-debug.apk \
             --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
-            --device model=MediumPhone.arm,version=34,locale=en,orientation=portrait
+            --device model=MediumPhone.arm,version=34,locale=en,orientation=portrait \
+            --results-bucket=gs://amdash-dev-test-lab-results
       - name: Build + run ems Test Lab suite (Android)
         script: |
           set -e
@@ -400,7 +401,16 @@ workflows:
             --type instrumentation --use-orchestrator \
             --app build/app/outputs/apk/debug/app-debug.apk \
             --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
-            --device model=MediumPhone.arm,version=34,locale=en,orientation=portrait
+            --device model=MediumPhone.arm,version=34,locale=en,orientation=portrait \
+            --results-bucket=gs://amdash-dev-test-lab-results
+    # Saved regardless of whether the workflow ultimately succeeds or
+    # fails (e.g. at the gcloud Test Lab step) — lets you grab a real APK
+    # from a failed build's page in the Codemagic UI without needing a
+    # local Android toolchain, e.g. for Firebase Test Lab Console's own
+    # one-time "upload an app" onboarding step.
+    artifacts:
+      - flutter/apps/physician/build/app/outputs/apk/debug/app-debug.apk
+      - flutter/apps/ems/build/app/outputs/apk/debug/app-debug.apk
     publishing:
       # Relies on publishing.scripts running regardless of build
       # success/failure (see the TODO at the top of this file) — this is
@@ -498,7 +508,8 @@ workflows:
           zip -r ios_tests.zip Release-iphoneos "$XCTESTRUN"
           gcloud firebase test ios run \
             --test ios_tests.zip \
-            --device model=iphone14pro,version=17.0,locale=en_US,orientation=portrait
+            --device model=iphone14pro,version=17.0,locale=en_US,orientation=portrait \
+            --results-bucket=gs://amdash-dev-test-lab-results
       - name: Build + run ems Test Lab suite (iOS)
         script: |
           set -e
@@ -512,7 +523,8 @@ workflows:
           zip -r ios_tests.zip Release-iphoneos "$XCTESTRUN"
           gcloud firebase test ios run \
             --test ios_tests.zip \
-            --device model=iphone14pro,version=17.0,locale=en_US,orientation=portrait
+            --device model=iphone14pro,version=17.0,locale=en_US,orientation=portrait \
+            --results-bucket=gs://amdash-dev-test-lab-results
     publishing:
       scripts:
         - name: Teardown physician + ems smoke accounts
