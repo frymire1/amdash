@@ -35,9 +35,16 @@
 #     confirmed by reading the repo — run `patrol build ios --release`
 #     once (locally or in an early Codemagic run) and inspect what it
 #     actually generates before registering anything.
-#   - Android device string is confirmed real: model=t2q (Samsung Galaxy
-#     S21+ 5G), version 34 — verified against `gcloud firebase test
-#     android models list` for amdash-dev. The iOS device string
+#   - Android device string is confirmed real AND well-stocked:
+#     model=tokay (Pixel 9), version 35 — verified via `gcloud firebase
+#     test android models list` + `list-device-capacities` for amdash-dev.
+#     A first attempt used model=t2q (Galaxy S21+ 5G), which is a real
+#     device but had LOW capacity — Test Lab's physical device pool is
+#     genuinely finite, and a matrix against a low-capacity device can
+#     error out immediately with no logs at all (never actually dispatched
+#     to a device) rather than queueing or falling back. Re-check
+#     list-device-capacities occasionally if this starts erroring again —
+#     capacity levels shift over time. The iOS device string
 #     (model=iphone14pro,version=17.0) is STILL an unverified placeholder
 #     — run `gcloud firebase test ios models list` against amdash-dev
 #     before trusting it.
@@ -389,7 +396,7 @@ workflows:
             --type instrumentation --use-orchestrator \
             --app build/app/outputs/apk/debug/app-debug.apk \
             --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
-            --device model=t2q,version=34,locale=en,orientation=portrait \
+            --device model=tokay,version=35,locale=en,orientation=portrait \
             --results-bucket=gs://amdash-dev-test-lab-results
       - name: Build + run ems Test Lab suite (Android)
         script: |
@@ -403,7 +410,7 @@ workflows:
             --type instrumentation --use-orchestrator \
             --app build/app/outputs/apk/debug/app-debug.apk \
             --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
-            --device model=t2q,version=34,locale=en,orientation=portrait \
+            --device model=tokay,version=35,locale=en,orientation=portrait \
             --results-bucket=gs://amdash-dev-test-lab-results
     # Saved regardless of whether the workflow ultimately succeeds or
     # fails (e.g. at the gcloud Test Lab step) — lets you grab a real APK
