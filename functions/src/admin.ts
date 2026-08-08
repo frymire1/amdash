@@ -14,6 +14,7 @@ import { CreateOrganizationRequest } from './classes/create-organization-request
 import { SetOrganizationRetentionRequest } from './classes/set-organization-retention-request';
 import { GeocodeResult } from './classes/geocode-result';
 import { REGION, findUserByEmail, getCallerProfile } from './shared';
+import { RESEND_API_KEY, sendWelcomeEmail } from './email';
 
 const GEOCODING_API_KEY = defineSecret('GEOCODING_API_KEY');
 
@@ -57,7 +58,7 @@ function requireSameOrg(caller: CallerProfile, targetOrganizationId: unknown, me
 // checkAccountStatus, sees hasPassword: false, and routes to the
 // set-password screen, which calls setInitialPassword below), or via
 // "Forgot password?".
-export const createUser = onCall<CreateUserRequest>({ region: REGION }, async (request) => {
+export const createUser = onCall<CreateUserRequest>({ region: REGION, secrets: [RESEND_API_KEY] }, async (request) => {
   const profile = await getCallerProfile(request.auth?.uid);
   requireAdmin(profile, 'Only admins can create users.');
 
@@ -85,6 +86,11 @@ export const createUser = onCall<CreateUserRequest>({ region: REGION }, async (r
     .collection('users')
     .doc(newUser.uid)
     .set({ email, firstName, lastName, role: [role], organizationId: profile.organizationId });
+
+  // Best-effort — see email.ts: the account already exists and is usable
+  // regardless of whether this send succeeds, so a failure here doesn't
+  // fail the whole createUser call.
+  await sendWelcomeEmail({ email, firstName, role });
 
   return { uid: newUser.uid, email, firstName, lastName, role };
 });
