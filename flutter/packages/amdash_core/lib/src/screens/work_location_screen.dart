@@ -69,6 +69,7 @@ class _WorkLocationScreenState extends ConsumerState<WorkLocationScreen> {
     final showError = _touched && !hospitalNames.contains(_typedValue);
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       body: Center(
         child: SingleChildScrollView(
           child: ConstrainedBox(

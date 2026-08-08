@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../auth/auth_service.dart';
+import '../theme/app_theme.dart';
 
 /// Mirrors `libs/auth/src/lib/login/login.component.ts`'s email-first flow:
 /// submitting an email decides server-side (via `checkAccountStatus`)
@@ -154,6 +155,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.transparent,
       body: Center(
         child: SingleChildScrollView(
           child: ConstrainedBox(
@@ -345,7 +347,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget _successText(BuildContext context, String text) {
     return Padding(
       padding: const EdgeInsets.only(top: 8),
-      child: Text(text, style: const TextStyle(color: Colors.green)),
+      child: Text(text, style: TextStyle(color: context.palette.success)),
     );
   }
 }

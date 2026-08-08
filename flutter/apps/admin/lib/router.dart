@@ -70,10 +70,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     refreshListenable: refreshNotifier,
     redirect: (context, state) => _adminRedirect(ref, state),
     routes: [
-      GoRoute(path: '/login', builder: (context, state) => const LoginScreen(appName: 'AmDash — Admin')),
+      GoRoute(
+        path: '/login',
+        pageBuilder: (context, state) =>
+            fastFadePage(context, state, const AppBackground(child: LoginScreen(appName: 'AmDash — Admin'))),
+      ),
       GoRoute(
         path: '/access-denied',
-        builder: (context, state) => const AccessDeniedScreen(appName: 'Admin'),
+        pageBuilder: (context, state) =>
+            fastFadePage(context, state, const AppBackground(child: AccessDeniedScreen(appName: 'Admin'))),
       ),
       // Pure redirect target, same as `landing.guard.ts` — never renders
       // its real content. While the profile is still loading,
@@ -93,13 +98,29 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // normal per-route page transition, so the navbar no longer visibly
       // unmounts/re-animates on every in-app navigation.
       ShellRoute(
-        builder: (context, state, child) => Scaffold(appBar: const AdminNavBar(), body: child),
+        builder: (context, state, child) =>
+            Scaffold(appBar: const AdminNavBar(), body: AppBackground(child: child)),
         routes: [
-          GoRoute(path: '/user-settings', builder: (context, state) => const UserSettingsScreen()),
-          GoRoute(path: '/users', builder: (context, state) => const UserManagementScreen()),
-          GoRoute(path: '/hospitals', builder: (context, state) => const HospitalManagementScreen()),
-          GoRoute(path: '/settings', builder: (context, state) => const OrganizationSettingsScreen()),
-          GoRoute(path: '/organizations', builder: (context, state) => const OrganizationManagementScreen()),
+          GoRoute(
+            path: '/user-settings',
+            pageBuilder: (context, state) => fastFadePage(context, state, const UserSettingsScreen()),
+          ),
+          GoRoute(
+            path: '/users',
+            pageBuilder: (context, state) => fastFadePage(context, state, const UserManagementScreen()),
+          ),
+          GoRoute(
+            path: '/hospitals',
+            pageBuilder: (context, state) => fastFadePage(context, state, const HospitalManagementScreen()),
+          ),
+          GoRoute(
+            path: '/settings',
+            pageBuilder: (context, state) => fastFadePage(context, state, const OrganizationSettingsScreen()),
+          ),
+          GoRoute(
+            path: '/organizations',
+            pageBuilder: (context, state) => fastFadePage(context, state, const OrganizationManagementScreen()),
+          ),
         ],
       ),
     ],

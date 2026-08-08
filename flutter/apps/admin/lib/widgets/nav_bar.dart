@@ -44,8 +44,13 @@ class _AdminNavBarState extends ConsumerState<AdminNavBar> {
     final initials = profile?.initials ?? '';
     final isAdmin = profile?.hasRole(UserRole.admin) ?? false;
     final isSuperAdmin = profile?.hasRole(UserRole.superAdmin) ?? false;
+    final colorScheme = Theme.of(context).colorScheme;
+    final palette = context.palette;
 
     return AppBar(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      flexibleSpace: const GlassPanel(borderRadius: BorderRadius.zero, child: SizedBox.expand()),
       leading: PopupMenuButton<String>(
         icon: const Icon(Icons.menu),
         onSelected: (route) => context.go(route),
@@ -66,12 +71,18 @@ class _AdminNavBarState extends ConsumerState<AdminNavBar> {
           child: InkWell(
             customBorder: const CircleBorder(),
             onTap: () => context.push('/user-settings'),
-            child: CircleAvatar(
-              radius: 16,
-              backgroundColor: initials.isEmpty ? AppColors.slate400 : AppColors.brand,
-              child: initials.isEmpty
-                  ? const Icon(Icons.account_circle, color: Colors.white, size: 20)
-                  : Text(initials, style: const TextStyle(color: Colors.white, fontSize: 13)),
+            child: Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: [BoxShadow(color: palette.glow.withValues(alpha: 0.45), blurRadius: 12)],
+              ),
+              child: CircleAvatar(
+                radius: 16,
+                backgroundColor: initials.isEmpty ? colorScheme.surfaceContainerHighest : colorScheme.primary,
+                child: initials.isEmpty
+                    ? Icon(Icons.account_circle, color: colorScheme.onSurfaceVariant, size: 20)
+                    : Text(initials, style: TextStyle(color: colorScheme.onPrimary, fontSize: 13)),
+              ),
             ),
           ),
         ),
@@ -79,11 +90,7 @@ class _AdminNavBarState extends ConsumerState<AdminNavBar> {
           onPressed: _loggingOut ? null : _logOut,
           tooltip: 'Log out',
           icon: _loggingOut
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                )
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
               : const Icon(Icons.logout),
         ),
       ],

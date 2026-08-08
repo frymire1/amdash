@@ -304,7 +304,7 @@ class _UserSettingsScreenState extends ConsumerState<UserSettingsScreen> {
                         if (alertsActive)
                           Text(
                             'Alerts armed until ${expiresAt.toDate().toLocal()}',
-                            style: const TextStyle(color: Colors.green),
+                            style: TextStyle(color: context.palette.success),
                           )
                         else
                           const Text('Alerts are currently off.'),
@@ -351,6 +351,8 @@ class _UserSettingsScreenState extends ConsumerState<UserSettingsScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 16),
+                const _AppearanceCard(),
               ],
             ),
           ),
@@ -375,18 +377,53 @@ class _StatusLine extends StatelessWidget {
       );
     }
     if (success != null) {
+      final successColor = context.palette.success;
       return Padding(
         padding: const EdgeInsets.only(top: 8),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.check_circle, color: Colors.green, size: 18),
+            Icon(Icons.check_circle, color: successColor, size: 18),
             const SizedBox(width: 6),
-            Text(success!, style: const TextStyle(color: Colors.green)),
+            Text(success!, style: TextStyle(color: successColor)),
           ],
         ),
       );
     }
     return const SizedBox.shrink();
+  }
+}
+
+/// Light/dark/system appearance control, wired to the shared
+/// `themeModeProvider` (persisted via SharedPreferences) — defaults to
+/// following the OS setting until explicitly changed here.
+class _AppearanceCard extends ConsumerWidget {
+  const _AppearanceCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = ref.watch(themeModeProvider);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('Appearance', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            SegmentedButton<ThemeMode>(
+              segments: const [
+                ButtonSegment(value: ThemeMode.system, label: Text('System'), icon: Icon(Icons.brightness_auto)),
+                ButtonSegment(value: ThemeMode.light, label: Text('Light'), icon: Icon(Icons.light_mode)),
+                ButtonSegment(value: ThemeMode.dark, label: Text('Dark'), icon: Icon(Icons.dark_mode)),
+              ],
+              selected: {mode},
+              onSelectionChanged: (selection) => ref.read(themeModeProvider.notifier).setMode(selection.first),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

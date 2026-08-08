@@ -42,6 +42,7 @@ class AccessDeniedScreen extends ConsumerWidget {
     final matchingApps = _matchingApps(profile?.role ?? const []);
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),

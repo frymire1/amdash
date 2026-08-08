@@ -127,11 +127,11 @@ class _HospitalManagementScreenState extends ConsumerState<HospitalManagementScr
               const Text('Hospitals', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
               if (hospitals.isEmpty)
-                Text('No hospitals yet.', style: TextStyle(color: AppColors.slate500))
+                Text('No hospitals yet.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))
               else
                 Table(
                   columnWidths: const {0: FlexColumnWidth(2), 1: FlexColumnWidth(3), 2: FixedColumnWidth(56)},
-                  border: TableBorder(horizontalInside: BorderSide(color: AppColors.slate200)),
+                  border: TableBorder(horizontalInside: BorderSide(color: context.palette.border)),
                   children: [
                     TableRow(
                       children: [
@@ -173,7 +173,7 @@ class _HospitalManagementScreenState extends ConsumerState<HospitalManagementScr
 
   Widget _headerCell(String text) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 8),
-    child: Text(text, style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.slate500)),
+    child: Text(text, style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurfaceVariant)),
   );
 
   Widget _cell(String text) => Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(text));

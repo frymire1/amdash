@@ -186,7 +186,7 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
 
     if (patient == null) {
       return Center(
-        child: Text('Select a patient to view details', style: TextStyle(color: AppColors.slate500)),
+        child: Text('Select a patient to view details', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
       );
     }
 
@@ -255,7 +255,7 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
           ),
           Text.rich(
             TextSpan(
-              style: TextStyle(color: AppColors.slate500),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
               children: [
                 if (isProvidedValue(patient.age))
                   TextSpan(text: '${patient.age} years')
@@ -275,7 +275,7 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
           ),
           Text(
             'Healthcare #: ${isProvidedValue(patient.healthcareNumber) ? patient.healthcareNumber : 'Not added by EMS yet'}',
-            style: TextStyle(color: AppColors.slate500),
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 16),
           _infoCard('Destination Hospital', [_infoRow('Destination', patient.destination)]),
@@ -330,25 +330,27 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
   Widget _infoRow(String label, Object? value, {String? suffix}) {
     final provided = isProvidedValue(value);
     final text = provided ? (suffix == null ? '$value' : '$value $suffix') : 'Not added by EMS yet';
+    final palette = context.palette;
+    final colorScheme = Theme.of(context).colorScheme;
     return SizedBox(
       width: 200,
       child: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: const Color(0xFFF0F9FF),
+          color: palette.glassSurface,
           border: Border(left: BorderSide(color: AppColors.trackingAccent, width: 3)),
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(label, style: TextStyle(fontSize: 11, color: AppColors.slate500)),
+            Text(label, style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant)),
             Text(
               text,
               style: TextStyle(
                 fontStyle: provided ? FontStyle.normal : FontStyle.italic,
-                color: provided ? AppColors.slate900 : AppColors.slate400,
+                color: provided ? colorScheme.onSurface : colorScheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -371,7 +373,7 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
               treatmentProvided ? patient.treatment! : 'Not added by EMS yet',
               style: TextStyle(
                 fontStyle: treatmentProvided ? FontStyle.normal : FontStyle.italic,
-                color: treatmentProvided ? null : AppColors.slate400,
+                color: treatmentProvided ? null : Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 12),
@@ -516,7 +518,7 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
             if (patient.location!.address.isNotEmpty) Text(patient.location!.address),
             Text(
               '${patient.location!.latitude.toStringAsFixed(4)}, ${patient.location!.longitude.toStringAsFixed(4)}',
-              style: TextStyle(color: AppColors.slate500, fontSize: 12),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
             ),
             if (vehiclePosition != null)
               Padding(
@@ -530,7 +532,11 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
                     : Text(
                         'Last updated at: '
                         '${DateFormat('h:mm:ss a').format(DateTime.fromMillisecondsSinceEpoch(trackedLocation!.updatedAtMs))}',
-                        style: TextStyle(color: AppColors.slate500, fontSize: 12, fontStyle: FontStyle.italic),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                        ),
                       ),
               ),
             if (directionsResult != null && destinationHospital != null)

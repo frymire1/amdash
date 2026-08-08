@@ -86,32 +86,19 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  margin: const EdgeInsets.only(right: 6),
-                  decoration: BoxDecoration(
-                    color: isTracking ? AppColors.success : AppColors.danger,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                Text(
-                  isTracking ? 'Tracking Online' : 'Tracking Offline',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: isTracking ? AppColors.success : AppColors.danger,
-                  ),
-                ),
-              ],
+            Align(
+              alignment: Alignment.centerLeft,
+              child: StatusPill(
+                kind: isTracking ? StatusPillKind.active : StatusPillKind.critical,
+                label: isTracking ? 'Tracking Online' : 'Tracking Offline',
+                pulsing: isTracking,
+              ),
             ),
             const SizedBox(height: 8),
             Text(patient.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             Text(
               'Healthcare #${patient.healthcareNumber}',
-              style: const TextStyle(fontSize: 13, color: AppColors.slate500),
+              style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 8),
             Row(

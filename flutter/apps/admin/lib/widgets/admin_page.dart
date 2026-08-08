@@ -1,3 +1,4 @@
+import 'package:amdash_core/amdash_core.dart';
 import 'package:flutter/material.dart';
 
 /// Shared layout for every admin management screen — mirrors the
@@ -58,7 +59,7 @@ class FormMessage extends StatelessWidget {
       child: Text(
         text,
         style: TextStyle(
-          color: isError ? Theme.of(context).colorScheme.error : Colors.green,
+          color: isError ? Theme.of(context).colorScheme.error : context.palette.success,
         ),
       ),
     );

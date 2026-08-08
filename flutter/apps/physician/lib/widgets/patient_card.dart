@@ -21,13 +21,13 @@ class PatientCard extends StatelessWidget {
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.md),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Align(alignment: Alignment.centerRight, child: _TrackingBadge(status: trackingStatus)),
+              Align(alignment: Alignment.centerRight, child: _trackingPill(trackingStatus)),
               Text(
                 isProvidedValue(patient.name) ? patient.name : 'Not added yet',
                 style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
@@ -35,22 +35,28 @@ class PatientCard extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 '${_fallback(patient.gender)} · ${_fallback(patient.age)}',
-                style: TextStyle(color: AppColors.slate500),
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
               const SizedBox(height: 4),
-              Text('Healthcare #: ${_fallback(patient.healthcareNumber)}', style: TextStyle(color: AppColors.slate500)),
-              Text('Destination: ${_fallback(patient.destination)}', style: TextStyle(color: AppColors.slate500)),
+              Text(
+                'Healthcare #: ${_fallback(patient.healthcareNumber)}',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+              Text(
+                'Destination: ${_fallback(patient.destination)}',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
               const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  _fieldChip('GCS', patient.vitals.gcs),
-                  _fieldChip('Heart Rate', patient.vitals.heartRate),
-                  _fieldChip('Blood Pressure', patient.vitals.bloodPressure),
-                  _fieldChip('Oxygen', patient.vitals.oxygen),
-                  _fieldChip('Temp', patient.vitals.temperature),
-                  _fieldChip('Resp. Rate', patient.vitals.respiratoryRate),
+                  _fieldChip(context, 'GCS', patient.vitals.gcs),
+                  _fieldChip(context, 'Heart Rate', patient.vitals.heartRate),
+                  _fieldChip(context, 'Blood Pressure', patient.vitals.bloodPressure),
+                  _fieldChip(context, 'Oxygen', patient.vitals.oxygen),
+                  _fieldChip(context, 'Temp', patient.vitals.temperature),
+                  _fieldChip(context, 'Resp. Rate', patient.vitals.respiratoryRate),
                 ],
               ),
             ],
@@ -62,97 +68,44 @@ class PatientCard extends StatelessWidget {
 
   String _fallback(Object? value) => isProvidedValue(value) ? value.toString() : 'Not added yet';
 
-  Widget _fieldChip(String label, Object? value) {
+  Widget _trackingPill(EmsTrackingStatus status) {
+    final (kind, label, pulsing) = switch (status) {
+      EmsTrackingStatus.active => (StatusPillKind.active, 'Tracking Online', true),
+      EmsTrackingStatus.stale => (StatusPillKind.warning, 'Lost Connection', false),
+      EmsTrackingStatus.noData => (StatusPillKind.critical, 'Tracking Offline', false),
+      // Normally sub-second (first Firestore snapshot) — shouldn't flash
+      // "Offline" before the real answer is known.
+      EmsTrackingStatus.loading => (StatusPillKind.neutral, 'Tracking…', false),
+    };
+    return StatusPill(kind: kind, label: label, pulsing: pulsing);
+  }
+
+  Widget _fieldChip(BuildContext context, String label, Object? value) {
     final provided = isProvidedValue(value);
+    final palette = context.palette;
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F9FF),
-        borderRadius: BorderRadius.circular(8),
+        color: palette.glassSurface,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: palette.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(label, style: TextStyle(fontSize: 11, color: AppColors.slate500)),
+          Text(label, style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant)),
           Text(
             provided ? value.toString() : 'Not added yet',
             style: TextStyle(
               fontSize: 13,
               fontStyle: provided ? FontStyle.normal : FontStyle.italic,
-              color: provided ? AppColors.slate900 : AppColors.slate400,
+              color: provided ? colorScheme.onSurface : colorScheme.onSurfaceVariant,
             ),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _TrackingBadge extends StatefulWidget {
-  const _TrackingBadge({required this.status});
-
-  final EmsTrackingStatus status;
-
-  @override
-  State<_TrackingBadge> createState() => _TrackingBadgeState();
-}
-
-class _TrackingBadgeState extends State<_TrackingBadge> with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final (color, label, pulsing) = switch (widget.status) {
-      EmsTrackingStatus.active => (AppColors.success, 'Tracking Online', true),
-      EmsTrackingStatus.stale => (AppColors.warning, 'Lost Connection', false),
-      EmsTrackingStatus.noData => (AppColors.danger, 'Tracking Offline', false),
-      // Normally sub-second (first Firestore snapshot) — shouldn't flash
-      // "Offline" before the real answer is known.
-      EmsTrackingStatus.loading => (AppColors.slate400, 'Tracking…', false),
-    };
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
-        const SizedBox(width: 6),
-        if (pulsing)
-          AnimatedBuilder(
-            animation: _controller,
-            builder: (context, _) {
-              final t = _controller.value;
-              return Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: color,
-                  boxShadow: [
-                    BoxShadow(
-                      color: color.withValues(alpha: (0.6 * (1 - t)).clamp(0, 1)),
-                      spreadRadius: 8 * t,
-                    ),
-                  ],
-                ),
-              );
-            },
-          )
-        else
-          Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
-      ],
     );
   }
 }

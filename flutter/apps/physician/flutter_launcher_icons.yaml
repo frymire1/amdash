@@ -1,4 +1,4 @@
-# Generates every platform's app icon from the one AmDash Signal Blue
+# Generates every platform's app icon from the one AmDash Arctic Cyan
 # source (see assets/icon/), shared across every AmDash app — run via
 # `dart run flutter_launcher_icons`.
 flutter_launcher_icons:
@@ -6,10 +6,15 @@ flutter_launcher_icons:
   ios: true
   image_path: "assets/icon/icon.png"
   min_sdk_android: 21
-  adaptive_icon_background: "#2563EB"
+  # icon.png now has transparent corners outside its baked-in rounded
+  # square (needed so the gradient background doesn't hard-crop into a
+  # literal square) — the App Store rejects icons with an alpha channel,
+  # so flatten it onto a solid background for iOS specifically.
+  remove_alpha_ios: true
+  adaptive_icon_background: "#071618"
   adaptive_icon_foreground: "assets/icon/icon-foreground.png"
   web:
     generate: true
     image_path: "assets/icon/icon.png"
-    background_color: "#2563EB"
-    theme_color: "#2563EB"
+    background_color: "#071618"
+    theme_color: "#12A7B5"

@@ -23,22 +23,34 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       requireWorkLocation: true,
     ),
     routes: [
-      GoRoute(path: '/login', builder: (context, state) => const LoginScreen(appName: 'AmDash — Physician')),
+      GoRoute(
+        path: '/login',
+        pageBuilder: (context, state) =>
+            fastFadePage(context, state, const AppBackground(child: LoginScreen(appName: 'AmDash — Physician'))),
+      ),
       GoRoute(
         path: '/access-denied',
-        builder: (context, state) => const AccessDeniedScreen(appName: 'Physician'),
+        pageBuilder: (context, state) =>
+            fastFadePage(context, state, const AppBackground(child: AccessDeniedScreen(appName: 'Physician'))),
       ),
-      GoRoute(path: '/work-location', builder: (context, state) => const WorkLocationScreen()),
+      GoRoute(
+        path: '/work-location',
+        pageBuilder: (context, state) => fastFadePage(context, state, const AppBackground(child: WorkLocationScreen())),
+      ),
       // A persistent Scaffold+NavBar shell — kept outside GoRouter's normal
       // per-route page transition, so the navbar no longer visibly
       // unmounts/re-animates on every in-app navigation (only /login,
       // /access-denied, /work-location are exempt, since those aren't
       // "using the app" yet).
       ShellRoute(
-        builder: (context, state, child) => Scaffold(appBar: const NavBar(), body: child),
+        builder: (context, state, child) =>
+            Scaffold(appBar: const NavBar(), body: AppBackground(child: child)),
         routes: [
-          GoRoute(path: '/user-settings', builder: (context, state) => const UserSettingsScreen()),
-          GoRoute(path: '/', builder: (context, state) => const MainViewScreen()),
+          GoRoute(
+            path: '/user-settings',
+            pageBuilder: (context, state) => fastFadePage(context, state, const UserSettingsScreen()),
+          ),
+          GoRoute(path: '/', pageBuilder: (context, state) => fastFadePage(context, state, const MainViewScreen())),
         ],
       ),
     ],

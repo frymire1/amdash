@@ -2,19 +2,27 @@
   display: block;
 }
 
-// Matches the accent blue already used across the product (see e.g.
-// apps/physician's patient-viewer.component.scss) for brand consistency.
-$accent: #0284c7;
-$accent-dark: #075985;
-$text-muted: #64748b;
+// Arctic Cyan — matches the retheme applied across the Flutter apps
+// (physician/ems/admin's amdash_core/lib/src/theme/app_theme.dart).
+$accent: #12a7b5;
+$accent-dark: #0c8f87;
+$text-muted: #5e7a7d;
+$bg-tint: #eaf6f7;
+$border: rgba(15, 45, 42, 0.12);
+$heading-font:
+  'Outfit',
+  -apple-system,
+  BlinkMacSystemFont,
+  'Segoe UI',
+  sans-serif;
 
 .site-header {
   position: sticky;
   top: 0;
   z-index: 10;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(6px);
-  border-bottom: 1px solid #e2e8f0;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid $border;
 
   &__inner {
     max-width: 1080px;
@@ -27,8 +35,10 @@ $text-muted: #64748b;
 }
 
 .brand {
+  font-family: $heading-font;
   font-size: 20px;
   font-weight: 700;
+  letter-spacing: 0.01em;
   color: $accent-dark;
 }
 
@@ -74,9 +84,11 @@ main {
   margin: 0 auto;
 
   h1 {
+    font-family: $heading-font;
     font-size: 44px;
     font-weight: 800;
-    color: #0f172a;
+    letter-spacing: -0.01em;
+    color: #122225;
   }
 
   &__subhead {
@@ -93,7 +105,7 @@ main {
 .button {
   display: inline-block;
   padding: 12px 28px;
-  border-radius: 8px;
+  border-radius: 7px;
   text-decoration: none;
   font-weight: 600;
   font-size: 15px;
@@ -109,9 +121,11 @@ main {
 }
 
 section h2 {
+  font-family: $heading-font;
   font-size: 30px;
   font-weight: 700;
-  color: #0f172a;
+  letter-spacing: -0.005em;
+  color: #122225;
   text-align: center;
 }
 
@@ -160,8 +174,8 @@ section h2 {
 }
 
 .features {
-  padding: 64px 0;
-  background: #f8fafc;
+  padding: 64px 40px;
+  background: $bg-tint;
   border-radius: 16px;
 
   .feature-grid {
@@ -172,12 +186,14 @@ section h2 {
   }
 
   .feature {
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(8px);
+    border: 1px solid $border;
+    border-radius: 7px;
     padding: 24px;
 
     h3 {
+      font-family: $heading-font;
       font-size: 17px;
       font-weight: 600;
       color: $accent-dark;
@@ -207,7 +223,7 @@ section h2 {
 }
 
 .site-footer {
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid $border;
   padding: 24px;
   text-align: center;
 

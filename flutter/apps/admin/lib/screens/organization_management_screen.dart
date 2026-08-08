@@ -134,10 +134,10 @@ class _OrganizationManagementScreenState extends ConsumerState<OrganizationManag
               const Text('Organizations', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
               if (organizations.isEmpty)
-                Text('No organizations yet.', style: TextStyle(color: AppColors.slate500))
+                Text('No organizations yet.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))
               else
                 Table(
-                  border: TableBorder(horizontalInside: BorderSide(color: AppColors.slate200)),
+                  border: TableBorder(horizontalInside: BorderSide(color: context.palette.border)),
                   children: [
                     TableRow(children: [_headerCell('Name')]),
                     for (final org in organizations) TableRow(children: [_cell(org.name)]),
@@ -152,7 +152,7 @@ class _OrganizationManagementScreenState extends ConsumerState<OrganizationManag
 
   Widget _headerCell(String text) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 8),
-    child: Text(text, style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.slate500)),
+    child: Text(text, style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurfaceVariant)),
   );
 
   Widget _cell(String text) => Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(text));

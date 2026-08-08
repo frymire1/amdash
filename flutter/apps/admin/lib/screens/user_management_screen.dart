@@ -281,7 +281,7 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
               else if (_users.isEmpty)
                 Padding(
                   padding: const EdgeInsets.all(16),
-                  child: Text('No users yet.', style: TextStyle(color: AppColors.slate500)),
+                  child: Text('No users yet.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                 )
               else
                 _UsersTable(users: _users, removingRoleKey: _removingRoleKey, onRemoveRole: _removeRole),
@@ -304,13 +304,13 @@ class _UsersTable extends StatelessWidget {
   Widget build(BuildContext context) {
     return Table(
       columnWidths: const {0: FlexColumnWidth(2), 1: FlexColumnWidth(2), 2: FlexColumnWidth(3)},
-      border: TableBorder(horizontalInside: BorderSide(color: AppColors.slate200)),
+      border: TableBorder(horizontalInside: BorderSide(color: context.palette.border)),
       children: [
         TableRow(
           children: [
-            _headerCell('Email'),
-            _headerCell('Name'),
-            _headerCell('Role'),
+            _headerCell(context, 'Email'),
+            _headerCell(context, 'Name'),
+            _headerCell(context, 'Role'),
           ],
         ),
         for (final user in users)
@@ -324,10 +324,11 @@ class _UsersTable extends StatelessWidget {
                   spacing: 6,
                   runSpacing: 6,
                   children: user.role.isEmpty
-                      ? [_roleChip(label: 'Unassigned', unassigned: true)]
+                      ? [_roleChip(context, label: 'Unassigned', unassigned: true)]
                       : [
                           for (final role in user.role)
                             _roleChip(
+                              context,
                               label: role.wireValue,
                               removing: removingRoleKey == '${user.uid}:${role.wireValue}',
                               onRemove: () => onRemoveRole(user, role),
@@ -341,24 +342,33 @@ class _UsersTable extends StatelessWidget {
     );
   }
 
-  Widget _headerCell(String text) => Padding(
+  Widget _headerCell(BuildContext context, String text) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 8),
-    child: Text(text, style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.slate500)),
+    child: Text(text, style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurfaceVariant)),
   );
 
   Widget _cell(String text) => Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(text));
 
-  Widget _roleChip({required String label, bool unassigned = false, bool removing = false, VoidCallback? onRemove}) {
+  Widget _roleChip(
+    BuildContext context, {
+    required String label,
+    bool unassigned = false,
+    bool removing = false,
+    VoidCallback? onRemove,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final accent = colorScheme.primary;
     return Container(
       padding: const EdgeInsets.only(left: 10, right: 4, top: 4, bottom: 4),
       decoration: BoxDecoration(
-        color: unassigned ? AppColors.slate100 : const Color(0xFFDBEAFE),
+        color: unassigned ? colorScheme.surfaceContainerHighest : accent.withValues(alpha: 0.16),
         borderRadius: BorderRadius.circular(999),
+        border: unassigned ? null : Border.all(color: accent.withValues(alpha: 0.35)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(label, style: TextStyle(color: unassigned ? AppColors.slate500 : const Color(0xFF1D4ED8))),
+          Text(label, style: TextStyle(color: unassigned ? colorScheme.onSurfaceVariant : accent)),
           if (!unassigned) ...[
             const SizedBox(width: 2),
             if (removing)

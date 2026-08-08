@@ -23,23 +23,36 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       requiredRoles: const [UserRole.ems],
     ),
     routes: [
-      GoRoute(path: '/login', builder: (context, state) => const LoginScreen(appName: 'AmDash — EMS')),
+      GoRoute(
+        path: '/login',
+        pageBuilder: (context, state) =>
+            fastFadePage(context, state, const AppBackground(child: LoginScreen(appName: 'AmDash — EMS'))),
+      ),
       GoRoute(
         path: '/access-denied',
-        builder: (context, state) => const AccessDeniedScreen(appName: 'EMS'),
+        pageBuilder: (context, state) =>
+            fastFadePage(context, state, const AppBackground(child: AccessDeniedScreen(appName: 'EMS'))),
       ),
       // A persistent Scaffold+NavBar shell — kept outside GoRouter's normal
       // per-route page transition, so the navbar no longer visibly
       // unmounts/re-animates on every in-app navigation.
       ShellRoute(
-        builder: (context, state, child) => Scaffold(appBar: const NavBar(), body: child),
+        builder: (context, state, child) =>
+            Scaffold(appBar: const NavBar(), body: AppBackground(child: child)),
         routes: [
-          GoRoute(path: '/user-settings', builder: (context, state) => const UserSettingsScreen()),
-          GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
-          GoRoute(path: '/upload', builder: (context, state) => const PatientUploadScreen()),
+          GoRoute(
+            path: '/user-settings',
+            pageBuilder: (context, state) => fastFadePage(context, state, const UserSettingsScreen()),
+          ),
+          GoRoute(path: '/', pageBuilder: (context, state) => fastFadePage(context, state, const HomeScreen())),
+          GoRoute(
+            path: '/upload',
+            pageBuilder: (context, state) => fastFadePage(context, state, const PatientUploadScreen()),
+          ),
           GoRoute(
             path: '/upload/:id',
-            builder: (context, state) => PatientUploadScreen(patientId: state.pathParameters['id']),
+            pageBuilder: (context, state) =>
+                fastFadePage(context, state, PatientUploadScreen(patientId: state.pathParameters['id'])),
           ),
         ],
       ),

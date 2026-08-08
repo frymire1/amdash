@@ -120,7 +120,7 @@ class _PatientListState extends ConsumerState<PatientList> {
               ? Center(
                   child: Text(
                     patients.isEmpty ? 'No patients uploaded yet.' : 'No patients match this filter.',
-                    style: TextStyle(color: AppColors.slate500),
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 )
               : ListView.builder(

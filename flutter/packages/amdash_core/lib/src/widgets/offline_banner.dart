@@ -29,11 +29,11 @@ class OfflineBanner extends ConsumerWidget {
 
     return Container(
       width: double.infinity,
-      color: AppColors.warning,
+      color: context.palette.warning,
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       child: const Text(
         'You are offline. Some features may not work.',
-        style: TextStyle(color: Colors.white, fontSize: 13),
+        style: TextStyle(color: Colors.black87, fontSize: 13),
         textAlign: TextAlign.center,
       ),
     );
