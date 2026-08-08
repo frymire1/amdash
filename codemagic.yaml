@@ -120,11 +120,15 @@ workflows:
       flutter: stable
       groups:
         - codemagic_api
+    # Only master triggers the full pipeline automatically — every push to
+    # flutter-switch tonight was firing all 8 mac_mini_m2 workflows, which
+    # got expensive fast. Test e2e locally before pushing to any other
+    # branch; the full CI/CD + Test Lab run is reserved for master.
     triggering:
       events:
         - push
       branch_patterns:
-        - pattern: '*'
+        - pattern: master
           include: true
     scripts:
       - name: Analyze amdash_core, physician, ems, admin
