@@ -1,4 +1,5 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { onDocumentDeleted } from 'firebase-functions/v2/firestore';
 import { onMessagePublished } from 'firebase-functions/v2/pubsub';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { PubSub } from '@google-cloud/pubsub';
@@ -93,3 +94,15 @@ export const onEmsLocationEvent = onMessagePublished(
     await getFirestore().collection('emsLocations').doc(data.patientId).set(update, { merge: true });
   },
 );
+
+// emsLocations/{patientId} is only ever written by onEmsLocationEvent above
+// (firestore.rules blocks client writes there entirely), so nothing deletes
+// it when a patient is removed unless something does it here. Triggering
+// off the patients collection itself — rather than requiring every
+// deletion path (the EMS app's delete button, cleanupCompletedPatients'
+// retention sweep, manual console deletes) to remember a second delete —
+// means this can never drift out of sync with however a patient doc
+// actually disappears.
+export const onPatientDeleted = onDocumentDeleted({ document: 'patients/{patientId}', region: REGION }, async (event) => {
+  await getFirestore().collection('emsLocations').doc(event.params.patientId).delete();
+});
