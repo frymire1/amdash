@@ -464,12 +464,14 @@ workflows:
     # Integrations -> Apple Developer Portal) is NOT enough on its own —
     # confirmed via a real "you have to enable code signing separately
     # for each workflow" message from Codemagic. Each workflow that needs
-    # it must reference the key explicitly, by the key reference
-    # Codemagic shows for the connected integration. Also confirmed via a
-    # real schema-validation error that this key is a sibling of
-    # `environment`, not nested inside it.
+    # it must reference the key explicitly, by the *reference name* the
+    # integration was given when connected (Codemagic's own Key ID,
+    # e.g. HA4FKHR2S7, does NOT work here — confirmed via a real "App
+    # Store Connect integration ... does not exist" error). Also
+    # confirmed via a real schema-validation error that this key is a
+    # sibling of `environment`, not nested inside it.
     integrations:
-      app_store_connect: HA4FKHR2S7
+      app_store_connect: amdash_ios
     environment:
       flutter: stable
       xcode: latest
