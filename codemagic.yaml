@@ -460,6 +460,16 @@ workflows:
     name: iOS e2e (Firebase Test Lab)
     instance_type: mac_mini_m2
     max_build_duration: 60
+    # Connecting the API key at the team level (Team settings ->
+    # Integrations -> Apple Developer Portal) is NOT enough on its own —
+    # confirmed via a real "you have to enable code signing separately
+    # for each workflow" message from Codemagic. Each workflow that needs
+    # it must reference the key explicitly, by the key reference
+    # Codemagic shows for the connected integration. Also confirmed via a
+    # real schema-validation error that this key is a sibling of
+    # `environment`, not nested inside it.
+    integrations:
+      app_store_connect: HA4FKHR2S7
     environment:
       flutter: stable
       xcode: latest
@@ -467,14 +477,6 @@ workflows:
       ios_signing:
         distribution_type: development
         bundle_identifier: com.amdash.physician
-      # Connecting the API key at the team level (Team settings ->
-      # Integrations -> Apple Developer Portal) is NOT enough on its own —
-      # confirmed via a real "you have to enable code signing separately
-      # for each workflow" message from Codemagic. Each workflow that
-      # needs it must reference the key explicitly here, by the key
-      # reference Codemagic shows for the connected integration.
-      integrations:
-        app_store_connect: HA4FKHR2S7
       groups:
         - firebase_deploy
         - firebase_testlab
