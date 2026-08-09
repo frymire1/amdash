@@ -467,16 +467,17 @@ workflows:
       ios_signing:
         distribution_type: development
         bundle_identifier: com.amdash.physician
+      # Connecting the API key at the team level (Team settings ->
+      # Integrations -> Apple Developer Portal) is NOT enough on its own —
+      # confirmed via a real "you have to enable code signing separately
+      # for each workflow" message from Codemagic. Each workflow that
+      # needs it must reference the key explicitly here, by the key
+      # reference Codemagic shows for the connected integration.
+      integrations:
+        app_store_connect: HA4FKHR2S7
       groups:
         - firebase_deploy
         - firebase_testlab
-        # If you connected the App Store Connect API key via Codemagic's
-        # team-level Developer Portal integration (Team settings ->
-        # Developer Portal -> Manage keys) rather than raw env vars, no
-        # group is needed here at all — `ios_signing` above taps that
-        # integration automatically. Only add an `app_store_connect` group
-        # back (holding APP_STORE_CONNECT_KEY_IDENTIFIER/_ISSUER_ID/
-        # _PRIVATE_KEY) if you went the raw-env-var route instead.
     cache:
       cache_paths:
         # $HOME/.pub-cache matters a lot here specifically — without it,
