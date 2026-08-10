@@ -538,6 +538,30 @@ workflows:
         script: xcode-project use-profiles --project flutter/apps/physician/ios/Runner.xcodeproj
       - name: Fetch signing profiles (ems)
         script: xcode-project use-profiles --project flutter/apps/ems/ios/Runner.xcodeproj
+      # xcode-project use-profiles only scans real Xcode targets in the
+      # .pbxproj (confirmed via a real log: it only ever mentions "Runner",
+      # never RunnerTests/RunnerUITests). The `<bundle id>.xctrunner`
+      # wrapper Xcode auto-generates to host a UI test target on a real
+      # device isn't a literal target at all, so it's never discovered that
+      # way — confirmed via a real error ("No profiles for
+      # 'com.amdash.physician.RunnerUITests.xctrunner' were found... To
+      # enable automatic signing, pass -allowProvisioningUpdates to
+      # xcodebuild"), which patrol_cli's internal xcodebuild invocation
+      # doesn't pass and gives no way to inject. app-store-connect
+      # fetch-signing-files fetches/creates a profile by exact bundle-id
+      # string instead, independent of any project scan, and installs it
+      # into the same local Provisioning Profiles directory xcodebuild
+      # searches — matches Patrol's own documented manual setup
+      # (https://patrol.leancode.co/documentation/physical-ios-devices-setup),
+      # which calls for a *separate* registered App ID with the
+      # `.RunnerUITests.xctrunner` suffix. --create makes it generate the
+      # profile if it doesn't exist yet; the App ID itself still has to be
+      # registered manually first (fetch-signing-files creates profiles,
+      # not Identifiers).
+      - name: Fetch signing profiles (physician RunnerUITests.xctrunner)
+        script: app-store-connect fetch-signing-files com.amdash.physician.RunnerUITests.xctrunner --type IOS_APP_DEVELOPMENT --create --exact-match
+      - name: Fetch signing profiles (ems RunnerUITests.xctrunner)
+        script: app-store-connect fetch-signing-files com.amdash.ems.RunnerUITests.xctrunner --type IOS_APP_DEVELOPMENT --create --exact-match
       - name: Install patrol_cli
         script: |
           dart pub global activate patrol_cli
