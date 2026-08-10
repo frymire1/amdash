@@ -17,20 +17,26 @@
 #     auto-builds on push (relied on so only flutter-unit-tests reacts to
 #     push, and everything downstream only runs via the API-triggering
 #     chain below).
-#   - RESOLVED: with two separate Xcode projects (physician + ems) in one
-#     workflow, an environment-level `ios_signing.bundle_identifier` can
-#     only name one of them — this file had it hardcoded to
-#     com.amdash.physician while relying on explicit `xcode-project
-#     use-profiles --project <path>` calls per app for the actual fetch.
-#     ems's fetch step consistently returned zero profiles/cert/team
-#     (`Did not find matching provisioning profiles`) despite its App ID,
-#     cert, and team all checking out fine on Apple's side and the
-#     integration being freshly resynced — physician's identical setup
-#     always worked. Removed the leftover `ios_signing` block entirely
-#     (redundant with the explicit per-project fetch calls, and singling
-#     out physician was never correct for a two-app workflow) as the next
-#     thing to rule out. Re-verify against a real ems build before trusting
-#     this was the actual cause.
+#   - `ios_signing` with two separate Xcode projects (physician + ems) in
+#     one workflow — this file calls `xcode-project use-profiles --project
+#     <path>` per app for the actual profile fetch, but keeps a top-level
+#     `ios_signing.bundle_identifier: com.amdash.physician` (which can only
+#     ever name one app) too. Tried removing it entirely on the theory it
+#     was quietly biasing profile resolution toward physician while ems's
+#     explicit fetch kept coming back empty (`Did not find matching
+#     provisioning profiles`, despite ems's App ID/cert/team all checking
+#     out fine on Apple's side) — that was wrong: removing it broke
+#     physician's certificate resolution too ("No valid code signing
+#     certificates were found", a regression physician had never hit
+#     before), so it's back. Whatever it does under the hood, at least one
+#     workflow having it present seems necessary for `xcode-project
+#     use-profiles`/`xcodebuild` to find a cert in the CI keychain at all —
+#     the ems asymmetry is still unexplained. Separately confirmed (via a
+#     real `--verbose` `patrol build ios` log) that the physician "Fetch
+#     signing profiles" step's own output only ever mentions the `Runner`
+#     target — never `RunnerTests`/`RunnerUITests` — so `xcode-project
+#     use-profiles` appears to skip test targets entirely; `RunnerUITests`
+#     needs its `DEVELOPMENT_TEAM` set some other way (in progress).
 #   - RESOLVED: a real Test Lab run confirmed Patrol's iOS integration
 #     requires a genuine `RunnerUITests` Xcode target (a "UI Testing
 #     Bundle") that Xcode's own GUI wizard normally creates — patrol_cli
@@ -499,6 +505,9 @@ workflows:
       flutter: stable
       xcode: latest
       node: latest
+      ios_signing:
+        distribution_type: development
+        bundle_identifier: com.amdash.physician
       groups:
         - firebase_deploy
         - firebase_testlab
@@ -609,6 +618,9 @@ workflows:
       flutter: stable
       xcode: latest
       node: latest
+      ios_signing:
+        distribution_type: development
+        bundle_identifier: com.amdash.physician
       groups:
         - firebase_deploy
     cache:
