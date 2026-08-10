@@ -12,31 +12,41 @@
 #   - Whether `publishing.scripts` really does run regardless of build
 #     success/failure (relied on below for guaranteed teardown of seeded
 #     Firebase test data) — confirm in the current YAML reference before
-#     trusting it the way this file's `android-e2e`/`ios-e2e` do.
+#     trusting it the way this file's `android-e2e`/`ios-e2e-*` do.
 #   - Whether a workflow with no `triggering:` block truly never
 #     auto-builds on push (relied on so only flutter-unit-tests reacts to
 #     push, and everything downstream only runs via the API-triggering
 #     chain below).
-#   - `ios_signing` with two separate Xcode projects (physician + ems) in
-#     one workflow — this file calls `xcode-project use-profiles --project
-#     <path>` per app for the actual profile fetch, but keeps a top-level
-#     `ios_signing.bundle_identifier: com.amdash.physician` (which can only
-#     ever name one app) too. Tried removing it entirely on the theory it
-#     was quietly biasing profile resolution toward physician while ems's
-#     explicit fetch kept coming back empty (`Did not find matching
-#     provisioning profiles`, despite ems's App ID/cert/team all checking
-#     out fine on Apple's side) — that was wrong: removing it broke
-#     physician's certificate resolution too ("No valid code signing
-#     certificates were found", a regression physician had never hit
-#     before), so it's back. Whatever it does under the hood, at least one
-#     workflow having it present seems necessary for `xcode-project
-#     use-profiles`/`xcodebuild` to find a cert in the CI keychain at all —
-#     the ems asymmetry is still unexplained. Separately confirmed (via a
-#     real `--verbose` `patrol build ios` log) that the physician "Fetch
-#     signing profiles" step's own output only ever mentions the `Runner`
-#     target — never `RunnerTests`/`RunnerUITests` — so `xcode-project
-#     use-profiles` appears to skip test targets entirely; `RunnerUITests`
-#     needs its `DEVELOPMENT_TEAM` set some other way (in progress).
+#   - RESOLVED (the long way): iOS signing for physician + ems started as
+#     ONE workflow calling `xcode-project use-profiles --project <path>`
+#     per app, with a top-level `ios_signing.bundle_identifier` that could
+#     only ever name one of them (physician). Every attempt to make ems's
+#     explicit fetch work in that shared workflow hit a distinct, real
+#     failure in sequence: `xcode-project use-profiles` only matches
+#     provisioning profile FILES already on local disk rather than calling
+#     the API itself, so ems's profile was never fetched by anything;
+#     explicitly fetching it via `app-store-connect fetch-signing-files`
+#     found the existing cert on Apple's side but couldn't save it
+#     ("Cannot save Signing Certificates without certificate private key"
+#     — that cert's private key only ever existed wherever it was
+#     originally generated, inside Codemagic's own account vault via
+#     physician's `ios_signing`-triggered flow, not accessible to a
+#     separate raw API call); generating a dedicated second certificate
+#     for ems hit Apple's hard account-wide limit of one active iOS
+#     Development certificate (`409: You already have a current iOS
+#     Development certificate`); and even before that limit was found,
+#     sharing one keychain between two apps' certs created deletion-
+#     ordering bugs (deleting physician's cert too early broke physician;
+#     deleting by name instead of hash deleted the wrong one, since Apple
+#     names every cert created via the same API key identically). Given
+#     Apple will only ever grant this account one iOS Development
+#     certificate, splitting into `ios-e2e-physician` / `ios-e2e-ems` and
+#     `ios-adhoc-distribute` / `ios-adhoc-distribute-ems` — each with its
+#     own `ios_signing.bundle_identifier`, its own isolated job/keychain —
+#     was the right fix: each app now gets the exact automatic-fetch
+#     treatment that always worked for physician, reusing the one
+#     account-wide certificate independently instead of two workflows
+#     fighting over one shared keychain.
 #   - RESOLVED: a real Test Lab run confirmed Patrol's iOS integration
 #     requires a genuine `RunnerUITests` Xcode target (a "UI Testing
 #     Bundle") that Xcode's own GUI wizard normally creates — patrol_cli
@@ -49,10 +59,18 @@
 #     directly to both apps' project.pbxproj + Podfile + shared scheme
 #     (mirroring Patrol's documented manual Xcode setup steps —
 #     https://patrol.leancode.co/documentation/physical-ios-devices-setup),
-#     bundle id `com.amdash.{physician,ems}.RunnerUITests`. TODO: this may
-#     need its own registered App ID in the Apple Developer portal (same
-#     as the main app bundle ids needed) — not yet confirmed by a real
-#     build, since this was authored without Xcode to verify against.
+#     bundle id `com.amdash.{physician,ems}.RunnerUITests`.
+#   - RESOLVED: `RunnerUITests` also needs its own `DEVELOPMENT_TEAM` build
+#     setting hand-set directly in project.pbxproj — confirmed via a real
+#     `--verbose` log ("Signing for RunnerUITests requires a development
+#     team") that `xcode-project use-profiles` only ever processes the
+#     `Runner` target, never `RunnerTests`/`RunnerUITests`. Separately, the
+#     `<bundle id>.RunnerUITests.xctrunner` wrapper Xcode auto-generates to
+#     host a UI test target on a real device isn't a literal project
+#     target at all, so it needs its own registered App ID
+#     (`com.amdash.{physician,ems}.RunnerUITests.xctrunner`) and an
+#     explicit `app-store-connect fetch-signing-files` call — matches
+#     Patrol's own documented manual setup for physical device signing.
 #   - Android device string is confirmed real AND well-stocked:
 #     model=tokay (Pixel 9), version 35 — verified via `gcloud firebase
 #     test android models list` + `list-device-capacities` for amdash-dev.
@@ -91,7 +109,7 @@
 # flutter-unit-tests passing matters as a gate. Fan-out from one
 # predecessor needs no coordination (unlike a fan-in would), same pattern
 # flutter-deploy already uses below to kick off web-e2e/android-e2e/
-# ios-e2e in parallel once it finishes.
+# ios-e2e-physician/ios-e2e-ems in parallel once it finishes.
 #
 # Trade-off: deploy no longer waits on flutter-android-build/flutter-ios-
 # build succeeding first, so a currently-broken native build no longer
@@ -308,11 +326,11 @@ workflows:
           firebase deploy --only hosting:physician,hosting:ems,hosting:admin,functions,firestore:rules,firestore:indexes --project amdash-dev --non-interactive
       # e2e tests seed data and call *live* Functions/Firestore even though
       # the app under test runs on Chrome/Test Lab, not the deployed
-      # hosting URL — so all three of these have to wait for this deploy,
-      # same as the old `needs: deploy` dependency in GitHub Actions.
-      - name: Trigger web-e2e, android-e2e, ios-e2e
+      # hosting URL — so all of these have to wait for this deploy, same as
+      # the old `needs: deploy` dependency in GitHub Actions.
+      - name: Trigger web-e2e, android-e2e, ios-e2e-physician, ios-e2e-ems
         script: |
-          for workflow in web-e2e android-e2e ios-e2e; do
+          for workflow in web-e2e android-e2e ios-e2e-physician ios-e2e-ems; do
             curl -sf -X POST https://api.codemagic.io/builds \
               -H "x-auth-token: $CM_API_TOKEN" \
               -H "Content-Type: application/json" \
@@ -485,8 +503,18 @@ workflows:
             node scripts/run-physician-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/physician-account.json" || true
             node scripts/run-ems-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/ems-account.json" || true
 
-  ios-e2e:
-    name: iOS e2e (Firebase Test Lab)
+  # Split into one workflow per app (see the header comment's RESOLVED note
+  # on iOS signing) — each app gets its own isolated job/keychain and its
+  # own ios_signing.bundle_identifier, which is what actually made
+  # automatic certificate/profile fetching work reliably. A single shared
+  # workflow kept hitting real, distinct failures trying to make two apps'
+  # signing coexist in one keychain: profile-fetch tooling that only
+  # matches local files, private keys that only exist in Codemagic's
+  # per-`ios_signing` vault, Apple's hard one-certificate-per-account
+  # limit, and cert-deletion ordering bugs once a second cert was
+  # (wrongly) attempted.
+  ios-e2e-physician:
+    name: iOS e2e (Firebase Test Lab) — physician
     instance_type: mac_mini_m2
     max_build_duration: 60
     # Connecting the API key at the team level (Team settings ->
@@ -530,83 +558,12 @@ workflows:
           echo "$GCLOUD_TESTLAB_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/testlab-service-account.json"
           gcloud auth activate-service-account --key-file="$CM_BUILD_DIR/testlab-service-account.json"
           gcloud config set project amdash-dev
-      # Two separate Xcode projects in this one workflow — fetch profiles
-      # for each explicitly rather than relying on the single
-      # ios_signing.bundle_identifier above (see the TODO at the top of
-      # this file).
-      #
-      # ROOT CAUSE of ems consistently coming back with "no matching
-      # profile" (confirmed via --code-signing-setup-verbose-logging on the
-      # ios-adhoc-distribute workflow's equivalent step): xcode-project
-      # use-profiles only matches against provisioning profile FILES
-      # already sitting on local disk — it doesn't call the App Store
-      # Connect API itself. Physician's profiles were only ever there
-      # because ios_signing.bundle_identifier: com.amdash.physician above
-      # triggers Codemagic's own separate automatic pre-build step that
-      # downloads *physician's* profile before any script runs, and that
-      # key can only ever name one bundle id — ems's was never fetched by
-      # anything. It does scan every real target in the project (Runner,
-      # RunnerUITests — confirmed via that same verbose log; it correctly
-      # skips RunnerTests as a unit-testing target), so both com.amdash.ems
-      # and com.amdash.ems.RunnerUITests need explicit fetches.
       - name: Fetch signing profiles (physician)
         script: xcode-project use-profiles --project flutter/apps/physician/ios/Runner.xcodeproj
-      # --certificate-key: fetch-signing-files alone found the existing
-      # "Apple Development: Created via API (HA4FKHR2S7)" cert on Apple's
-      # side but failed with "Cannot save Signing Certificates without
-      # certificate private key" (confirmed via a real log) — that cert's
-      # private key only ever exists wherever it was originally generated
-      # (physician's ios_signing-triggered flow, inside Codemagic's own
-      # account vault), not accessible to this separate raw API call.
-      # Generating a fresh key here and passing it lets the tool create a
-      # dedicated second certificate this build session actually holds the
-      # private key for. Only needed on the first ems-scoped call in a
-      # given workflow run — once saved locally, later calls in the same
-      # job (the .xctrunner fetch further below) can find and reuse it.
-      #
-      # Apple names every cert created via this API key identically
-      # ("Apple Development: Created via API (HA4FKHR2S7)" — that suffix is
-      # the shared key's ID, not a per-certificate identifier), so the
-      # keychain now has two identically-*named* but distinct certs
-      # (physician's + ems's) once this step runs. Capturing physician's
-      # cert's SHA-1 hash here (to a file, not deleted yet) lets it be
-      # deleted by that exact hash (`-Z`) later, avoiding the archive-time
-      # ambiguity a name-based delete can't resolve — but NOT here: this
-      # step runs before physician's own "Build + run physician Test Lab
-      # suite (iOS)" step below, so deleting immediately broke physician
-      # too (confirmed via a real regression on the equivalent
-      # ios-adhoc-distribute step). The actual deletion happens in "Build +
-      # run ems Test Lab suite (iOS)" instead, after physician's build has
-      # already finished using it.
-      # Still "No valid code signing certificates were found" at build time
-      # even after the fix above (confirmed via a real log on the
-      # equivalent ios-adhoc-distribute step) — fetch-signing-files
-      # --certificate-key registers the cert with Apple and saves the
-      # private key to the file we gave it, but doesn't actually import the
-      # resulting identity into the system keychain xcodebuild queries.
-      # Splitting cert creation (with an explicit --p12-path/--p12-password
-      # so we know exactly where the container lands) from profile
-      # fetching, and explicitly importing that p12 via `keychain
-      # add-certificates`, is what actually makes it a usable codesigning
-      # identity.
-      - name: Fetch signing profiles (ems)
-        script: |
-          security find-identity -v -p codesigning | awk '/Apple Development/ {print $2}' > $CM_BUILD_DIR/physician_cert_hashes.txt
-          openssl genrsa -out $CM_BUILD_DIR/ems_cert_key.pem 2048
-          app-store-connect certificates create \
-            --type IOS_DEVELOPMENT \
-            --certificate-key @file:$CM_BUILD_DIR/ems_cert_key.pem \
-            --p12-password ems-build-cert \
-            --p12-path $CM_BUILD_DIR/ems_cert.p12 \
-            --save
-          keychain add-certificates -c $CM_BUILD_DIR/ems_cert.p12 --certificate-password ems-build-cert
-          app-store-connect fetch-signing-files com.amdash.ems --type IOS_APP_DEVELOPMENT --create
-          app-store-connect fetch-signing-files com.amdash.ems.RunnerUITests --type IOS_APP_DEVELOPMENT --create
-          xcode-project use-profiles --project flutter/apps/ems/ios/Runner.xcodeproj
       # The `<bundle id>.xctrunner` wrapper Xcode auto-generates to host a
       # UI test target on a real device isn't a literal target at all, so
-      # it's never discovered that way — confirmed via a real error
-      # ("No profiles for
+      # it's never discovered via xcode-project use-profiles's project
+      # scan — confirmed via a real error ("No profiles for
       # 'com.amdash.physician.RunnerUITests.xctrunner' were found... To
       # enable automatic signing, pass -allowProvisioningUpdates to
       # xcodebuild"), which patrol_cli's internal xcodebuild invocation
@@ -623,8 +580,6 @@ workflows:
       # not Identifiers).
       - name: Fetch signing profiles (physician RunnerUITests.xctrunner)
         script: app-store-connect fetch-signing-files com.amdash.physician.RunnerUITests.xctrunner --type IOS_APP_DEVELOPMENT --create
-      - name: Fetch signing profiles (ems RunnerUITests.xctrunner)
-        script: app-store-connect fetch-signing-files com.amdash.ems.RunnerUITests.xctrunner --type IOS_APP_DEVELOPMENT --create
       - name: Install patrol_cli
         script: |
           dart pub global activate patrol_cli
@@ -632,10 +587,8 @@ workflows:
       - name: Install nx-monorepo dependencies
         script: npm ci
         working_directory: nx-monorepo
-      - name: Seed physician + ems smoke accounts
-        script: |
-          node scripts/run-physician-patrol-test.mjs --seed-only --account-json="$CM_BUILD_DIR/physician-account.json"
-          node scripts/run-ems-patrol-test.mjs --seed-only --account-json="$CM_BUILD_DIR/ems-account.json"
+      - name: Seed physician smoke account
+        script: node scripts/run-physician-patrol-test.mjs --seed-only --account-json="$CM_BUILD_DIR/physician-account.json"
         working_directory: nx-monorepo
       # Must be --release and properly signed — Test Lab's iOS tier is real
       # devices only, no simulator, unlike the old (broken) local-Simulator
@@ -665,16 +618,62 @@ workflows:
             --test ios_tests.zip \
             --device model=iphone14pro,version=16.6,locale=en_US,orientation=portrait \
             --results-bucket=gs://amdash-dev-test-lab-results
+    publishing:
+      scripts:
+        - name: Teardown physician smoke account
+          script: |
+            cd nx-monorepo
+            node scripts/run-physician-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/physician-account.json" || true
+
+  ios-e2e-ems:
+    name: iOS e2e (Firebase Test Lab) — ems
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: amdash_ios
+    environment:
+      flutter: stable
+      xcode: latest
+      node: latest
+      ios_signing:
+        distribution_type: development
+        bundle_identifier: com.amdash.ems
+      groups:
+        - firebase_deploy
+        - firebase_testlab
+    cache:
+      cache_paths:
+        - $HOME/.pub-cache
+        - $HOME/.npm
+        - $HOME/Library/Caches/CocoaPods
+        - $HOME/Library/Caches/org.swift.swiftpm
+    scripts:
+      - name: Authenticate to Firebase Admin SDK
+        script: |
+          echo "$FIREBASE_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$CM_BUILD_DIR/firebase-service-account.json" >> $CM_ENV
+      - name: Authenticate gcloud to Test Lab
+        script: |
+          echo "$GCLOUD_TESTLAB_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/testlab-service-account.json"
+          gcloud auth activate-service-account --key-file="$CM_BUILD_DIR/testlab-service-account.json"
+          gcloud config set project amdash-dev
+      - name: Fetch signing profiles (ems)
+        script: xcode-project use-profiles --project flutter/apps/ems/ios/Runner.xcodeproj
+      - name: Fetch signing profiles (ems RunnerUITests.xctrunner)
+        script: app-store-connect fetch-signing-files com.amdash.ems.RunnerUITests.xctrunner --type IOS_APP_DEVELOPMENT --create
+      - name: Install patrol_cli
+        script: |
+          dart pub global activate patrol_cli
+          echo "PATH=$HOME/.pub-cache/bin:$PATH" >> $CM_ENV
+      - name: Install nx-monorepo dependencies
+        script: npm ci
+        working_directory: nx-monorepo
+      - name: Seed ems smoke account
+        script: node scripts/run-ems-patrol-test.mjs --seed-only --account-json="$CM_BUILD_DIR/ems-account.json"
+        working_directory: nx-monorepo
       - name: Build + run ems Test Lab suite (iOS)
         script: |
           set -e
-          # Deletes physician's now-ambiguously-named cert here, not in the
-          # earlier fetch step — physician's own build above has already
-          # finished using it by this point. See the comment on "Fetch
-          # signing profiles (ems)" above for why this has to happen here.
-          while read -r hash; do
-            security delete-certificate -Z "$hash" 2>/dev/null || true
-          done < $CM_BUILD_DIR/physician_cert_hashes.txt
           ACCOUNT="$CM_BUILD_DIR/ems-account.json"
           cd flutter/apps/ems
           patrol build ios --target patrol_test/ems_test.dart --release --verbose \
@@ -689,21 +688,22 @@ workflows:
             --results-bucket=gs://amdash-dev-test-lab-results
     publishing:
       scripts:
-        - name: Teardown physician + ems smoke accounts
+        - name: Teardown ems smoke account
           script: |
             cd nx-monorepo
-            node scripts/run-physician-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/physician-account.json" || true
             node scripts/run-ems-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/ems-account.json" || true
 
   # Manual-trigger-only utility workflow — not part of the e2e chain, so a
   # still-failing Patrol UI test target doesn't block getting a real build
   # onto a phone. Builds a development-signed IPA (installable on any
   # device already registered on the account, e.g. the one added earlier
-  # for ios-e2e) and pushes it to Firebase App Distribution, reusing the
-  # same signing setup as ios-e2e. GOOGLE_APP_ID values below are read
-  # directly from each app's GoogleService-Info.plist, not guessed.
+  # for ios-e2e-physician) and pushes it to Firebase App Distribution,
+  # reusing the same signing setup. GOOGLE_APP_ID values below are read
+  # directly from each app's GoogleService-Info.plist, not guessed. See the
+  # header comment's RESOLVED note on why this is split per-app rather than
+  # one workflow handling both.
   ios-adhoc-distribute:
-    name: iOS ad-hoc build + Firebase App Distribution
+    name: iOS ad-hoc build + Firebase App Distribution (physician)
     instance_type: mac_mini_m2
     max_build_duration: 60
     integrations:
@@ -732,86 +732,12 @@ workflows:
       # -exportArchive` failed with "No Accounts" — it wants an
       # interactively-signed-in Xcode account for automatic resolution,
       # which doesn't exist on a CI machine authenticated via API key
-      # instead. Separate output paths per app since both would otherwise
-      # collide on the same $HOME/export_options.plist default.
-      #
-      # ROOT CAUSE (confirmed via --code-signing-setup-verbose-logging):
-      # xcode-project use-profiles only matches against provisioning
-      # profile FILES already sitting on local disk
-      # (~/Library/MobileDevice/Provisioning Profiles/) — it doesn't call
-      # the App Store Connect API to fetch anything itself. Physician's
-      # profile was only ever there because the environment-level
-      # ios_signing.bundle_identifier: com.amdash.physician block above
-      # triggers Codemagic's own separate automatic pre-build step that
-      # downloads *physician's* profile before any script runs — and that
-      # key can only ever name one bundle id. ems's profile was never
-      # fetched by anything, so xcode-project use-profiles found nothing to
-      # match against, even though the profile itself was correctly
-      # configured on Apple's side the whole time. Fixed by explicitly
-      # fetching it first via app-store-connect fetch-signing-files (same
-      # command already used for the RunnerUITests.xctrunner ids in
-      # ios-e2e), which does call the API and downloads the file to disk.
-      #
-      # That alone still wasn't enough — the plain fetch-signing-files call
-      # found the existing "Apple Development: Created via API (HA4FKHR2S7)"
-      # cert on Apple's side but failed with "Cannot save Signing
-      # Certificates without certificate private key" (confirmed via a real
-      # log). That cert's private key only exists wherever it was
-      # originally generated (physician's ios_signing-triggered flow,
-      # inside Codemagic's own account vault) — not accessible to this
-      # separate raw API call. Generating a fresh key and passing it via
-      # --certificate-key lets the tool create a dedicated second
-      # certificate this build session actually holds the private key for.
-      #
-      # That created a NEW problem: Apple names every cert created via this
-      # API key identically ("Apple Development: Created via API
-      # (HA4FKHR2S7)" — that suffix is the shared key's ID, not a
-      # per-certificate identifier), so the keychain now has two
-      # identically-*named* but distinct certs (physician's + ems's).
-      # Confirmed via a real error that xcodebuild's archive step then
-      # picked the wrong one by name ambiguity. `security delete-certificate
-      # -c <name>` can't disambiguate either (matches by name, same
-      # problem) — a real regression when tried, it deleted the needed one
-      # and archiving failed with "No valid code signing certificates were
-      # found".
-      #
-      # Fixed by capturing physician's cert's SHA-1 hash here (before
-      # creating ems's new one) to a file, but NOT deleting it yet — this
-      # step runs before physician's own "Build + distribute physician IPA"
-      # step below, so deleting it here broke physician too (confirmed via
-      # a real "No certificate for team ... matching ... found" regression).
-      # The actual deletion happens in "Build + distribute ems IPA" instead,
-      # which runs after physician's build has already finished using it.
+      # instead.
       - name: Fetch signing profiles (physician)
         script: |
           xcode-project use-profiles \
             --project flutter/apps/physician/ios/Runner.xcodeproj \
             --export-options-plist=$CM_BUILD_DIR/physician_export_options.plist
-      # Still "No valid code signing certificates were found" at archive
-      # time even after the fix above (confirmed via a real log) — turns
-      # out fetch-signing-files --certificate-key registers the cert with
-      # Apple and saves the private key to the file we gave it, but doesn't
-      # actually import the resulting identity into the system keychain
-      # xcodebuild queries. Splitting cert creation (with an explicit
-      # --p12-path/--p12-password so we know exactly where the container
-      # lands) from profile fetching, and explicitly importing that p12 via
-      # `keychain add-certificates`, is what actually makes it a usable
-      # codesigning identity.
-      - name: Fetch signing profiles (ems)
-        script: |
-          security find-identity -v -p codesigning | awk '/Apple Development/ {print $2}' > $CM_BUILD_DIR/physician_cert_hashes.txt
-          openssl genrsa -out $CM_BUILD_DIR/ems_cert_key.pem 2048
-          app-store-connect certificates create \
-            --type IOS_DEVELOPMENT \
-            --certificate-key @file:$CM_BUILD_DIR/ems_cert_key.pem \
-            --p12-password ems-build-cert \
-            --p12-path $CM_BUILD_DIR/ems_cert.p12 \
-            --save
-          keychain add-certificates -c $CM_BUILD_DIR/ems_cert.p12 --certificate-password ems-build-cert
-          app-store-connect fetch-signing-files com.amdash.ems --type IOS_APP_DEVELOPMENT --create
-          xcode-project use-profiles \
-            --project flutter/apps/ems/ios/Runner.xcodeproj \
-            --export-options-plist=$CM_BUILD_DIR/ems_export_options.plist
       - name: Install Firebase CLI
         # --force: Codemagic's mac_mini_m2 images now ship firebase-tools
         # preinstalled at /usr/local/bin/firebase — a plain global install
@@ -832,16 +758,42 @@ workflows:
             build/ios/ipa/*.ipa \
             --app 1:577422583971:ios:552c78d74e0b0fae4fb716 \
             --testers "frymire1@gmail.com"
+
+  ios-adhoc-distribute-ems:
+    name: iOS ad-hoc build + Firebase App Distribution (ems)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: amdash_ios
+    environment:
+      flutter: stable
+      xcode: latest
+      node: latest
+      ios_signing:
+        distribution_type: development
+        bundle_identifier: com.amdash.ems
+      groups:
+        - firebase_deploy
+    cache:
+      cache_paths:
+        - $HOME/.pub-cache
+        - $HOME/Library/Caches/CocoaPods
+        - $HOME/Library/Caches/org.swift.swiftpm
+    scripts:
+      - name: Fetch signing profiles (ems)
+        script: |
+          xcode-project use-profiles \
+            --project flutter/apps/ems/ios/Runner.xcodeproj \
+            --export-options-plist=$CM_BUILD_DIR/ems_export_options.plist
+      - name: Install Firebase CLI
+        script: npm install -g firebase-tools --force
+      - name: Authenticate to Firebase
+        script: |
+          echo "$FIREBASE_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$CM_BUILD_DIR/firebase-service-account.json" >> $CM_ENV
       - name: Build + distribute ems IPA
         script: |
           set -e
-          # Deletes physician's now-ambiguously-named cert here, not in the
-          # earlier fetch step — physician's own build above has already
-          # finished using it by this point. See the comment on "Fetch
-          # signing profiles (ems)" above for why this has to happen here.
-          while read -r hash; do
-            security delete-certificate -Z "$hash" 2>/dev/null || true
-          done < $CM_BUILD_DIR/physician_cert_hashes.txt
           cd flutter/apps/ems
           flutter build ipa --release --export-options-plist=$CM_BUILD_DIR/ems_export_options.plist
           firebase appdistribution:distribute \
