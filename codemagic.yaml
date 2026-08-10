@@ -559,9 +559,9 @@ workflows:
       # registered manually first (fetch-signing-files creates profiles,
       # not Identifiers).
       - name: Fetch signing profiles (physician RunnerUITests.xctrunner)
-        script: app-store-connect fetch-signing-files com.amdash.physician.RunnerUITests.xctrunner --type IOS_APP_DEVELOPMENT --create --exact-match
+        script: app-store-connect fetch-signing-files com.amdash.physician.RunnerUITests.xctrunner --type IOS_APP_DEVELOPMENT --create
       - name: Fetch signing profiles (ems RunnerUITests.xctrunner)
-        script: app-store-connect fetch-signing-files com.amdash.ems.RunnerUITests.xctrunner --type IOS_APP_DEVELOPMENT --create --exact-match
+        script: app-store-connect fetch-signing-files com.amdash.ems.RunnerUITests.xctrunner --type IOS_APP_DEVELOPMENT --create
       - name: Install patrol_cli
         script: |
           dart pub global activate patrol_cli
