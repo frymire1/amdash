@@ -272,7 +272,12 @@ workflows:
             (cd "apps/$app" && flutter build web --release)
           done
       - name: Install Firebase CLI
-        script: npm install -g firebase-tools
+        # --force: Codemagic's mac_mini_m2 images now ship firebase-tools
+        # preinstalled at /usr/local/bin/firebase — a plain global install
+        # fails with EEXIST trying to symlink over it. Confirmed via a
+        # real build failure on flutter-deploy, previously working exactly
+        # this way — an image-side change, not anything in this repo.
+        script: npm install -g firebase-tools --force
       - name: Authenticate to Firebase
         script: |
           echo "$FIREBASE_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/firebase-service-account.json"
@@ -542,7 +547,10 @@ workflows:
           set -e
           ACCOUNT="$CM_BUILD_DIR/physician-account.json"
           cd flutter/apps/physician
-          patrol build ios --target patrol_test/patient_flow_test.dart --release \
+          # --verbose: the default output swallows xcodebuild's actual
+          # error lines, printing only a "** TEST BUILD FAILED **"
+          # pass/fail summary with no way to tell what actually failed.
+          patrol build ios --target patrol_test/patient_flow_test.dart --release --verbose \
             --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
             --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")" \
             --dart-define SMOKE_HOSPITAL="$(jq -r .hospitalName "$ACCOUNT")" \
@@ -561,7 +569,7 @@ workflows:
           set -e
           ACCOUNT="$CM_BUILD_DIR/ems-account.json"
           cd flutter/apps/ems
-          patrol build ios --target patrol_test/ems_test.dart --release \
+          patrol build ios --target patrol_test/ems_test.dart --release --verbose \
             --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
             --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")"
           cd build/ios_integ/Build/Products
@@ -612,7 +620,12 @@ workflows:
       - name: Fetch signing profiles (ems)
         script: xcode-project use-profiles --project flutter/apps/ems/ios/Runner.xcodeproj
       - name: Install Firebase CLI
-        script: npm install -g firebase-tools
+        # --force: Codemagic's mac_mini_m2 images now ship firebase-tools
+        # preinstalled at /usr/local/bin/firebase — a plain global install
+        # fails with EEXIST trying to symlink over it. Confirmed via a
+        # real build failure on flutter-deploy, previously working exactly
+        # this way — an image-side change, not anything in this repo.
+        script: npm install -g firebase-tools --force
       - name: Authenticate to Firebase
         script: |
           echo "$FIREBASE_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/firebase-service-account.json"
