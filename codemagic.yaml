@@ -637,6 +637,13 @@ workflows:
       - name: Build + run ems Test Lab suite (iOS)
         script: |
           set -e
+          # See the matching comment in ios-adhoc-distribute's "Build +
+          # distribute ems IPA" step — two certs both generically named
+          # "Apple Development: ..." end up in the same keychain (physician's
+          # shared one + ems's dedicated one), and physician's build already
+          # finished using its cert earlier in this same job, so removing it
+          # now avoids the same signing-identity ambiguity here too.
+          security delete-certificate -c "Apple Development: Created via API (HA4FKHR2S7)" 2>/dev/null || true
           ACCOUNT="$CM_BUILD_DIR/ems-account.json"
           cd flutter/apps/ems
           patrol build ios --target patrol_test/ems_test.dart --release --verbose \
@@ -762,6 +769,17 @@ workflows:
       - name: Build + distribute ems IPA
         script: |
           set -e
+          # The keychain now has two certs both generically named
+          # "Apple Development: ..." — physician's shared one (from its own
+          # fetch step above) and the dedicated one just created for ems.
+          # Confirmed via a real error that archiving picked the wrong one
+          # by ambiguity ("Provisioning profile ... doesn't include signing
+          # certificate 'Apple Development: Created via API (HA4FKHR2S7)'")
+          # even though the correct dedicated cert/profile pair was fetched
+          # successfully. Physician's build+distribute step already
+          # finished using its cert earlier in this same job, so removing
+          # it now is safe and makes ems's signing identity unambiguous.
+          security delete-certificate -c "Apple Development: Created via API (HA4FKHR2S7)" 2>/dev/null || true
           cd flutter/apps/ems
           flutter build ipa --release --export-options-plist=$CM_BUILD_DIR/ems_export_options.plist
           firebase appdistribution:distribute \
