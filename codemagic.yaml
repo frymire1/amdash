@@ -634,7 +634,13 @@ workflows:
         script: |
           set -e
           cd flutter/apps/physician
-          flutter build ipa --release --export-method=development
+          # --export-options-plist, not --export-method: the flag alone
+          # produced an incomplete export config and `xcodebuild
+          # -exportArchive` failed with "requires a provisioning
+          # profile" even though the archive step itself signed fine —
+          # confirmed via a real build. ios/ExportOptions.plist spells
+          # out signingStyle: automatic explicitly instead.
+          flutter build ipa --release --export-options-plist=ios/ExportOptions.plist
           firebase appdistribution:distribute \
             build/ios/ipa/*.ipa \
             --app 1:577422583971:ios:552c78d74e0b0fae4fb716 \
@@ -643,7 +649,7 @@ workflows:
         script: |
           set -e
           cd flutter/apps/ems
-          flutter build ipa --release --export-method=development
+          flutter build ipa --release --export-options-plist=ios/ExportOptions.plist
           firebase appdistribution:distribute \
             build/ios/ipa/*.ipa \
             --app 1:577422583971:ios:427a94985db8fabb4fb716 \
