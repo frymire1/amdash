@@ -563,13 +563,27 @@ workflows:
       # private key for. Only needed on the first ems-scoped call in a
       # given workflow run — once saved locally, later calls in the same
       # job (the .xctrunner fetch further below) can find and reuse it.
+      #
+      # Apple names every cert created via this API key identically
+      # ("Apple Development: Created via API (HA4FKHR2S7)" — that suffix is
+      # the shared key's ID, not a per-certificate identifier), so the
+      # keychain now has two identically-*named* but distinct certs
+      # (physician's + ems's) once this step runs. Capturing physician's
+      # cert's SHA-1 hash beforehand and deleting by that exact hash (`-Z`)
+      # afterward avoids the archive-time ambiguity a name-based delete
+      # can't resolve — physician's own build already finished using it
+      # earlier in this same job, so removing it now is safe.
       - name: Fetch signing profiles (ems)
         script: |
+          PHYSICIAN_CERT_HASHES=$(security find-identity -v -p codesigning | awk '/Apple Development/ {print $2}')
           openssl genrsa -out $CM_BUILD_DIR/ems_cert_key.pem 2048
           app-store-connect fetch-signing-files com.amdash.ems \
             --type IOS_APP_DEVELOPMENT \
             --certificate-key @file:$CM_BUILD_DIR/ems_cert_key.pem \
             --create
+          for hash in $PHYSICIAN_CERT_HASHES; do
+            security delete-certificate -Z "$hash" 2>/dev/null || true
+          done
           app-store-connect fetch-signing-files com.amdash.ems.RunnerUITests --type IOS_APP_DEVELOPMENT --create
           xcode-project use-profiles --project flutter/apps/ems/ios/Runner.xcodeproj
       # The `<bundle id>.xctrunner` wrapper Xcode auto-generates to host a
@@ -637,13 +651,6 @@ workflows:
       - name: Build + run ems Test Lab suite (iOS)
         script: |
           set -e
-          # See the matching comment in ios-adhoc-distribute's "Build +
-          # distribute ems IPA" step — two certs both generically named
-          # "Apple Development: ..." end up in the same keychain (physician's
-          # shared one + ems's dedicated one), and physician's build already
-          # finished using its cert earlier in this same job, so removing it
-          # now avoids the same signing-identity ambiguity here too.
-          security delete-certificate -c "Apple Development: Created via API (HA4FKHR2S7)" 2>/dev/null || true
           ACCOUNT="$CM_BUILD_DIR/ems-account.json"
           cd flutter/apps/ems
           patrol build ios --target patrol_test/ems_test.dart --release --verbose \
@@ -731,6 +738,23 @@ workflows:
       # separate raw API call. Generating a fresh key and passing it via
       # --certificate-key lets the tool create a dedicated second
       # certificate this build session actually holds the private key for.
+      #
+      # That created a NEW problem: Apple names every cert created via this
+      # API key identically ("Apple Development: Created via API
+      # (HA4FKHR2S7)" — that suffix is the shared key's ID, not a
+      # per-certificate identifier), so the keychain now has two
+      # identically-*named* but distinct certs (physician's + ems's).
+      # Confirmed via a real error that xcodebuild's archive step then
+      # picked the wrong one by name ambiguity. `security delete-certificate
+      # -c <name>` can't disambiguate either (matches by name, same
+      # problem) — a real regression when tried, it deleted the needed one
+      # and archiving failed with "No valid code signing certificates were
+      # found". Fixed by capturing physician's cert's SHA-1 hash *before*
+      # creating ems's new one, then deleting by that exact hash (`-Z`)
+      # afterward — physician's own build+distribute step already finished
+      # using it earlier in this same job, so removing it now is safe and
+      # leaves only ems's dedicated cert, unambiguous by hash even though
+      # the display name collides.
       - name: Fetch signing profiles (physician)
         script: |
           xcode-project use-profiles \
@@ -738,11 +762,15 @@ workflows:
             --export-options-plist=$CM_BUILD_DIR/physician_export_options.plist
       - name: Fetch signing profiles (ems)
         script: |
+          PHYSICIAN_CERT_HASHES=$(security find-identity -v -p codesigning | awk '/Apple Development/ {print $2}')
           openssl genrsa -out $CM_BUILD_DIR/ems_cert_key.pem 2048
           app-store-connect fetch-signing-files com.amdash.ems \
             --type IOS_APP_DEVELOPMENT \
             --certificate-key @file:$CM_BUILD_DIR/ems_cert_key.pem \
             --create
+          for hash in $PHYSICIAN_CERT_HASHES; do
+            security delete-certificate -Z "$hash" 2>/dev/null || true
+          done
           xcode-project use-profiles \
             --project flutter/apps/ems/ios/Runner.xcodeproj \
             --export-options-plist=$CM_BUILD_DIR/ems_export_options.plist
@@ -769,17 +797,6 @@ workflows:
       - name: Build + distribute ems IPA
         script: |
           set -e
-          # The keychain now has two certs both generically named
-          # "Apple Development: ..." — physician's shared one (from its own
-          # fetch step above) and the dedicated one just created for ems.
-          # Confirmed via a real error that archiving picked the wrong one
-          # by ambiguity ("Provisioning profile ... doesn't include signing
-          # certificate 'Apple Development: Created via API (HA4FKHR2S7)'")
-          # even though the correct dedicated cert/profile pair was fetched
-          # successfully. Physician's build+distribute step already
-          # finished using its cert earlier in this same job, so removing
-          # it now is safe and makes ems's signing identity unambiguous.
-          security delete-certificate -c "Apple Development: Created via API (HA4FKHR2S7)" 2>/dev/null || true
           cd flutter/apps/ems
           flutter build ipa --release --export-options-plist=$CM_BUILD_DIR/ems_export_options.plist
           firebase appdistribution:distribute \
