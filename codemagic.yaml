@@ -664,16 +664,27 @@ workflows:
       # which doesn't exist on a CI machine authenticated via API key
       # instead. Separate output paths per app since both would otherwise
       # collide on the same $HOME/export_options.plist default.
-      - name: Fetch signing profiles (physician)
-        script: |
-          xcode-project use-profiles \
-            --project flutter/apps/physician/ios/Runner.xcodeproj \
-            --export-options-plist=$CM_BUILD_DIR/physician_export_options.plist
+      #
+      # DIAGNOSTIC: ems's fetch has consistently come back completely empty
+      # (no cert, no team, no profile found) on every run so far, despite
+      # its App ID/cert/device/profile all checking out identically to
+      # physician's on Apple's side — while physician (which always runs
+      # first) has always succeeded. Swapped the order here to test whether
+      # this is actually a "second xcode-project use-profiles call in the
+      # same job" bug rather than anything ems-specific — if the failure
+      # follows physician now that it runs second, that confirms it; if ems
+      # still fails even running first, that rules it out. Revert this
+      # swap once the real cause is confirmed either way.
       - name: Fetch signing profiles (ems)
         script: |
           xcode-project use-profiles \
             --project flutter/apps/ems/ios/Runner.xcodeproj \
             --export-options-plist=$CM_BUILD_DIR/ems_export_options.plist
+      - name: Fetch signing profiles (physician)
+        script: |
+          xcode-project use-profiles \
+            --project flutter/apps/physician/ios/Runner.xcodeproj \
+            --export-options-plist=$CM_BUILD_DIR/physician_export_options.plist
       - name: Install Firebase CLI
         # --force: Codemagic's mac_mini_m2 images now ship firebase-tools
         # preinstalled at /usr/local/bin/firebase — a plain global install
