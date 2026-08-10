@@ -578,14 +578,29 @@ workflows:
       # ios-adhoc-distribute step). The actual deletion happens in "Build +
       # run ems Test Lab suite (iOS)" instead, after physician's build has
       # already finished using it.
+      # Still "No valid code signing certificates were found" at build time
+      # even after the fix above (confirmed via a real log on the
+      # equivalent ios-adhoc-distribute step) — fetch-signing-files
+      # --certificate-key registers the cert with Apple and saves the
+      # private key to the file we gave it, but doesn't actually import the
+      # resulting identity into the system keychain xcodebuild queries.
+      # Splitting cert creation (with an explicit --p12-path/--p12-password
+      # so we know exactly where the container lands) from profile
+      # fetching, and explicitly importing that p12 via `keychain
+      # add-certificates`, is what actually makes it a usable codesigning
+      # identity.
       - name: Fetch signing profiles (ems)
         script: |
           security find-identity -v -p codesigning | awk '/Apple Development/ {print $2}' > $CM_BUILD_DIR/physician_cert_hashes.txt
           openssl genrsa -out $CM_BUILD_DIR/ems_cert_key.pem 2048
-          app-store-connect fetch-signing-files com.amdash.ems \
-            --type IOS_APP_DEVELOPMENT \
+          app-store-connect certificates create \
+            --type IOS_DEVELOPMENT \
             --certificate-key @file:$CM_BUILD_DIR/ems_cert_key.pem \
-            --create
+            --p12-password ems-build-cert \
+            --p12-path $CM_BUILD_DIR/ems_cert.p12 \
+            --save
+          keychain add-certificates -c $CM_BUILD_DIR/ems_cert.p12 --certificate-password ems-build-cert
+          app-store-connect fetch-signing-files com.amdash.ems --type IOS_APP_DEVELOPMENT --create
           app-store-connect fetch-signing-files com.amdash.ems.RunnerUITests --type IOS_APP_DEVELOPMENT --create
           xcode-project use-profiles --project flutter/apps/ems/ios/Runner.xcodeproj
       # The `<bundle id>.xctrunner` wrapper Xcode auto-generates to host a
@@ -772,14 +787,28 @@ workflows:
           xcode-project use-profiles \
             --project flutter/apps/physician/ios/Runner.xcodeproj \
             --export-options-plist=$CM_BUILD_DIR/physician_export_options.plist
+      # Still "No valid code signing certificates were found" at archive
+      # time even after the fix above (confirmed via a real log) — turns
+      # out fetch-signing-files --certificate-key registers the cert with
+      # Apple and saves the private key to the file we gave it, but doesn't
+      # actually import the resulting identity into the system keychain
+      # xcodebuild queries. Splitting cert creation (with an explicit
+      # --p12-path/--p12-password so we know exactly where the container
+      # lands) from profile fetching, and explicitly importing that p12 via
+      # `keychain add-certificates`, is what actually makes it a usable
+      # codesigning identity.
       - name: Fetch signing profiles (ems)
         script: |
           security find-identity -v -p codesigning | awk '/Apple Development/ {print $2}' > $CM_BUILD_DIR/physician_cert_hashes.txt
           openssl genrsa -out $CM_BUILD_DIR/ems_cert_key.pem 2048
-          app-store-connect fetch-signing-files com.amdash.ems \
-            --type IOS_APP_DEVELOPMENT \
+          app-store-connect certificates create \
+            --type IOS_DEVELOPMENT \
             --certificate-key @file:$CM_BUILD_DIR/ems_cert_key.pem \
-            --create
+            --p12-password ems-build-cert \
+            --p12-path $CM_BUILD_DIR/ems_cert.p12 \
+            --save
+          keychain add-certificates -c $CM_BUILD_DIR/ems_cert.p12 --certificate-password ems-build-cert
+          app-store-connect fetch-signing-files com.amdash.ems --type IOS_APP_DEVELOPMENT --create
           xcode-project use-profiles \
             --project flutter/apps/ems/ios/Runner.xcodeproj \
             --export-options-plist=$CM_BUILD_DIR/ems_export_options.plist
