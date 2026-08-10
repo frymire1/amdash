@@ -551,9 +551,25 @@ workflows:
       # and com.amdash.ems.RunnerUITests need explicit fetches.
       - name: Fetch signing profiles (physician)
         script: xcode-project use-profiles --project flutter/apps/physician/ios/Runner.xcodeproj
+      # --certificate-key: fetch-signing-files alone found the existing
+      # "Apple Development: Created via API (HA4FKHR2S7)" cert on Apple's
+      # side but failed with "Cannot save Signing Certificates without
+      # certificate private key" (confirmed via a real log) — that cert's
+      # private key only ever exists wherever it was originally generated
+      # (physician's ios_signing-triggered flow, inside Codemagic's own
+      # account vault), not accessible to this separate raw API call.
+      # Generating a fresh key here and passing it lets the tool create a
+      # dedicated second certificate this build session actually holds the
+      # private key for. Only needed on the first ems-scoped call in a
+      # given workflow run — once saved locally, later calls in the same
+      # job (the .xctrunner fetch further below) can find and reuse it.
       - name: Fetch signing profiles (ems)
         script: |
-          app-store-connect fetch-signing-files com.amdash.ems --type IOS_APP_DEVELOPMENT --create
+          openssl genrsa -out $CM_BUILD_DIR/ems_cert_key.pem 2048
+          app-store-connect fetch-signing-files com.amdash.ems \
+            --type IOS_APP_DEVELOPMENT \
+            --certificate-key @file:$CM_BUILD_DIR/ems_cert_key.pem \
+            --create
           app-store-connect fetch-signing-files com.amdash.ems.RunnerUITests --type IOS_APP_DEVELOPMENT --create
           xcode-project use-profiles --project flutter/apps/ems/ios/Runner.xcodeproj
       # The `<bundle id>.xctrunner` wrapper Xcode auto-generates to host a
@@ -697,6 +713,17 @@ workflows:
       # fetching it first via app-store-connect fetch-signing-files (same
       # command already used for the RunnerUITests.xctrunner ids in
       # ios-e2e), which does call the API and downloads the file to disk.
+      #
+      # That alone still wasn't enough — the plain fetch-signing-files call
+      # found the existing "Apple Development: Created via API (HA4FKHR2S7)"
+      # cert on Apple's side but failed with "Cannot save Signing
+      # Certificates without certificate private key" (confirmed via a real
+      # log). That cert's private key only exists wherever it was
+      # originally generated (physician's ios_signing-triggered flow,
+      # inside Codemagic's own account vault) — not accessible to this
+      # separate raw API call. Generating a fresh key and passing it via
+      # --certificate-key lets the tool create a dedicated second
+      # certificate this build session actually holds the private key for.
       - name: Fetch signing profiles (physician)
         script: |
           xcode-project use-profiles \
@@ -704,7 +731,11 @@ workflows:
             --export-options-plist=$CM_BUILD_DIR/physician_export_options.plist
       - name: Fetch signing profiles (ems)
         script: |
-          app-store-connect fetch-signing-files com.amdash.ems --type IOS_APP_DEVELOPMENT --create
+          openssl genrsa -out $CM_BUILD_DIR/ems_cert_key.pem 2048
+          app-store-connect fetch-signing-files com.amdash.ems \
+            --type IOS_APP_DEVELOPMENT \
+            --certificate-key @file:$CM_BUILD_DIR/ems_cert_key.pem \
+            --create
           xcode-project use-profiles \
             --project flutter/apps/ems/ios/Runner.xcodeproj \
             --export-options-plist=$CM_BUILD_DIR/ems_export_options.plist
