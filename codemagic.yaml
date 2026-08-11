@@ -545,9 +545,17 @@ workflows:
           - amdash_ios
           - physician_adhoc
         provisioning_profiles:
-          - AmDash Physician Development
-          - AmDash Physician RunnerUITests xctrunner Dev
-          - AmDash Physician AdHoc
+          # Codemagic assigns its own reference name when a profile is
+          # fetched/synced into Team settings -> Code signing identities ->
+          # iOS provisioning profiles — confirmed via a real error listing
+          # physician_dev_provisioning_file as the only available option at
+          # the time, distinct from the profile's actual name on Apple's
+          # portal ("AmDash Physician Development"). The other two were
+          # fetched afterward, chosen at fetch time to match this naming
+          # pattern.
+          - physician_dev_provisioning_file
+          - physician_runneruitests_xctrunner_provisioning_file
+          - physician_adhoc_provisioning_file
       groups:
         - firebase_deploy
         - firebase_testlab
