@@ -57,7 +57,7 @@ class _NavBarState extends ConsumerState<NavBar> {
       flexibleSpace: const GlassPanel(borderRadius: BorderRadius.zero, child: SizedBox.expand()),
       actions: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
+          padding: const EdgeInsets.only(left: 4, right: 16),
           child: PopupMenuButton<String>(
             tooltip: 'Account',
             enabled: !_loggingOut,

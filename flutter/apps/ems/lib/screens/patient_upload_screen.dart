@@ -71,6 +71,7 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
 
   bool _liveTrackingEnabled = true;
   bool _hasLocationError = false;
+  bool _locationErrorDialogShown = false;
 
   @override
   void initState() {
@@ -153,24 +154,23 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     return '$systolic/$diastolic';
   }
 
+  Future<void> _showLocationPermissionDialog() async {
+    if (!mounted) return;
+    await showErrorDialog(
+      context,
+      title: 'Location permission is off',
+      message:
+          "This patient's location can't be shared, and live tracking won't be available, "
+          'until you enable location access for AmDash EMS in Settings.',
+    );
+  }
+
   Future<void> _onSubmit() async {
     // Guards against a double-submit even if two tap events land before the
     // button's own `_submitting`-disabled rebuild has visually applied
     // (e.g. a fast real double-tap, or two dispatched-close-together
     // synthetic taps) — not just relying on the button being disabled.
     if (_submitting) return;
-
-    if (_hasLocationError) {
-      final proceed = await showConfirmDialog(
-        context,
-        title: 'Location permission is off',
-        message:
-            "This patient's location can't be shared, and live tracking won't be available. "
-            'Enable location access in Settings for full tracking, or continue without it.',
-        confirmLabel: 'Upload Anyway',
-      );
-      if (!mounted || !proceed) return;
-    }
 
     final values = PatientFormValues(
       name: _nameController.text.trim(),
@@ -394,6 +394,18 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
                       _longitude = value.longitude;
                       _liveTrackingEnabled = value.liveTrackingEnabled;
                       _hasLocationError = value.hasLocationError;
+                      // Fires once, the first time the section reports an
+                      // error (typically right after it mounts) — not
+                      // re-shown on every 15s poll while permission stays
+                      // off. This callback can run mid-build (the section
+                      // reports its very first value from its own
+                      // initState), so the dialog itself has to wait for
+                      // the frame to finish rather than opening here
+                      // directly.
+                      if (_hasLocationError && !_locationErrorDialogShown) {
+                        _locationErrorDialogShown = true;
+                        WidgetsBinding.instance.addPostFrameCallback((_) => _showLocationPermissionDialog());
+                      }
                     },
                   ),
                 ]),

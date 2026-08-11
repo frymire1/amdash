@@ -67,7 +67,7 @@ class _AdminNavBarState extends ConsumerState<AdminNavBar> {
       centerTitle: true,
       actions: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
+          padding: const EdgeInsets.only(left: 4, right: 16),
           child: PopupMenuButton<String>(
             tooltip: 'Account',
             enabled: !_loggingOut,
