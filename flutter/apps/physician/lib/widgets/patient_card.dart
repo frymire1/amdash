@@ -1,6 +1,8 @@
 import 'package:amdash_core/amdash_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../services/directions_service.dart';
 import '../services/ems_location_service.dart';
 
 /// Mirrors `patient-card.component.ts`/`.html`/`.scss`: a clickable patient
@@ -8,7 +10,7 @@ import '../services/ems_location_service.dart';
 /// online) and a vitals grid, each field falling back to "Not added yet"
 /// via [isProvidedValue] (EMS leaves required fields as the literal
 /// string `'Unknown'` when left blank on upload).
-class PatientCard extends StatelessWidget {
+class PatientCard extends ConsumerWidget {
   const PatientCard({required this.patient, required this.trackingStatus, required this.onTap, super.key});
 
   final Patient patient;
@@ -16,7 +18,15 @@ class PatientCard extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Same cache PatientViewer populates — only present once a patient's
+    // been actively tracked and viewed at least once (the fetch is
+    // triggered from there, not from this card), so most cards simply
+    // won't have an ETA yet.
+    final cachedRoute = patient.id == null
+        ? null
+        : ref.watch(directionsCacheProvider.select((cache) => cache[patient.id]));
+
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: InkWell(
@@ -28,6 +38,16 @@ class PatientCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Align(alignment: Alignment.centerRight, child: _trackingPill(trackingStatus)),
+              if (cachedRoute != null) ...[
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    'ETA: ${cachedRoute.result.durationText}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
               Text(
                 isProvidedValue(patient.name) ? patient.name : 'Not added yet',
                 style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),

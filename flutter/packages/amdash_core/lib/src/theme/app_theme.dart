@@ -87,9 +87,13 @@ class AppPalette extends ThemeExtension<AppPalette> {
   );
 
   static const dark = AppPalette(
-    glassSurface: Color(0x8C152524), // rgba(21,37,34,.55)
+    // Bumped from 0x8C (~55% opaque) — cards read as too see-through
+    // against the background in dark mode.
+    glassSurface: Color(0xE6152524), // rgba(21,37,34,.90)
     border: Color(0x2933D6E6), // rgba(45,225,211,.16)
-    gridLine: Color(0x1433D6E6),
+    // Dropped from 0x14 (~8%) — the background grid was too visible/bright
+    // in dark mode.
+    gridLine: Color(0x0833D6E6),
     glow: Color(0xFF33D6E6),
     success: Color(0xFF4CD97B),
     warning: Color(0xFFFFC15E),

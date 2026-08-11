@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../theme/app_theme.dart';
 
@@ -6,6 +7,11 @@ import '../theme/app_theme.dart';
 /// + soft accent glow, matching the approved Arctic Cyan mockup's
 /// `.app-shell` background. Painted once behind the whole subtree (not
 /// per-card), so it's cheap regardless of how much content scrolls inside.
+///
+/// Also sets the system status bar's icon brightness to match the current
+/// theme — nothing in the app did this before, so the OS default (light/
+/// white icons) was used regardless of theme, leaving battery/signal/
+/// notification icons invisible against light mode's light background.
 class AppBackground extends StatelessWidget {
   const AppBackground({super.key, required this.child});
 
@@ -14,11 +20,15 @@ class AppBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
-    return DecoratedBox(
-      decoration: BoxDecoration(color: Theme.of(context).scaffoldBackgroundColor),
-      child: CustomPaint(
-        painter: _GridPainter(gridLine: palette.gridLine, glow: palette.glow),
-        child: child,
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: Theme.of(context).scaffoldBackgroundColor),
+        child: CustomPaint(
+          painter: _GridPainter(gridLine: palette.gridLine, glow: palette.glow),
+          child: child,
+        ),
       ),
     );
   }
