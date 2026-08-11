@@ -109,6 +109,11 @@ class _LocationTrackingSectionState extends ConsumerState<LocationTrackingSectio
     setState(() => _locationError = null);
 
     try {
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
       // Deliberately NOT passing `timeLimit` here: geolocator_web 4.1.4 has
       // a confirmed bug (html_geolocation_manager.dart) where it computes
       // the browser's timeout via `timeout?.inMicroseconds` but treats the
