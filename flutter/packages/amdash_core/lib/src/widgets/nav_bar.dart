@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -48,12 +49,19 @@ class _NavBarState extends ConsumerState<NavBar> {
     final initials = profile?.initials ?? '';
     final colorScheme = Theme.of(context).colorScheme;
     final palette = context.palette;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return AppBar(
       title: const Text('AmDash'),
       centerTitle: true,
       backgroundColor: Colors.transparent,
       elevation: 0,
+      // AppBar computes its own status bar icon style by default (based on
+      // backgroundColor/theme), which can win over AppBackground's
+      // AnnotatedRegion right where the status bar actually sits — set
+      // explicitly here too, same light/dark logic, so there's no
+      // ambiguity between the two.
+      systemOverlayStyle: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       flexibleSpace: const GlassPanel(borderRadius: BorderRadius.zero, child: SizedBox.expand()),
       actions: [
         Padding(

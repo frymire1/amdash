@@ -1,5 +1,6 @@
 import 'package:amdash_core/amdash_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -46,10 +47,15 @@ class _AdminNavBarState extends ConsumerState<AdminNavBar> {
     final isSuperAdmin = profile?.hasRole(UserRole.superAdmin) ?? false;
     final colorScheme = Theme.of(context).colorScheme;
     final palette = context.palette;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return AppBar(
       backgroundColor: Colors.transparent,
       elevation: 0,
+      // See the matching comment in the shared NavBar — AppBar computes its
+      // own status bar icon style by default, which can win over
+      // AppBackground's AnnotatedRegion right where the status bar sits.
+      systemOverlayStyle: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       flexibleSpace: const GlassPanel(borderRadius: BorderRadius.zero, child: SizedBox.expand()),
       leading: PopupMenuButton<String>(
         icon: const Icon(Icons.menu),
