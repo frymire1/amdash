@@ -578,6 +578,18 @@ workflows:
           echo "$GCLOUD_TESTLAB_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/testlab-service-account.json"
           gcloud auth activate-service-account --key-file="$CM_BUILD_DIR/testlab-service-account.json"
           gcloud config set project amdash-dev
+      # The reference-based ios_signing block above fetches the referenced
+      # certs/profiles into the keychain/profiles directory as a hidden
+      # pre-build step, but doesn't itself apply them to the Xcode project
+      # — removing this step entirely broke even the Runner target, which
+      # had always worked before (confirmed via a real regression: "Signing
+      # for 'Runner' requires a development team", something that had never
+      # failed across dozens of prior runs). xcode-project use-profiles is
+      # what actually switches targets from Automatic to Manual signing
+      # with an explicit profile — still needed even with all the right
+      # certs/profiles now available.
+      - name: Apply signing profiles (physician)
+        script: xcode-project use-profiles --project flutter/apps/physician/ios/Runner.xcodeproj
       - name: Install patrol_cli
         script: |
           dart pub global activate patrol_cli
