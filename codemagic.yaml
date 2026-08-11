@@ -624,8 +624,19 @@ workflows:
           # don't hardcode a version.
           XCTESTRUN=$(ls Runner_iphoneos*-arm64.xctestrun)
           zip -r ios_tests.zip Release-iphoneos "$XCTESTRUN"
+          # The build/sign side is confirmed fine now (a real .xctestrun
+          # pulled from a run's own ios_tests.zip shows RunnerUITests
+          # correctly configured — IsUITestBundle, IsXCTRunnerHostedTestBundle,
+          # the right TestHostBundleIdentifier). "Test failed to run" with 0
+          # test cases despite that pointed at the gcloud invocation itself:
+          # missing --type=xctest (never specified before — Codemagic's own
+          # working Patrol demo project always passes it explicitly) and
+          # --record-video (so a real video exists to inspect if this still
+          # fails for a different reason next).
           gcloud firebase test ios run \
             --test ios_tests.zip \
+            --type=xctest \
+            --record-video \
             --device model=iphone14pro,version=16.6,locale=en_US,orientation=portrait \
             --results-bucket=gs://amdash-dev-test-lab-results
     publishing:
@@ -701,8 +712,12 @@ workflows:
           cd build/ios_integ/Build/Products
           XCTESTRUN=$(ls Runner_iphoneos*-arm64.xctestrun)
           zip -r ios_tests.zip Release-iphoneos "$XCTESTRUN"
+          # See the matching comment on physician's equivalent step —
+          # --type=xctest and --record-video added for the same reasons.
           gcloud firebase test ios run \
             --test ios_tests.zip \
+            --type=xctest \
+            --record-video \
             --device model=iphone14pro,version=16.6,locale=en_US,orientation=portrait \
             --results-bucket=gs://amdash-dev-test-lab-results
     publishing:
