@@ -7,12 +7,13 @@ import '../auth/user_profile_service.dart';
 import '../theme/app_theme.dart';
 import 'glass_panel.dart';
 
-/// Mirrors `nav-bar.component.ts`/`.html`: brand, user-initials avatar
-/// (tapping it opens User Settings, same as the Angular `routerLink`), and
-/// sign-out. Shared across every app — the brand text is always "AmDash",
-/// never per-app. Renders as a glass panel (real backdrop blur) per the
-/// Arctic Cyan retheme, since it's one of the few "hero" surfaces that
-/// gets real blur rather than the cheaper translucent-card look.
+/// Mirrors `nav-bar.component.ts`/`.html`: brand and a user-initials avatar
+/// that opens a dropdown with Settings and Logout, rather than separate
+/// tap-to-navigate and sign-out controls. Shared across every app — the
+/// brand text is always "AmDash", never per-app. Renders as a glass panel
+/// (real backdrop blur) per the Arctic Cyan retheme, since it's one of the
+/// few "hero" surfaces that gets real blur rather than the cheaper
+/// translucent-card look.
 class NavBar extends ConsumerStatefulWidget implements PreferredSizeWidget {
   const NavBar({super.key});
 
@@ -57,30 +58,39 @@ class _NavBarState extends ConsumerState<NavBar> {
       actions: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: () => context.push('/user-settings'),
+          child: PopupMenuButton<String>(
+            tooltip: 'Account',
+            enabled: !_loggingOut,
+            onSelected: (value) {
+              if (value == 'settings') {
+                context.push('/user-settings');
+              } else if (value == 'logout') {
+                _logOut();
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'settings', child: Text('Settings')),
+              PopupMenuItem(value: 'logout', child: Text('Logout')),
+            ],
             child: Container(
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 boxShadow: [BoxShadow(color: palette.glow.withValues(alpha: 0.45), blurRadius: 12)],
               ),
-              child: CircleAvatar(
-                radius: 16,
-                backgroundColor: initials.isEmpty ? colorScheme.surfaceContainerHighest : colorScheme.primary,
-                child: initials.isEmpty
-                    ? Icon(Icons.account_circle, color: colorScheme.onSurfaceVariant, size: 20)
-                    : Text(initials, style: TextStyle(color: colorScheme.onPrimary, fontSize: 13)),
-              ),
+              child: _loggingOut
+                  ? const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                    )
+                  : CircleAvatar(
+                      radius: 16,
+                      backgroundColor: initials.isEmpty ? colorScheme.surfaceContainerHighest : colorScheme.primary,
+                      child: initials.isEmpty
+                          ? Icon(Icons.account_circle, color: colorScheme.onSurfaceVariant, size: 20)
+                          : Text(initials, style: TextStyle(color: colorScheme.onPrimary, fontSize: 13)),
+                    ),
             ),
           ),
-        ),
-        IconButton(
-          onPressed: _loggingOut ? null : _logOut,
-          tooltip: 'Log out',
-          icon: _loggingOut
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.logout),
         ),
       ],
     );

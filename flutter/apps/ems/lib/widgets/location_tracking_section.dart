@@ -38,11 +38,22 @@ class LocationTrackingSection extends ConsumerStatefulWidget {
 }
 
 class LocationTrackingValue {
-  const LocationTrackingValue({required this.latitude, required this.longitude, required this.liveTrackingEnabled});
+  const LocationTrackingValue({
+    required this.latitude,
+    required this.longitude,
+    required this.liveTrackingEnabled,
+    required this.hasLocationError,
+  });
 
   final double? latitude;
   final double? longitude;
   final bool liveTrackingEnabled;
+
+  /// True when the current position couldn't be fetched — most often
+  /// because location permission is off. Lets the parent screen warn the
+  /// user before they submit, rather than only finding out after the
+  /// patient's already been saved.
+  final bool hasLocationError;
 }
 
 class _LocationTrackingSectionState extends ConsumerState<LocationTrackingSection> with WidgetsBindingObserver {
@@ -101,7 +112,12 @@ class _LocationTrackingSectionState extends ConsumerState<LocationTrackingSectio
 
   void _reportChange() {
     widget.onChanged(
-      LocationTrackingValue(latitude: _latitude, longitude: _longitude, liveTrackingEnabled: _liveTrackingEnabled),
+      LocationTrackingValue(
+        latitude: _latitude,
+        longitude: _longitude,
+        liveTrackingEnabled: _liveTrackingEnabled,
+        hasLocationError: _locationError != null,
+      ),
     );
   }
 

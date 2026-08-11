@@ -9,7 +9,7 @@ import 'package:go_router/go_router.dart';
 /// hamburger menu with role-conditional links (both sets of links show
 /// for a dual-role account), centered "AmDash Admin" brand (the admin app
 /// is the one app where the brand text differs from the shared "AmDash"),
-/// avatar, and logout.
+/// and an avatar that opens a dropdown with Settings and Logout.
 class AdminNavBar extends ConsumerStatefulWidget implements PreferredSizeWidget {
   const AdminNavBar({super.key});
 
@@ -68,30 +68,39 @@ class _AdminNavBarState extends ConsumerState<AdminNavBar> {
       actions: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: () => context.push('/user-settings'),
+          child: PopupMenuButton<String>(
+            tooltip: 'Account',
+            enabled: !_loggingOut,
+            onSelected: (value) {
+              if (value == 'settings') {
+                context.push('/user-settings');
+              } else if (value == 'logout') {
+                _logOut();
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'settings', child: Text('Settings')),
+              PopupMenuItem(value: 'logout', child: Text('Logout')),
+            ],
             child: Container(
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 boxShadow: [BoxShadow(color: palette.glow.withValues(alpha: 0.45), blurRadius: 12)],
               ),
-              child: CircleAvatar(
-                radius: 16,
-                backgroundColor: initials.isEmpty ? colorScheme.surfaceContainerHighest : colorScheme.primary,
-                child: initials.isEmpty
-                    ? Icon(Icons.account_circle, color: colorScheme.onSurfaceVariant, size: 20)
-                    : Text(initials, style: TextStyle(color: colorScheme.onPrimary, fontSize: 13)),
-              ),
+              child: _loggingOut
+                  ? const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                    )
+                  : CircleAvatar(
+                      radius: 16,
+                      backgroundColor: initials.isEmpty ? colorScheme.surfaceContainerHighest : colorScheme.primary,
+                      child: initials.isEmpty
+                          ? Icon(Icons.account_circle, color: colorScheme.onSurfaceVariant, size: 20)
+                          : Text(initials, style: TextStyle(color: colorScheme.onPrimary, fontSize: 13)),
+                    ),
             ),
           ),
-        ),
-        IconButton(
-          onPressed: _loggingOut ? null : _logOut,
-          tooltip: 'Log out',
-          icon: _loggingOut
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.logout),
         ),
       ],
     );

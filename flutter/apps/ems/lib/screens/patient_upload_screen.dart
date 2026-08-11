@@ -70,6 +70,7 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
   String? _errorMessage;
 
   bool _liveTrackingEnabled = true;
+  bool _hasLocationError = false;
 
   @override
   void initState() {
@@ -158,6 +159,18 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     // (e.g. a fast real double-tap, or two dispatched-close-together
     // synthetic taps) — not just relying on the button being disabled.
     if (_submitting) return;
+
+    if (_hasLocationError) {
+      final proceed = await showConfirmDialog(
+        context,
+        title: 'Location permission is off',
+        message:
+            "This patient's location can't be shared, and live tracking won't be available. "
+            'Enable location access in Settings for full tracking, or continue without it.',
+        confirmLabel: 'Upload Anyway',
+      );
+      if (!mounted || !proceed) return;
+    }
 
     final values = PatientFormValues(
       name: _nameController.text.trim(),
@@ -380,6 +393,7 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
                       _latitude = value.latitude;
                       _longitude = value.longitude;
                       _liveTrackingEnabled = value.liveTrackingEnabled;
+                      _hasLocationError = value.hasLocationError;
                     },
                   ),
                 ]),
