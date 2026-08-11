@@ -574,12 +574,19 @@ workflows:
       # searches — matches Patrol's own documented manual setup
       # (https://patrol.leancode.co/documentation/physical-ios-devices-setup),
       # which calls for a *separate* registered App ID with the
-      # `.RunnerUITests.xctrunner` suffix. --create makes it generate the
-      # profile if it doesn't exist yet; the App ID itself still has to be
-      # registered manually first (fetch-signing-files creates profiles,
-      # not Identifiers).
+      # `.RunnerUITests.xctrunner` suffix.
+      #
+      # --create still failed with "Cannot save Signing Certificates
+      # without certificate private key" even after manually creating a
+      # matching profile on Apple's side (same private-key gap as the ems
+      # cert saga — this tool can't reuse a cert it doesn't hold the key
+      # for) — --create appears to always attempt certificate resolution
+      # regardless of whether a matching profile already exists. Removed
+      # it now that the profile is confirmed to exist, so this only needs
+      # to find and download what's already there rather than also trying
+      # to create anything.
       - name: Fetch signing profiles (physician RunnerUITests.xctrunner)
-        script: app-store-connect fetch-signing-files com.amdash.physician.RunnerUITests.xctrunner --type IOS_APP_DEVELOPMENT --create
+        script: app-store-connect fetch-signing-files com.amdash.physician.RunnerUITests.xctrunner --type IOS_APP_DEVELOPMENT
       - name: Install patrol_cli
         script: |
           dart pub global activate patrol_cli
@@ -659,8 +666,12 @@ workflows:
           gcloud config set project amdash-dev
       - name: Fetch signing profiles (ems)
         script: xcode-project use-profiles --project flutter/apps/ems/ios/Runner.xcodeproj
+      # --create removed, same reasoning as physician's equivalent step
+      # above — a matching profile already exists on Apple's side (created
+      # automatically by an earlier attempt), and --create appears to
+      # always attempt certificate resolution regardless.
       - name: Fetch signing profiles (ems RunnerUITests.xctrunner)
-        script: app-store-connect fetch-signing-files com.amdash.ems.RunnerUITests.xctrunner --type IOS_APP_DEVELOPMENT --create
+        script: app-store-connect fetch-signing-files com.amdash.ems.RunnerUITests.xctrunner --type IOS_APP_DEVELOPMENT
       - name: Install patrol_cli
         script: |
           dart pub global activate patrol_cli
