@@ -576,17 +576,21 @@ workflows:
       # which calls for a *separate* registered App ID with the
       # `.RunnerUITests.xctrunner` suffix.
       #
-      # --create still failed with "Cannot save Signing Certificates
-      # without certificate private key" even after manually creating a
-      # matching profile on Apple's side (same private-key gap as the ems
-      # cert saga — this tool can't reuse a cert it doesn't hold the key
-      # for) — --create appears to always attempt certificate resolution
-      # regardless of whether a matching profile already exists. Removed
-      # it now that the profile is confirmed to exist, so this only needs
-      # to find and download what's already there rather than also trying
-      # to create anything.
-      - name: Fetch signing profiles (physician RunnerUITests.xctrunner)
-        script: app-store-connect fetch-signing-files com.amdash.physician.RunnerUITests.xctrunner --type IOS_APP_DEVELOPMENT
+      # fetch-signing-files kept failing with "Cannot save Signing
+      # Certificates without certificate private key" even after manually
+      # creating a matching profile on Apple's side, and even with --create
+      # removed — it apparently always tries to resolve/save a certificate
+      # as part of resolving any profile, unconditionally. app-store-connect
+      # profiles list --save is a lower-level command that only ever
+      # touches profiles, never certificates — confirmed via its own docs.
+      # It filters by --name/--type, not bundle id, so rather than guess
+      # the exact name this (or an earlier attempt) auto-generated, just
+      # download every Development profile on the account — there are only
+      # a handful, and xcode-project use-profiles/xcodebuild still match
+      # the right one to each target via the profile's own embedded
+      # metadata, not by filename.
+      - name: Fetch signing profiles (RunnerUITests.xctrunner profiles)
+        script: app-store-connect profiles list --type IOS_APP_DEVELOPMENT --save
       - name: Install patrol_cli
         script: |
           dart pub global activate patrol_cli
@@ -666,12 +670,11 @@ workflows:
           gcloud config set project amdash-dev
       - name: Fetch signing profiles (ems)
         script: xcode-project use-profiles --project flutter/apps/ems/ios/Runner.xcodeproj
-      # --create removed, same reasoning as physician's equivalent step
-      # above — a matching profile already exists on Apple's side (created
-      # automatically by an earlier attempt), and --create appears to
-      # always attempt certificate resolution regardless.
-      - name: Fetch signing profiles (ems RunnerUITests.xctrunner)
-        script: app-store-connect fetch-signing-files com.amdash.ems.RunnerUITests.xctrunner --type IOS_APP_DEVELOPMENT
+      # Same fix as physician's equivalent step — fetch-signing-files always
+      # tries to resolve/save a certificate even with --create removed;
+      # profiles list --save only ever touches profiles.
+      - name: Fetch signing profiles (RunnerUITests.xctrunner profiles)
+        script: app-store-connect profiles list --type IOS_APP_DEVELOPMENT --save
       - name: Install patrol_cli
         script: |
           dart pub global activate patrol_cli
