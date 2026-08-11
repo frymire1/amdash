@@ -87,9 +87,16 @@
 #     actually available for it (confirmed via a real "'17.0' is not a
 #     valid OS version" error, after signing/build/upload all succeeded).
 #     No iOS equivalent of Android's list-device-capacities subcommand
-#     exists, so capacity for iphone14pro@16.6 is unverified — if it
-#     errors out immediately with no logs (same symptom low-capacity
-#     Android devices produced), that's the next thing to suspect.
+#     exists, so capacity for iphone14pro@16.6 was unverified — turned out
+#     to matter: two separate real runs both hit "Infrastructure error
+#     occurred" after 3 retries each, with build/sign/upload/dispatch all
+#     genuinely succeeding first (confirmed via the REST API —
+#     testing.googleapis.com/v1/projects/{project}/testMatrices/{id}, since
+#     the Firebase console UI shows nothing useful for this failure mode).
+#     Switched to model=iphone11pro (still version=16.6, a different real
+#     device from the same models-list output) to test whether it's
+#     iphone14pro specifically that's capacity-constrained despite being
+#     the "default"-tagged model.
 #   - Whether Codemagic's linux images ship `gcloud`/`jq` preinstalled —
 #     add an explicit install step if not.
 #
@@ -637,7 +644,7 @@ workflows:
             --test ios_tests.zip \
             --type=xctest \
             --record-video \
-            --device model=iphone14pro,version=16.6,locale=en_US,orientation=portrait \
+            --device model=iphone11pro,version=16.6,locale=en_US,orientation=portrait \
             --results-bucket=gs://amdash-dev-test-lab-results
     publishing:
       scripts:
@@ -718,7 +725,7 @@ workflows:
             --test ios_tests.zip \
             --type=xctest \
             --record-video \
-            --device model=iphone14pro,version=16.6,locale=en_US,orientation=portrait \
+            --device model=iphone11pro,version=16.6,locale=en_US,orientation=portrait \
             --results-bucket=gs://amdash-dev-test-lab-results
     publishing:
       scripts:
