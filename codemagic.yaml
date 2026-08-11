@@ -589,8 +589,19 @@ workflows:
       # a handful, and xcode-project use-profiles/xcodebuild still match
       # the right one to each target via the profile's own embedded
       # metadata, not by filename.
+      #
+      # Still failed the same way even after this ran successfully and
+      # saved the profile — its default --profiles-dir is
+      # ~/Library/Developer/Xcode/UserData/Provisioning Profiles, which
+      # isn't where xcodebuild's own automatic-signing engine actually
+      # looks at build time (confirmed real: the file was there, xcodebuild
+      # still reported "No profiles ... were found"). Forced to save into
+      # ~/Library/MobileDevice/Provisioning Profiles instead — the
+      # traditional location xcodebuild has always used.
       - name: Fetch signing profiles (RunnerUITests.xctrunner profiles)
-        script: app-store-connect profiles list --type IOS_APP_DEVELOPMENT --save
+        script: |
+          app-store-connect profiles list --type IOS_APP_DEVELOPMENT --save \
+            --profiles-dir="$HOME/Library/MobileDevice/Provisioning Profiles"
       - name: Install patrol_cli
         script: |
           dart pub global activate patrol_cli
@@ -672,9 +683,15 @@ workflows:
         script: xcode-project use-profiles --project flutter/apps/ems/ios/Runner.xcodeproj
       # Same fix as physician's equivalent step — fetch-signing-files always
       # tries to resolve/save a certificate even with --create removed;
-      # profiles list --save only ever touches profiles.
+      # profiles list --save only ever touches profiles. --profiles-dir
+      # forces the traditional ~/Library/MobileDevice/Provisioning Profiles
+      # location, which is where xcodebuild's automatic-signing engine
+      # actually looks at build time (its own default,
+      # UserData/Provisioning Profiles, isn't).
       - name: Fetch signing profiles (RunnerUITests.xctrunner profiles)
-        script: app-store-connect profiles list --type IOS_APP_DEVELOPMENT --save
+        script: |
+          app-store-connect profiles list --type IOS_APP_DEVELOPMENT --save \
+            --profiles-dir="$HOME/Library/MobileDevice/Provisioning Profiles"
       - name: Install patrol_cli
         script: |
           dart pub global activate patrol_cli
