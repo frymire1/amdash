@@ -42,9 +42,15 @@ const _routeWidth = 6;
 /// and kicking off a Directions fetch, are genuine reactions to a *change*
 /// and stay as `ref.listen`-driven imperative side effects.
 class PatientViewer extends ConsumerStatefulWidget {
-  const PatientViewer({required this.patient, super.key});
+  const PatientViewer({required this.patient, this.leading, super.key});
 
   final Patient? patient;
+
+  /// Rendered above the patient's name, inside the same scrollable content
+  /// — so it scrolls out of view with the rest of the page rather than
+  /// floating over it. Used by [MainViewScreen] to place its mobile-only
+  /// "Patient List" button without overlapping the name.
+  final Widget? leading;
 
   @override
   ConsumerState<PatientViewer> createState() => _PatientViewerState();
@@ -185,8 +191,18 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
     final patient = widget.patient;
 
     if (patient == null) {
-      return Center(
-        child: Text('Select a patient to view details', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+      return Column(
+        children: [
+          if (widget.leading != null) Padding(padding: const EdgeInsets.all(16), child: widget.leading),
+          Expanded(
+            child: Center(
+              child: Text(
+                'Select a patient to view details',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+            ),
+          ),
+        ],
       );
     }
 
@@ -249,6 +265,10 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (widget.leading != null) ...[
+            Align(alignment: Alignment.centerLeft, child: widget.leading),
+            const SizedBox(height: 12),
+          ],
           Text(
             isProvidedValue(patient.name) ? patient.name : 'Not added by EMS yet',
             style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),

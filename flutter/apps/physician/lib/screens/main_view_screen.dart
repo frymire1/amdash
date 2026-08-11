@@ -54,40 +54,22 @@ class _MainViewScreenState extends State<MainViewScreen> {
             );
           }
 
-          return Stack(
-            children: [
-              PatientViewer(
-                key: ValueKey(_selectedPatient?.id),
-                patient: _selectedPatient,
-              ),
-              Positioned(
-                left: 12,
-                top: 12,
-                child: FilledButton.icon(
-                  onPressed: () => setState(() => _showListOnMobile = true),
-                  icon: const Icon(Icons.list),
-                  label: const Text('Patient List'),
-                ),
-              ),
-              if (_showListOnMobile)
-                Positioned.fill(
-                  child: Container(
-                    color: Theme.of(context).scaffoldBackgroundColor,
-                    child: Column(
-                      children: [
-                        Align(
-                          alignment: Alignment.topRight,
-                          child: IconButton(
-                            onPressed: () => setState(() => _showListOnMobile = false),
-                            icon: const Icon(Icons.close),
-                          ),
-                        ),
-                        Expanded(child: PatientList(onSelected: _onSelected)),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
+          if (_showListOnMobile) {
+            return PatientList(onSelected: _onSelected);
+          }
+
+          // The "Patient List" button used to float over PatientViewer via a
+          // Stack, which covered the patient's name — now passed in as
+          // PatientViewer's `leading`, so it sits in its own space above the
+          // name and scrolls away with the rest of the content instead.
+          return PatientViewer(
+            key: ValueKey(_selectedPatient?.id),
+            patient: _selectedPatient,
+            leading: FilledButton.icon(
+              onPressed: () => setState(() => _showListOnMobile = true),
+              icon: const Icon(Icons.list),
+              label: const Text('Patient List'),
+            ),
           );
         },
       );
