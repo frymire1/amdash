@@ -517,25 +517,37 @@ workflows:
     name: iOS e2e (Firebase Test Lab) — physician
     instance_type: mac_mini_m2
     max_build_duration: 60
-    # Connecting the API key at the team level (Team settings ->
-    # Integrations -> Apple Developer Portal) is NOT enough on its own —
-    # confirmed via a real "you have to enable code signing separately
-    # for each workflow" message from Codemagic. Each workflow that needs
-    # it must reference the key explicitly, by the *reference name* the
-    # integration was given when connected (Codemagic's own Key ID,
-    # e.g. HA4FKHR2S7, does NOT work here — confirmed via a real "App
-    # Store Connect integration ... does not exist" error). Also
-    # confirmed via a real schema-validation error that this key is a
-    # sibling of `environment`, not nested inside it.
-    integrations:
-      app_store_connect: amdash_ios
     environment:
       flutter: stable
       xcode: latest
       node: latest
+      # RESOLVED (the long way — see the header comment's note on this):
+      # the API-key-based `ios_signing.distribution_type +
+      # bundle_identifier` mode never worked for RunnerUITests's
+      # `.xctrunner` wrapper, no matter how the profile/certificate was
+      # fetched — every raw app-store-connect CLI path either couldn't
+      # save a certificate without a local private key, or saved a
+      # profile to a directory xcodebuild's automatic-signing engine
+      # doesn't actually search. Switched to Codemagic's OTHER `ios_signing`
+      # mode instead: reference manually-generated/uploaded certificates
+      # and provisioning profiles by name (Team settings -> Code signing
+      # identities), the same pattern Codemagic's own official Patrol demo
+      # project uses
+      # (codemagic-sample-projects/integrations/patrol-demo-project) for
+      # this exact scenario. This mode applies everything as a hidden
+      # pre-build step, same as the old mode did for the main app alone —
+      # no more manual fetch steps needed at all. Needs BOTH a development
+      # and an ad-hoc (distribution-type) certificate/profile — Test Lab's
+      # physical-device dispatch needs ad-hoc signing for the main app,
+      # confirmed via that same official example.
       ios_signing:
-        distribution_type: development
-        bundle_identifier: com.amdash.physician
+        certificates:
+          - amdash_ios
+          - physician_adhoc
+        provisioning_profiles:
+          - AmDash Physician Development
+          - AmDash Physician RunnerUITests xctrunner Dev
+          - AmDash Physician AdHoc
       groups:
         - firebase_deploy
         - firebase_testlab
@@ -558,50 +570,6 @@ workflows:
           echo "$GCLOUD_TESTLAB_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/testlab-service-account.json"
           gcloud auth activate-service-account --key-file="$CM_BUILD_DIR/testlab-service-account.json"
           gcloud config set project amdash-dev
-      - name: Fetch signing profiles (physician)
-        script: xcode-project use-profiles --project flutter/apps/physician/ios/Runner.xcodeproj
-      # The `<bundle id>.xctrunner` wrapper Xcode auto-generates to host a
-      # UI test target on a real device isn't a literal target at all, so
-      # it's never discovered via xcode-project use-profiles's project
-      # scan — confirmed via a real error ("No profiles for
-      # 'com.amdash.physician.RunnerUITests.xctrunner' were found... To
-      # enable automatic signing, pass -allowProvisioningUpdates to
-      # xcodebuild"), which patrol_cli's internal xcodebuild invocation
-      # doesn't pass and gives no way to inject. app-store-connect
-      # fetch-signing-files fetches/creates a profile by exact bundle-id
-      # string instead, independent of any project scan, and installs it
-      # into the same local Provisioning Profiles directory xcodebuild
-      # searches — matches Patrol's own documented manual setup
-      # (https://patrol.leancode.co/documentation/physical-ios-devices-setup),
-      # which calls for a *separate* registered App ID with the
-      # `.RunnerUITests.xctrunner` suffix.
-      #
-      # fetch-signing-files kept failing with "Cannot save Signing
-      # Certificates without certificate private key" even after manually
-      # creating a matching profile on Apple's side, and even with --create
-      # removed — it apparently always tries to resolve/save a certificate
-      # as part of resolving any profile, unconditionally. app-store-connect
-      # profiles list --save is a lower-level command that only ever
-      # touches profiles, never certificates — confirmed via its own docs.
-      # It filters by --name/--type, not bundle id, so rather than guess
-      # the exact name this (or an earlier attempt) auto-generated, just
-      # download every Development profile on the account — there are only
-      # a handful, and xcode-project use-profiles/xcodebuild still match
-      # the right one to each target via the profile's own embedded
-      # metadata, not by filename.
-      #
-      # Still failed the same way even after this ran successfully and
-      # saved the profile — its default --profiles-dir is
-      # ~/Library/Developer/Xcode/UserData/Provisioning Profiles, which
-      # isn't where xcodebuild's own automatic-signing engine actually
-      # looks at build time (confirmed real: the file was there, xcodebuild
-      # still reported "No profiles ... were found"). Forced to save into
-      # ~/Library/MobileDevice/Provisioning Profiles instead — the
-      # traditional location xcodebuild has always used.
-      - name: Fetch signing profiles (RunnerUITests.xctrunner profiles)
-        script: |
-          app-store-connect profiles list --type IOS_APP_DEVELOPMENT --save \
-            --profiles-dir="$HOME/Library/MobileDevice/Provisioning Profiles"
       - name: Install patrol_cli
         script: |
           dart pub global activate patrol_cli
