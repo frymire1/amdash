@@ -1,0 +1,25 @@
+# Generates the native launch/splash screens from the same Arctic Cyan
+# mark used for the app icon (see flutter_launcher_icons.yaml) — reuses
+# icon-foreground.png (transparent background, pulse-line mark) over the
+# same dark teal the app icon's own background uses, so the icon and
+# splash screen read as one consistent piece rather than switching to the
+# stock Flutter placeholder mid-launch. Kept the same dark background for
+# both light and dark mode (rather than matching the app's own light-mode
+# background) since the app icon on the home screen is already this dark
+# tile — matching it keeps the icon-to-splash transition seamless
+# regardless of system theme. Run via `dart run flutter_native_splash:create`.
+flutter_native_splash:
+  color: "071618"
+  image: assets/icon/icon-foreground.png
+  color_dark: "071618"
+  image_dark: assets/icon/icon-foreground.png
+
+  android_12:
+    color: "071618"
+    image: assets/icon/icon-foreground.png
+    color_dark: "071618"
+    image_dark: assets/icon/icon-foreground.png
+
+  android: true
+  ios: true
+  web: false
