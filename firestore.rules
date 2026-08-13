@@ -30,6 +30,13 @@ service cloud.firestore {
       return isSignedIn() && orgId == callerOrgId();
     }
 
+    // `role` is a list (a user can hold more than one) — see isSuperAdmin
+    // above, which checks it the same way. Mirrors the server-side role
+    // checks in functions/src/admin.ts (requireAdmin etc.).
+    function callerHasRole(role) {
+      return isSignedIn() && (role in callerDoc().get('role', []));
+    }
+
     // Every user's own profile lives here, including their assigned `role`
     // and `organizationId`. Both are only ever set by Cloud Functions (Admin
     // SDK, bypasses these rules) — clients are explicitly blocked from
@@ -64,12 +71,20 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Reads stay open to any same-org member — physicians/nurses need to
+    // see incoming patients (physician/lib/services/patient_service.dart is
+    // read-only). Writes are restricted to the `ems` role: EMS is the only
+    // client that creates/edits/deletes/completes patient records
+    // (ems/lib/services/patient_upload_service.dart), and without this a
+    // same-org physician/nurse/admin could falsify vitals or delete an
+    // active transport straight through the SDK, bypassing the app UI.
     match /patients/{patientId} {
       allow read: if isSuperAdmin() || sameOrgAsCaller(resource.data.get('organizationId', null));
-      allow create: if isSignedIn() && sameOrgAsCaller(request.resource.data.organizationId);
-      allow update: if sameOrgAsCaller(resource.data.get('organizationId', null))
+      allow create: if callerHasRole('ems') && sameOrgAsCaller(request.resource.data.organizationId);
+      allow update: if callerHasRole('ems')
+        && sameOrgAsCaller(resource.data.get('organizationId', null))
         && request.resource.data.organizationId == resource.data.organizationId;
-      allow delete: if sameOrgAsCaller(resource.data.get('organizationId', null));
+      allow delete: if callerHasRole('ems') && sameOrgAsCaller(resource.data.get('organizationId', null));
     }
 
     // Only ever written by the onEmsLocationEvent Cloud Function (Admin SDK,
