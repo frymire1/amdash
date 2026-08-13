@@ -52,7 +52,17 @@ class _NavBarState extends ConsumerState<NavBar> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return AppBar(
-      title: const Text('AmDash'),
+      // Logo + wordmark centered together as one unit (centerTitle centers
+      // the whole Row, and mainAxisSize.min keeps the Row only as wide as
+      // its contents so it actually centers rather than filling the bar).
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Image.asset('assets/logo.png', package: 'amdash_core', height: 26, width: 26),
+          const SizedBox(width: 8),
+          const Text('AmDash'),
+        ],
+      ),
       centerTitle: true,
       backgroundColor: Colors.transparent,
       elevation: 0,

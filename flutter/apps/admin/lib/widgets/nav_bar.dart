@@ -69,7 +69,16 @@ class _AdminNavBarState extends ConsumerState<AdminNavBar> {
           if (isSuperAdmin) const PopupMenuItem(value: '/organizations', child: Text('Organizations')),
         ],
       ),
-      title: const Text('AmDash Admin'),
+      // Logo + wordmark centered together as one unit — see the shared
+      // NavBar for the mainAxisSize.min + centerTitle reasoning.
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Image.asset('assets/logo.png', package: 'amdash_core', height: 26, width: 26),
+          const SizedBox(width: 8),
+          const Text('AmDash Admin'),
+        ],
+      ),
       centerTitle: true,
       actions: [
         Padding(
