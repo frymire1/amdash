@@ -7,8 +7,6 @@ import '../services/patient_service.dart';
 import '../utils/geo.dart';
 import 'patient_card.dart';
 
-const kAllDestinations = 'All destinations';
-
 /// Mirrors `patient-list.component.ts`/`.html`: a filterable (by
 /// destination hospital), optionally distance-sorted list of the org's
 /// active patients.
@@ -24,7 +22,16 @@ class PatientList extends ConsumerStatefulWidget {
 class _PatientListState extends ConsumerState<PatientList> {
   bool _filterOpen = false;
   bool _sortByDistance = false;
-  String _selectedDestination = kAllDestinations;
+  // Always a concrete hospital once the lists load — there is no
+  // "All destinations" option; a physician only cares about patients
+  // inbound to one hospital at a time. Null only during the brief window
+  // before the default is applied.
+  String? _selectedDestination;
+
+  // The destination filter defaults to the physician's own work location
+  // (see build) — but only once, so a later manual choice sticks across
+  // rebuilds.
+  bool _appliedDefaultDestination = false;
 
   // Latches true the first time the (now guaranteed server-confirmed, see
   // physicianPatientsProvider) patients stream produces a value, and stays
@@ -47,10 +54,23 @@ class _PatientListState extends ConsumerState<PatientList> {
     final hospitals = ref.watch(hospitalsProvider).valueOrNull ?? const [];
     final profile = ref.watch(userProfileProvider).valueOrNull;
 
-    final destinationOptions = [kAllDestinations, ...hospitals.map((h) => h.name)];
+    final destinationOptions = [for (final h in hospitals) h.name];
 
-    var filtered = _selectedDestination == kAllDestinations
-        ? patients
+    // Default the filter to the physician's own hospital once both the
+    // profile and hospital list have loaded — a physician only cares about
+    // patients inbound to where they are. Falls back to the first hospital
+    // if their work location isn't one of the destinations. Guarded so it
+    // applies just once and never overrides a manual choice later.
+    if (!_appliedDefaultDestination && destinationOptions.isNotEmpty && profile != null) {
+      final workLocation = profile.workLocation;
+      _selectedDestination = (workLocation != null && destinationOptions.contains(workLocation))
+          ? workLocation
+          : destinationOptions.first;
+      _appliedDefaultDestination = true;
+    }
+
+    var filtered = _selectedDestination == null
+        ? <Patient>[]
         : patients.where((p) => p.destination == _selectedDestination).toList();
 
     final myHospital = _sortByDistance ? _findHospital(hospitals, profile?.workLocation) : null;
@@ -66,13 +86,16 @@ class _PatientListState extends ConsumerState<PatientList> {
       });
     }
 
-    final filterActive = _selectedDestination != kAllDestinations || _sortByDistance;
+    // A destination is always selected now, so "active" means the physician
+    // has moved off their own hospital or turned on distance sorting.
+    final filterActive =
+        _sortByDistance || (_selectedDestination != null && _selectedDestination != profile?.workLocation);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
           child: Row(
             children: [
               const Expanded(
@@ -86,31 +109,45 @@ class _PatientListState extends ConsumerState<PatientList> {
             ],
           ),
         ),
+        if (_selectedDestination != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+            child: Text(
+              'Currently showing patients en route to $_selectedDestination',
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 13),
+            ),
+          ),
         if (_filterOpen)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: _selectedDestination,
-                  decoration: const InputDecoration(labelText: 'Destination'),
-                  items: [
-                    for (final option in destinationOptions)
-                      DropdownMenuItem(value: option, child: Text(option)),
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+            child: Card(
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 16, 12, 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      initialValue: _selectedDestination,
+                      decoration: const InputDecoration(labelText: 'Destination'),
+                      items: [
+                        for (final option in destinationOptions)
+                          DropdownMenuItem(value: option, child: Text(option)),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) setState(() => _selectedDestination = value);
+                      },
+                    ),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      value: _sortByDistance,
+                      title: const Text('Sort by distance from my hospital'),
+                      onChanged: (value) => setState(() => _sortByDistance = value ?? false),
+                    ),
                   ],
-                  onChanged: (value) {
-                    if (value != null) setState(() => _selectedDestination = value);
-                  },
                 ),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  value: _sortByDistance,
-                  title: const Text('Sort by distance from my hospital'),
-                  onChanged: (value) => setState(() => _sortByDistance = value ?? false),
-                ),
-              ],
+              ),
             ),
           ),
         Expanded(

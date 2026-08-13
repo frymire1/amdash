@@ -74,7 +74,18 @@ class _AdminNavBarState extends ConsumerState<AdminNavBar> {
       title: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Image.asset('assets/logo.png', package: 'amdash_core', height: 40, width: 40),
+          // See the shared NavBar for why cacheWidth/Height — decode the
+          // 1024px source down to ~120px once rather than crushing it to
+          // 40px at paint time, which aliases on low-DPI web.
+          Image.asset(
+            'assets/logo.png',
+            package: 'amdash_core',
+            height: 40,
+            width: 40,
+            cacheWidth: 120,
+            cacheHeight: 120,
+            filterQuality: FilterQuality.medium,
+          ),
           const SizedBox(width: 3),
           const Text('AmDash Admin'),
         ],

@@ -58,7 +58,21 @@ class _NavBarState extends ConsumerState<NavBar> {
       title: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Image.asset('assets/logo.png', package: 'amdash_core', height: 40, width: 40),
+          // The source is a crisp 1024px mark shown at 40px. cacheWidth/
+          // Height makes Flutter decode it down to ~120px (3x the display
+          // size, for high-DPI) with its high-quality resampler once, so
+          // it isn't crushed 1024->40 at paint time — the default paint-
+          // time path aliases badly at that extreme downscale on low-DPI
+          // web displays (phones' high DPR happened to hide it).
+          Image.asset(
+            'assets/logo.png',
+            package: 'amdash_core',
+            height: 40,
+            width: 40,
+            cacheWidth: 120,
+            cacheHeight: 120,
+            filterQuality: FilterQuality.medium,
+          ),
           const SizedBox(width: 3),
           const Text('AmDash'),
         ],
