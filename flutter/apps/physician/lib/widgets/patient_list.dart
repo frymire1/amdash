@@ -128,9 +128,23 @@ class _PatientListState extends ConsumerState<PatientList> {
                   itemCount: filtered.length,
                   itemBuilder: (context, index) {
                     final patient = filtered[index];
+                    final info = emsTrackingInfo(ref, patient.id);
+                    // Straight-line (haversine) distance from the vehicle's
+                    // last known fix to its destination hospital — pure math
+                    // from data already streamed to the list, so unlike the
+                    // road ETA in PatientViewer it costs no Directions API
+                    // call and can show on every card without opening one.
+                    final location = info.location;
+                    final destination = _findHospital(hospitals, patient.destination);
+                    final distanceToHospitalMeters =
+                        (location?.latitude != null && location?.longitude != null && destination != null)
+                            ? distanceMeters(
+                                location!.latitude!, location.longitude!, destination.latitude, destination.longitude)
+                            : null;
                     return PatientCard(
                       patient: patient,
-                      trackingStatus: emsTrackingInfo(ref, patient.id).status,
+                      trackingStatus: info.status,
+                      distanceToHospitalMeters: distanceToHospitalMeters,
                       onTap: () => widget.onSelected(patient),
                     );
                   },

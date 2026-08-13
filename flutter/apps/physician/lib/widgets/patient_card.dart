@@ -1,8 +1,6 @@
 import 'package:amdash_core/amdash_core.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../services/directions_service.dart';
 import '../services/ems_location_service.dart';
 
 /// Mirrors `patient-card.component.ts`/`.html`/`.scss`: a clickable patient
@@ -10,23 +8,28 @@ import '../services/ems_location_service.dart';
 /// online) and a vitals grid, each field falling back to "Not added yet"
 /// via [isProvidedValue] (EMS leaves required fields as the literal
 /// string `'Unknown'` when left blank on upload).
-class PatientCard extends ConsumerWidget {
-  const PatientCard({required this.patient, required this.trackingStatus, required this.onTap, super.key});
+class PatientCard extends StatelessWidget {
+  const PatientCard({
+    required this.patient,
+    required this.trackingStatus,
+    required this.distanceToHospitalMeters,
+    required this.onTap,
+    super.key,
+  });
 
   final Patient patient;
   final EmsTrackingStatus trackingStatus;
+
+  /// Straight-line distance from the vehicle's last fix to its destination
+  /// hospital, computed in [PatientList] from data already on the list —
+  /// null when there's no location/hospital to measure between. This is the
+  /// free, always-available proximity hint; the precise road ETA lives in
+  /// [PatientViewer], which pays for a Directions API call to get it.
+  final double? distanceToHospitalMeters;
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // Same cache PatientViewer populates — only present once a patient's
-    // been actively tracked and viewed at least once (the fetch is
-    // triggered from there, not from this card), so most cards simply
-    // won't have an ETA yet.
-    final cachedRoute = patient.id == null
-        ? null
-        : ref.watch(directionsCacheProvider.select((cache) => cache[patient.id]));
-
+  Widget build(BuildContext context) {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: InkWell(
@@ -38,12 +41,15 @@ class PatientCard extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Align(alignment: Alignment.centerRight, child: _trackingPill(trackingStatus)),
-              if (cachedRoute != null) ...[
+              // Distance is only meaningful while the vehicle is actively
+              // reporting — hide it when tracking is stale/offline rather
+              // than showing a distance from a last-known-but-abandoned fix.
+              if (trackingStatus == EmsTrackingStatus.active && distanceToHospitalMeters != null) ...[
                 const SizedBox(height: 4),
                 Align(
                   alignment: Alignment.centerRight,
                   child: Text(
-                    'ETA: ${cachedRoute.result.durationText}',
+                    '${_formatDistance(distanceToHospitalMeters!)} from hospital',
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -87,6 +93,14 @@ class PatientCard extends ConsumerWidget {
   }
 
   String _fallback(Object? value) => isProvidedValue(value) ? value.toString() : 'Not added yet';
+
+  // Metres under 1 km, one-decimal km above — "as the crow flies", so it's
+  // deliberately a rough proximity read, not the road distance the viewer's
+  // Directions-backed ETA gives.
+  String _formatDistance(double meters) {
+    if (meters < 1000) return '${meters.round()} m';
+    return '${(meters / 1000).toStringAsFixed(1)} km';
+  }
 
   Widget _trackingPill(EmsTrackingStatus status) {
     final (kind, label, pulsing) = switch (status) {
