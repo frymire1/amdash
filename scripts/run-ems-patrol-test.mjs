@@ -10,7 +10,7 @@
 // Written in Node/JS rather than Dart for the same reason as
 // run-admin-patrol-test.mjs: needs the Firebase *Admin* SDK to seed/tear
 // down real Auth + Firestore state around the Dart-side Patrol test, and
-// nx-monorepo already has that set up.
+// scripts/ already has that set up.
 //
 // Usage:
 //   node scripts/run-ems-patrol-test.mjs
@@ -45,7 +45,7 @@ import { findOrganizationId, initFirebaseAdmin } from './lib/firebase-admin-cli.
 import { runPatrolTest } from './lib/run-patrol.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, '..', '..');
+const REPO_ROOT = path.resolve(__dirname, '..');
 const EMS_APP_DIR = path.join(REPO_ROOT, 'flutter', 'apps', 'ems');
 const DEFAULT_ACCOUNT_JSON_PATH = path.join(os.tmpdir(), 'amdash-ems-smoke-account.json');
 

@@ -13,9 +13,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, '..', '..');
+const REPO_ROOT = path.resolve(__dirname, '..');
 const SOURCE = path.join(REPO_ROOT, 'flutter', 'apps', 'ems', 'assets', 'icon', 'icon.png');
-const PUBLIC_DIR = path.join(REPO_ROOT, 'nx-monorepo', 'apps', 'marketing', 'public');
+const PUBLIC_DIR = path.join(REPO_ROOT, 'marketing', 'public');
 
 async function resize(sourceDataUri, size) {
   const browser = await chromium.launch();

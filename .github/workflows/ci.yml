@@ -13,15 +13,15 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: nx-monorepo/package-lock.json
+          cache-dependency-path: marketing/package-lock.json
 
       - name: Install dependencies
         run: npm ci
-        working-directory: nx-monorepo
+        working-directory: marketing
 
       - name: Test
-        run: npx nx run-many -t test
-        working-directory: nx-monorepo
+        run: npm test
+        working-directory: marketing
 
   lint:
     runs-on: ubuntu-latest
@@ -32,15 +32,15 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: nx-monorepo/package-lock.json
+          cache-dependency-path: marketing/package-lock.json
 
       - name: Install dependencies
         run: npm ci
-        working-directory: nx-monorepo
+        working-directory: marketing
 
       - name: Lint
-        run: npx nx run-many -t lint
-        working-directory: nx-monorepo
+        run: npm run lint
+        working-directory: marketing
 
   build:
     runs-on: ubuntu-latest
@@ -51,26 +51,27 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: nx-monorepo/package-lock.json
+          cache-dependency-path: marketing/package-lock.json
 
       - name: Install dependencies
         run: npm ci
-        working-directory: nx-monorepo
+        working-directory: marketing
 
       - name: Build
-        run: npx nx run-many -t build
-        working-directory: nx-monorepo
+        run: npm run build
+        working-directory: marketing
 
   # physician/ems/admin (Flutter unit tests, web/android/ios builds, e2e,
   # and their Firebase deploy) moved to Codemagic — see codemagic.yaml at
-  # the repo root. This workflow now covers only `marketing` (still
-  # Angular/Nx). Its hosting deploy is deliberately kept here rather than
-  # moved to Codemagic too: `marketing` isn't a Flutter app and has no
-  # reason to depend on Codemagic's toolchain. This does mean marketing's
-  # deploy and the Flutter apps'/functions' deploy (on Codemagic) are two
-  # independent pipelines against the same amdash-dev project instead of
-  # one atomic `firebase deploy` — a change/push that touches both is no
-  # longer guaranteed to land together, unlike before this split.
+  # the repo root. This workflow now covers only `marketing` (a standalone
+  # Angular app, formerly under an Nx monorepo). Its hosting deploy is
+  # deliberately kept here rather than moved to Codemagic too: `marketing`
+  # isn't a Flutter app and has no reason to depend on Codemagic's
+  # toolchain. This does mean marketing's deploy and the Flutter
+  # apps'/functions' deploy (on Codemagic) are two independent pipelines
+  # against the same amdash-dev project instead of one atomic
+  # `firebase deploy` — a change/push that touches both is no longer
+  # guaranteed to land together, unlike before this split.
   deploy-marketing:
     runs-on: ubuntu-latest
     needs: [test, lint, build]
@@ -81,19 +82,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: nx-monorepo/package-lock.json
+          cache-dependency-path: marketing/package-lock.json
 
       - name: Install dependencies
         run: npm ci
-        working-directory: nx-monorepo
+        working-directory: marketing
 
       # This job runs on its own fresh runner (no filesystem shared with the
       # `build` job above), so the production build has to happen again
       # here too — deploy needs the actual build output on disk, not just
       # proof that it built successfully.
       - name: Build marketing
-        run: npx nx run-many -t build -p marketing
-        working-directory: nx-monorepo
+        run: npm run build
+        working-directory: marketing
 
       - name: Install Firebase CLI
         run: npm install -g firebase-tools

@@ -12,7 +12,7 @@
 // Written in Node/JS rather than Dart because it needs the Firebase
 // *Admin* SDK (elevated, server-side — creates/deletes real Auth users and
 // bypasses Firestore rules) to seed and tear down data around the actual
-// Dart-side Patrol test; nx-monorepo already has Node + firebase-admin set
+// Dart-side Patrol test; scripts/ already has Node + firebase-admin set
 // up for exactly this, reusing the same pattern the old Playwright e2e
 // suites used before physician/ems/admin moved to Flutter.
 //
@@ -30,7 +30,7 @@ import { findOrganizationId, initFirebaseAdmin } from './lib/firebase-admin-cli.
 import { runPatrolTest } from './lib/run-patrol.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, '..', '..');
+const REPO_ROOT = path.resolve(__dirname, '..');
 const ADMIN_APP_DIR = path.join(REPO_ROOT, 'flutter', 'apps', 'admin');
 
 async function createSmokeAdminAccount(db) {

@@ -135,7 +135,7 @@
 # the more natural fit. web-e2e's script steps were adjusted for this too
 # — its old locale-gen/apt-get-install-xvfb steps were Linux-only fixes
 # for a bare CI box with no display, which a real Mac already has; see
-# nx-monorepo/scripts/lib/run-patrol.mjs's matching IS_MACOS check, which
+# scripts/lib/run-patrol.mjs's matching IS_MACOS check, which
 # skips xvfb-run (also Linux-only, not installed on macOS) for the same
 # reason.
 #
@@ -375,12 +375,12 @@ workflows:
         script: |
           dart pub global activate patrol_cli
           echo "PATH=$HOME/.pub-cache/bin:$PATH" >> $CM_ENV
-      - name: Install nx-monorepo dependencies
+      - name: Install scripts dependencies
         script: npm ci
-        working_directory: nx-monorepo
+        working_directory: scripts
       - name: Install Playwright browser + OS dependencies
         script: npx playwright install --with-deps chromium
-        working_directory: nx-monorepo
+        working_directory: scripts
       - name: Authenticate to Firebase
         script: |
           echo "$FIREBASE_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/firebase-service-account.json"
@@ -388,14 +388,14 @@ workflows:
       # Unchanged seed -> patrol test -> teardown shape, same scripts as
       # before — only the CI system underneath changed.
       - name: Run admin Patrol e2e
-        script: node scripts/run-admin-patrol-test.mjs
-        working_directory: nx-monorepo
+        script: node run-admin-patrol-test.mjs
+        working_directory: scripts
       - name: Run physician Patrol e2e
-        script: node scripts/run-physician-patrol-test.mjs
-        working_directory: nx-monorepo
+        script: node run-physician-patrol-test.mjs
+        working_directory: scripts
       - name: Run EMS Patrol e2e
-        script: node scripts/run-ems-patrol-test.mjs
-        working_directory: nx-monorepo
+        script: node run-ems-patrol-test.mjs
+        working_directory: scripts
     artifacts:
       - flutter/apps/admin/playwright-report/**
       - flutter/apps/physician/playwright-report/**
@@ -437,9 +437,9 @@ workflows:
         script: |
           dart pub global activate patrol_cli
           echo "PATH=$HOME/.pub-cache/bin:$PATH" >> $CM_ENV
-      - name: Install nx-monorepo dependencies
+      - name: Install scripts dependencies
         script: npm ci
-        working_directory: nx-monorepo
+        working_directory: scripts
       # Seeding and teardown are split across separate steps (unlike
       # web-e2e's single-process seed->test->teardown) because
       # `patrol build` + `gcloud ... run` doesn't fit that shape — see
@@ -447,9 +447,9 @@ workflows:
       # --seed-only/--teardown modes.
       - name: Seed physician + ems smoke accounts
         script: |
-          node scripts/run-physician-patrol-test.mjs --seed-only --account-json="$CM_BUILD_DIR/physician-account.json"
-          node scripts/run-ems-patrol-test.mjs --seed-only --account-json="$CM_BUILD_DIR/ems-account.json"
-        working_directory: nx-monorepo
+          node run-physician-patrol-test.mjs --seed-only --account-json="$CM_BUILD_DIR/physician-account.json"
+          node run-ems-patrol-test.mjs --seed-only --account-json="$CM_BUILD_DIR/ems-account.json"
+        working_directory: scripts
       - name: Build + run physician Test Lab suite (Android)
         script: |
           set -e
@@ -506,9 +506,9 @@ workflows:
       scripts:
         - name: Teardown physician + ems smoke accounts
           script: |
-            cd nx-monorepo
-            node scripts/run-physician-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/physician-account.json" || true
-            node scripts/run-ems-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/ems-account.json" || true
+            cd scripts
+            node run-physician-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/physician-account.json" || true
+            node run-ems-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/ems-account.json" || true
 
   # Split into one workflow per app (see the header comment's RESOLVED note
   # on iOS signing) — each app gets its own isolated job/keychain and its
@@ -601,12 +601,12 @@ workflows:
         script: |
           dart pub global activate patrol_cli
           echo "PATH=$HOME/.pub-cache/bin:$PATH" >> $CM_ENV
-      - name: Install nx-monorepo dependencies
+      - name: Install scripts dependencies
         script: npm ci
-        working_directory: nx-monorepo
+        working_directory: scripts
       - name: Seed physician smoke account
-        script: node scripts/run-physician-patrol-test.mjs --seed-only --account-json="$CM_BUILD_DIR/physician-account.json"
-        working_directory: nx-monorepo
+        script: node run-physician-patrol-test.mjs --seed-only --account-json="$CM_BUILD_DIR/physician-account.json"
+        working_directory: scripts
       # Must be --release and properly signed — Test Lab's iOS tier is real
       # devices only, no simulator, unlike the old (broken) local-Simulator
       # ios-e2e job. This is what actually retires the patrol_cli
@@ -650,8 +650,8 @@ workflows:
       scripts:
         - name: Teardown physician smoke account
           script: |
-            cd nx-monorepo
-            node scripts/run-physician-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/physician-account.json" || true
+            cd scripts
+            node run-physician-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/physician-account.json" || true
 
   ios-e2e-ems:
     name: iOS e2e (Firebase Test Lab) — ems
@@ -702,12 +702,12 @@ workflows:
         script: |
           dart pub global activate patrol_cli
           echo "PATH=$HOME/.pub-cache/bin:$PATH" >> $CM_ENV
-      - name: Install nx-monorepo dependencies
+      - name: Install scripts dependencies
         script: npm ci
-        working_directory: nx-monorepo
+        working_directory: scripts
       - name: Seed ems smoke account
-        script: node scripts/run-ems-patrol-test.mjs --seed-only --account-json="$CM_BUILD_DIR/ems-account.json"
-        working_directory: nx-monorepo
+        script: node run-ems-patrol-test.mjs --seed-only --account-json="$CM_BUILD_DIR/ems-account.json"
+        working_directory: scripts
       - name: Build + run ems Test Lab suite (iOS)
         script: |
           set -e
@@ -731,8 +731,8 @@ workflows:
       scripts:
         - name: Teardown ems smoke account
           script: |
-            cd nx-monorepo
-            node scripts/run-ems-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/ems-account.json" || true
+            cd scripts
+            node run-ems-patrol-test.mjs --teardown --account-json="$CM_BUILD_DIR/ems-account.json" || true
 
   # Manual-trigger-only utility workflow — not part of the e2e chain, so a
   # still-failing Patrol UI test target doesn't block getting a real build

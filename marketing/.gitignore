@@ -1,0 +1,22 @@
+# compiled output
+dist
+tmp
+out-tsc
+
+# dependencies
+node_modules
+
+# Angular cache
+.angular
+
+# misc
+/coverage
+npm-debug.log
+yarn-error.log
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Vitest
+vitest.config.*.timestamp*

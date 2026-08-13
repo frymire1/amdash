@@ -31,7 +31,7 @@ async function toDataUri(filePath) {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, '..', '..');
+const REPO_ROOT = path.resolve(__dirname, '..');
 
 const BG_FROM = '#0f201e';
 const BG_TO = '#071618';

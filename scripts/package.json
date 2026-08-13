@@ -1,0 +1,12 @@
+{
+  "name": "amdash-scripts",
+  "version": "0.0.0",
+  "description": "Repo-wide Node tooling: Flutter Patrol e2e runners (used by codemagic.yaml) and one-off app-icon/favicon generators. Formerly lived under the Nx monorepo.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@playwright/test": "^1.37.0",
+    "firebase-admin": "^14.1.0"
+  }
+}
