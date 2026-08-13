@@ -13,6 +13,20 @@ import 'ems_tracking_task_handler.dart';
 const _updateInterval = Duration(seconds: 15);
 const _storageKeyPrefix = 'amdash-ems-tracking:';
 
+// How long after the last successful location fix tracking is still
+// considered "live" before the chip falls back to "No GPS Signal". ~3x
+// the publish interval, so a merely-stopped vehicle (iOS may space out
+// updates when stationary) doesn't false-trip, while a genuine signal
+// loss (tunnel, GPS off) still surfaces reasonably quickly. Services-off
+// and permission-revoked are detected directly (and faster) below, so
+// this threshold only governs the true "no fix coming through" case.
+const _fixStaleThreshold = Duration(seconds: 45);
+
+/// Why tracking isn't fully live, for the EMS-side status chip. Every cause
+/// ultimately stops fixes from being published; the specific value just
+/// lets the UI say *why*.
+enum EmsTrackingHealth { online, locationOff, permissionDenied, noSignal }
+
 /// Mirrors `apps/ems/src/app/services/ems-tracking.service.ts`'s public
 /// API (start/stop/isTracking, localStorage-backed resume-on-relaunch),
 /// with three real, platform-appropriate delivery mechanisms rather than
@@ -47,14 +61,25 @@ class EmsTrackingController extends Notifier<Set<String>> {
   final Map<String, Timer> _webTimers = {};
   StreamSubscription<Position>? _iosPositionSubscription;
 
+  // Wall-clock ms of the last confirmed location fix, from whichever
+  // delivery path is active (iOS stream / web timer / Android isolate
+  // report). Drives the "No GPS Signal" freshness fallback — see
+  // [evaluateHealth].
+  int? _lastFixMs;
+
   @override
   Set<String> build() {
     _functions = FirebaseFunctions.instanceFor(region: functionsRegion);
+    // Android's tracking isolate reports its fixes back here (see
+    // emsFixReportSignal); harmless no-op on other platforms, which record
+    // fixes directly in-isolate.
+    FlutterForegroundTask.addTaskDataCallback(_onTaskData);
     ref.onDispose(() {
       for (final timer in _webTimers.values) {
         timer.cancel();
       }
       _iosPositionSubscription?.cancel();
+      FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
     });
     // Fire-and-forget, matching the web version's own constructor-time
     // resume — this shouldn't block the provider's own creation.
@@ -65,6 +90,38 @@ class EmsTrackingController extends Notifier<Set<String>> {
   bool get _isIOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
   bool isTracking(String patientId) => state.contains(patientId);
+
+  void _recordFix() => _lastFixMs = DateTime.now().millisecondsSinceEpoch;
+
+  void _onTaskData(Object data) {
+    if (data == emsFixReportSignal) _recordFix();
+  }
+
+  bool get _isFixFresh {
+    final last = _lastFixMs;
+    return last != null && DateTime.now().millisecondsSinceEpoch - last < _fixStaleThreshold.inMilliseconds;
+  }
+
+  /// Current tracking health, recomputed on a cadence by
+  /// [emsTrackingHealthProvider]. Checks the cheap, specific causes first
+  /// (they surface faster than freshness), then falls back to fix
+  /// staleness for the generic "out of service / no signal" case.
+  Future<EmsTrackingHealth> evaluateHealth() async {
+    // Chip shows "Offline" straight from the tracked set when nothing's
+    // tracked, so health is moot then — skip the OS calls entirely.
+    if (state.isEmpty) return EmsTrackingHealth.online;
+    if (kIsWeb) {
+      // Browsers expose neither a services toggle nor a stable permission
+      // query separate from a prompt, so only freshness is meaningful.
+      return _isFixFresh ? EmsTrackingHealth.online : EmsTrackingHealth.noSignal;
+    }
+    if (!await Geolocator.isLocationServiceEnabled()) return EmsTrackingHealth.locationOff;
+    final permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+      return EmsTrackingHealth.permissionDenied;
+    }
+    return _isFixFresh ? EmsTrackingHealth.online : EmsTrackingHealth.noSignal;
+  }
 
   Future<void> _resumePersisted() async {
     final prefs = await _prefsInstance();
@@ -183,11 +240,18 @@ class EmsTrackingController extends Notifier<Set<String>> {
         showBackgroundLocationIndicator: true,
         allowBackgroundLocationUpdates: true,
       ),
-    ).listen((position) {
-      for (final patientId in state.toList()) {
-        unawaited(_publishPosition(patientId, position));
-      }
-    });
+    ).listen(
+      (position) {
+        _recordFix();
+        for (final patientId in state.toList()) {
+          unawaited(_publishPosition(patientId, position));
+        }
+      },
+      // A stream error (e.g. location services disabled mid-stream) just
+      // means fixes stop flowing — swallow it so it doesn't go unhandled;
+      // evaluateHealth surfaces the resulting staleness/cause to the chip.
+      onError: (_) {},
+    );
   }
 
   Future<void> _publishPosition(String patientId, Position position) async {
@@ -262,6 +326,9 @@ class EmsTrackingController extends Notifier<Set<String>> {
     final position = await Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, timeLimit: Duration(seconds: 10)),
     );
+    // Covers the web timer, the initial confirming publish, and resume —
+    // a fix genuinely came through here.
+    _recordFix();
     await _functions.httpsCallable('publishEmsLocation').call<Object?>({
       'patientId': patientId,
       'latitude': position.latitude,
@@ -275,3 +342,20 @@ class EmsTrackingController extends Notifier<Set<String>> {
 }
 
 final emsTrackingProvider = NotifierProvider<EmsTrackingController, Set<String>>(EmsTrackingController.new);
+
+/// Live tracking health for the status chip.
+///
+/// [emsTrackingProvider] only records whether tracking was *started*, not
+/// whether GPS is actually delivering — so on its own the chip would stay
+/// "Tracking Online" even after location services are turned off, the
+/// app's permission is revoked, or the vehicle drives out of GPS range,
+/// since none of those touch the tracked set. This re-evaluates on a short
+/// cadence (freshness decays with no new fixes, so it can't be purely
+/// event-driven) and reports the specific cause. autoDispose so it only
+/// runs while a tracking chip is actually on screen. All checks are
+/// on-device — no network/API calls, no added cost.
+final emsTrackingHealthProvider = StreamProvider.autoDispose<EmsTrackingHealth>((ref) async* {
+  final controller = ref.read(emsTrackingProvider.notifier);
+  yield await controller.evaluateHealth();
+  yield* Stream<void>.periodic(const Duration(seconds: 5)).asyncMap((_) => controller.evaluateHealth());
+});

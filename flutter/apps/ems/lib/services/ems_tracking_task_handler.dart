@@ -9,6 +9,13 @@ import '../firebase_options.dart';
 
 const functionsRegion = 'northamerica-northeast2';
 
+/// Marker this isolate sends back to the main isolate (over
+/// sendDataToMain) on each successful location fix, so the main isolate's
+/// EmsTrackingController can keep its freshness clock current even though
+/// the fixes happen over here in a separate process. Consumed by
+/// EmsTrackingController._onTaskData.
+const emsFixReportSignal = 'ems-fix';
+
 /// Must be a top-level (or static) function — this is what
 /// `FlutterForegroundTask.startService(callback: ...)` runs to install the
 /// handler in the dedicated background isolate the foreground service
@@ -61,9 +68,16 @@ class EmsTrackingTaskHandler extends TaskHandler {
       );
     } catch (_) {
       // Same tolerance as the web version: a revoked/unavailable permission
-      // just means this cycle's publish is skipped, not a crash.
+      // just means this cycle's publish is skipped, not a crash. Also means
+      // no fix is reported back, so the main isolate's freshness clock goes
+      // stale and the chip falls back to "No GPS Signal" — the intended
+      // behavior when GPS drops mid-transport.
       return;
     }
+
+    // A fix genuinely came through — let the main isolate know so its
+    // status chip stays "live" (see EmsTrackingController._onTaskData).
+    FlutterForegroundTask.sendDataToMain(emsFixReportSignal);
 
     final functions = FirebaseFunctions.instanceFor(region: functionsRegion);
     for (final patientId in _trackedPatientIds.toList()) {

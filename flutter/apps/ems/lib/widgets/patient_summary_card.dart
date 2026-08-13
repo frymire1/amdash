@@ -74,10 +74,43 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
     }
   }
 
+  // Reflects real tracking health, not just whether tracking was started:
+  // a degraded state (location off, permission revoked, or no GPS fix
+  // coming through) shows a distinct, non-pulsing warning pill instead of
+  // staying "Tracking Online".
+  Widget _trackingPill(bool isTracking, EmsTrackingHealth? health) {
+    if (!isTracking) {
+      return const StatusPill(kind: StatusPillKind.critical, label: 'Tracking Offline', pulsing: false);
+    }
+    // Optimistic default while the first health check resolves (sub-second)
+    // — avoids a flicker to a degraded label before we actually know.
+    return switch (health ?? EmsTrackingHealth.online) {
+      EmsTrackingHealth.online => const StatusPill(kind: StatusPillKind.active, label: 'Tracking Online', pulsing: true),
+      EmsTrackingHealth.locationOff => const StatusPill(
+        kind: StatusPillKind.warning,
+        label: 'Location Off',
+        pulsing: false,
+      ),
+      EmsTrackingHealth.permissionDenied => const StatusPill(
+        kind: StatusPillKind.warning,
+        label: 'Location Permission Off',
+        pulsing: false,
+      ),
+      EmsTrackingHealth.noSignal => const StatusPill(
+        kind: StatusPillKind.warning,
+        label: 'No GPS Signal',
+        pulsing: false,
+      ),
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final patient = widget.uploaded.patient;
     final isTracking = ref.watch(emsTrackingProvider).contains(widget.uploaded.id);
+    // Only meaningful while tracking; skip the watch otherwise so an
+    // untracked card doesn't spin up the health poller.
+    final health = isTracking ? ref.watch(emsTrackingHealthProvider).valueOrNull : null;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -88,11 +121,7 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
           children: [
             Align(
               alignment: Alignment.centerLeft,
-              child: StatusPill(
-                kind: isTracking ? StatusPillKind.active : StatusPillKind.critical,
-                label: isTracking ? 'Tracking Online' : 'Tracking Offline',
-                pulsing: isTracking,
-              ),
+              child: _trackingPill(isTracking, health),
             ),
             const SizedBox(height: 8),
             Text(patient.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
