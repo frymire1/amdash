@@ -58,8 +58,8 @@ class _NavBarState extends ConsumerState<NavBar> {
       title: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Image.asset('assets/logo.png', package: 'amdash_core', height: 26, width: 26),
-          const SizedBox(width: 8),
+          Image.asset('assets/logo.png', package: 'amdash_core', height: 40, width: 40),
+          const SizedBox(width: 3),
           const Text('AmDash'),
         ],
       ),
