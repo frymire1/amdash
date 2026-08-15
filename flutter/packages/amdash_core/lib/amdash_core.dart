@@ -17,6 +17,7 @@ export 'src/theme/route_transitions.dart';
 export 'src/theme/theme_mode_provider.dart';
 export 'src/widgets/app_background.dart';
 export 'src/widgets/dialogs.dart';
+export 'src/widgets/empty_state.dart';
 export 'src/widgets/glass_panel.dart';
 export 'src/widgets/nav_bar.dart';
 export 'src/widgets/offline_banner.dart';

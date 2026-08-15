@@ -62,10 +62,18 @@ class HomeScreen extends ConsumerWidget {
                         // 720px width as patient_upload_screen.dart's form
                         // sections, instead of shrink-wrapping to its own
                         // content width under the outer Column's .start.
-                        data: (patients) => Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [for (final uploaded in patients) PatientSummaryCard(uploaded: uploaded)],
-                        ),
+                        data: (patients) => patients.isEmpty
+                            ? const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 24),
+                                child: PatientsEmptyState(
+                                  title: 'No patients uploaded yet',
+                                  subtitle: 'Tap "Add Patient" above to get started',
+                                ),
+                              )
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [for (final uploaded in patients) PatientSummaryCard(uploaded: uploaded)],
+                              ),
                         loading: () => const Padding(
                           padding: EdgeInsets.symmetric(vertical: 32),
                           child: Center(child: CircularProgressIndicator()),

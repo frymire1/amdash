@@ -32,14 +32,16 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
     );
     if (!confirmed || !mounted) return;
 
-    await ref.read(emsTrackingProvider.notifier).stopTracking(widget.uploaded.id);
-
+    // Flip this before the stopTracking/delete calls below, not after —
+    // stopTracking alone can take a couple of seconds to tear down the
+    // location stream, which is what looked like the button doing nothing.
     setState(() {
       _deleting = true;
       _deleteError = null;
     });
 
     try {
+      await ref.read(emsTrackingProvider.notifier).stopTracking(widget.uploaded.id);
       await ref.read(patientUploadServiceProvider).deletePatient(widget.uploaded.id);
     } catch (error) {
       if (mounted) setState(() => _deleteError = 'Failed to delete patient. Please try again.');
@@ -58,14 +60,14 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
     );
     if (!confirmed || !mounted) return;
 
-    await ref.read(emsTrackingProvider.notifier).stopTracking(widget.uploaded.id);
-
+    // Same ordering fix as _deletePatient — flip before stopTracking/complete.
     setState(() {
       _completing = true;
       _completeError = null;
     });
 
     try {
+      await ref.read(emsTrackingProvider.notifier).stopTracking(widget.uploaded.id);
       await ref.read(patientUploadServiceProvider).completeTransport(widget.uploaded.id);
     } catch (error) {
       if (mounted) setState(() => _completeError = 'Failed to complete transport. Please try again.');
@@ -159,8 +161,13 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
                 ),
                 OutlinedButton.icon(
                   onPressed: _completing ? null : _completeTransport,
+                  style: OutlinedButton.styleFrom(foregroundColor: AppColors.success),
                   icon: _completing
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.success),
+                        )
                       : const Icon(Icons.check_circle),
                   label: Text(_completing ? 'Completing…' : 'Complete Transport'),
                 ),
@@ -168,7 +175,11 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
                   onPressed: _deleting ? null : _deletePatient,
                   style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
                   icon: _deleting
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.danger),
+                        )
                       : const Icon(Icons.delete),
                   label: Text(_deleting ? 'Deleting…' : 'Delete'),
                 ),

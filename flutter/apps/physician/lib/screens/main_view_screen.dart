@@ -54,14 +54,20 @@ class _MainViewScreenState extends State<MainViewScreen> {
             );
           }
 
-          if (_showListOnMobile) {
+          // Also falls back to the list when nothing is selected yet — on
+          // first load there's no patient to view, so land on the list
+          // directly instead of an empty PatientViewer with a button to get
+          // there. The button (below) still shows once a patient is picked.
+          if (_showListOnMobile || _selectedPatient == null) {
             return PatientList(onSelected: _onSelected);
           }
 
-          // The "Patient List" button used to float over PatientViewer via a
-          // Stack, which covered the patient's name — now passed in as
-          // PatientViewer's `leading`, so it sits in its own space above the
-          // name and scrolls away with the rest of the content instead.
+          // Reached only once a patient is selected (see the fallback
+          // above). The "Patient List" button used to float over
+          // PatientViewer via a Stack, which covered the patient's name —
+          // now passed in as PatientViewer's `leading`, so it sits in its
+          // own space above the name and scrolls away with the rest of the
+          // content instead.
           return PatientViewer(
             key: ValueKey(_selectedPatient?.id),
             patient: _selectedPatient,

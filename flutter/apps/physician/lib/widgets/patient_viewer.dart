@@ -194,12 +194,10 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
       return Column(
         children: [
           if (widget.leading != null) Padding(padding: const EdgeInsets.all(16), child: widget.leading),
-          Expanded(
-            child: Center(
-              child: Text(
-                'Select a patient to view details',
-                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-              ),
+          const Expanded(
+            child: PatientsEmptyState(
+              graphic: EmptyStateGraphic.chartPulse,
+              title: 'Select a patient to view details',
             ),
           ),
         ],
