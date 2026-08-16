@@ -1,5 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+/// Must match REGION in functions/src/shared.ts.
+const _functionsRegion = 'northamerica-northeast2';
 
 /// Raw values straight off the upload form — mirrors the shape
 /// `patientForm.getRawValue()` produces in
@@ -51,20 +55,49 @@ const _optionalTopLevelFields = ['location', 'ivSize', 'ivPlacement', 'treatment
 
 /// Mirrors `apps/ems/src/app/services/patient-upload.service.ts`: direct
 /// Firestore writes to `patients` (no Cloud Function — EMS accounts write
-/// this collection directly, per firestore.rules).
+/// this collection directly, per firestore.rules). The one exception is
+/// `name`/`healthcareNumber`, which are always routed through
+/// `encryptPatientFields` (functions/src/patients.ts) first — that
+/// function itself decides encrypt-vs-passthrough from the caller's org,
+/// so this call site never branches on whether Canadian data residency is
+/// even on for the current org.
 class PatientUploadService {
-  PatientUploadService(this._firestore);
+  PatientUploadService(this._firestore, this._functions);
 
   final FirebaseFirestore _firestore;
+  final FirebaseFunctions _functions;
 
-  Map<String, Object?> _patientFields(PatientFormValues value) {
+  Future<Map<String, Object?>> _patientFields(PatientFormValues value) async {
     final hasLocation = value.latitude != null && value.longitude != null;
 
+    final name = value.name.isNotEmpty ? value.name : 'Unknown';
+    final healthcareNumber = value.healthcareNumber.isNotEmpty ? value.healthcareNumber : 'Unknown';
+
+    // Deliberately never falls back to writing the plaintext values above
+    // on failure — that would make Canadian data residency fail silently
+    // exactly when a flaky connection makes it most likely to fail. Lets
+    // the exception propagate; uploadPatient/updatePatient's callers
+    // already surface any failure here as a blocking, retryable error and
+    // stay on the form rather than navigating away.
+    final Object? encryptedName;
+    final Object? encryptedHealthcareNumber;
+    try {
+      final callable = _functions.httpsCallable('encryptPatientFields');
+      final result = await callable.call<Map<Object?, Object?>>({
+        'name': name,
+        'healthcareNumber': healthcareNumber,
+      });
+      encryptedName = result.data['name'];
+      encryptedHealthcareNumber = result.data['healthcareNumber'];
+    } catch (error) {
+      throw PatientFieldEncryptionException(error);
+    }
+
     return {
-      'name': value.name.isNotEmpty ? value.name : 'Unknown',
+      'name': encryptedName,
       'gender': value.gender.isNotEmpty ? value.gender : 'Unknown',
       'age': value.age ?? 'Unknown',
-      'healthcareNumber': value.healthcareNumber.isNotEmpty ? value.healthcareNumber : 'Unknown',
+      'healthcareNumber': encryptedHealthcareNumber,
       'destination': value.destination.isNotEmpty ? value.destination : 'Unknown',
       'vitals': {
         'heartRate': value.heartRate ?? 'Unknown',
@@ -95,8 +128,9 @@ class PatientUploadService {
     debugCallCount++;
     debugCallStacks.add(StackTrace.current);
 
+    final fields = await _patientFields(value);
     final docRef = await _firestore.collection('patients').add({
-      ..._patientFields(value),
+      ...fields,
       // Stamped from the caller's own org, never client-chosen — matches
       // firestore.rules' create check.
       'organizationId': organizationId,
@@ -112,7 +146,7 @@ class PatientUploadService {
   // organizationId is deliberately never included — rules block changing
   // it post-create.
   Future<void> updatePatient(String id, PatientFormValues value) async {
-    final fields = _patientFields(value);
+    final fields = await _patientFields(value);
     final update = <String, Object?>{...fields, 'updatedAt': FieldValue.serverTimestamp()};
     for (final field in _optionalTopLevelFields) {
       if (!fields.containsKey(field)) {
@@ -134,6 +168,23 @@ class PatientUploadService {
   }
 }
 
+/// Thrown when `encryptPatientFields` fails — deliberately never caught
+/// and silently degraded to a plaintext write (see `_patientFields`'s own
+/// comment). The upload/edit screen's existing generic error handling
+/// already surfaces this as a blocking, retryable error and keeps the
+/// user on the form rather than navigating away.
+class PatientFieldEncryptionException implements Exception {
+  PatientFieldEncryptionException(this.cause);
+
+  final Object cause;
+
+  @override
+  String toString() => 'Failed to prepare patient fields for saving: $cause';
+}
+
 final patientUploadServiceProvider = Provider<PatientUploadService>((ref) {
-  return PatientUploadService(FirebaseFirestore.instance);
+  return PatientUploadService(
+    FirebaseFirestore.instance,
+    FirebaseFunctions.instanceFor(region: _functionsRegion),
+  );
 });

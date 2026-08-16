@@ -27,7 +27,7 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
     final confirmed = await showConfirmDialog(
       context,
       title: 'Delete patient?',
-      message: 'Delete ${widget.uploaded.patient.name}? This cannot be undone.',
+      message: 'Delete ${widget.uploaded.patient.name.display()}? This cannot be undone.',
       confirmLabel: 'Delete',
     );
     if (!confirmed || !mounted) return;
@@ -55,7 +55,7 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
       context,
       title: 'Complete transport?',
       message:
-          "Mark ${widget.uploaded.patient.name}'s transport as complete? Live tracking will stop and it will no longer appear as active.",
+          "Mark ${widget.uploaded.patient.name.display()}'s transport as complete? Live tracking will stop and it will no longer appear as active.",
       confirmLabel: 'Complete Transport',
     );
     if (!confirmed || !mounted) return;
@@ -126,9 +126,10 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
               child: _trackingPill(isTracking, health),
             ),
             const SizedBox(height: 8),
-            Text(patient.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            Text(
-              'Healthcare #${patient.healthcareNumber}',
+            PatientFieldText(patient.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            PatientFieldText(
+              patient.healthcareNumber,
+              prefix: 'Healthcare #',
               style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 8),

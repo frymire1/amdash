@@ -6,8 +6,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// re-subscribes whenever the signed-in user's own org changes, listing
 /// only this org's *active* patients, newest first. Completed/archived
 /// patients never show up here — there's no completed-patients view in
-/// this app.
-final physicianPatientsProvider = StreamProvider<List<Patient>>((ref) async* {
+/// this app. Private/raw — [physicianPatientsProvider] below is the one
+/// widgets should actually watch; it wraps this with decrypted-field
+/// splicing.
+final _rawPhysicianPatientsProvider = StreamProvider<List<Patient>>((ref) async* {
   final profileAsync = ref.watch(userProfileProvider);
 
   // userProfileProvider mid-rebuild (e.g. right after a fresh sign-in
@@ -40,4 +42,17 @@ final physicianPatientsProvider = StreamProvider<List<Patient>>((ref) async* {
   yield* query.snapshots(includeMetadataChanges: true).where((snapshot) => !snapshot.metadata.isFromCache).map(
     (snapshot) => snapshot.docs.map((doc) => Patient.fromFirestore(doc.id, doc.data())).toList(),
   );
+});
+
+/// The provider every widget actually watches. Splices in whatever's
+/// already decrypted in `patientFieldCacheProvider` (amdash_core) and
+/// kicks a background pull for anything encrypted and still missing —
+/// the list renders immediately with "Decrypting…" placeholders rather
+/// than waiting on that pull. Riverpod's `Provider<AsyncValue<T>>` here
+/// resolves to the exact same `AsyncValue<List<Patient>>` shape a
+/// `StreamProvider<List<Patient>>` would, so this is a drop-in swap —
+/// nothing downstream needed to change how it reads this provider.
+final physicianPatientsProvider = Provider<AsyncValue<List<Patient>>>((ref) {
+  final rawAsync = ref.watch(_rawPhysicianPatientsProvider);
+  return rawAsync.whenData((patients) => withCachedDecryptedFields(ref, patients));
 });

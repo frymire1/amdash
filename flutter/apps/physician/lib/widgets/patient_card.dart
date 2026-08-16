@@ -54,8 +54,8 @@ class PatientCard extends StatelessWidget {
                   ),
                 ),
               ],
-              Text(
-                isProvidedValue(patient.name) ? patient.name : 'Not added yet',
+              PatientFieldText(
+                patient.name,
                 style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 2),
@@ -64,8 +64,9 @@ class PatientCard extends StatelessWidget {
                 style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
               const SizedBox(height: 4),
-              Text(
-                'Healthcare #: ${_fallback(patient.healthcareNumber)}',
+              PatientFieldText(
+                patient.healthcareNumber,
+                prefix: 'Healthcare #: ',
                 style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
               Text(

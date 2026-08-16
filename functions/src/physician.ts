@@ -1,5 +1,6 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+import { logger } from 'firebase-functions/v2';
 import { defineSecret } from 'firebase-functions/params';
 import { getMessaging } from 'firebase-admin/messaging';
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
@@ -7,6 +8,7 @@ import { DirectionsApiResult } from './classes/directions-api-result';
 import { FetchDirectionsRequest } from './classes/fetch-directions-request';
 import { FetchDirectionsResponse } from './classes/fetch-directions-response';
 import { REGION, getCallerProfile } from './shared';
+import { decryptField, isEncryptedField } from './kms';
 
 const DIRECTIONS_API_KEY = defineSecret('DIRECTIONS_API_KEY');
 
@@ -40,7 +42,7 @@ export const sendNewPatientAlerts = onDocumentCreated({ document: 'patients/{pat
     tokens: allTokens,
     data: {
       title: 'New patient inbound',
-      body: typeof patient['name'] === 'string' && patient['name'] ? patient['name'] : 'A new patient has been uploaded.',
+      body: await notificationBody(patient['name']),
     },
   });
 
@@ -73,6 +75,26 @@ export const sendNewPatientAlerts = onDocumentCreated({ document: 'patients/{pat
 
 function isUnregisteredError(error: { code?: string } | undefined): boolean {
   return error?.code === 'messaging/registration-token-not-registered';
+}
+
+// Handles the plain-string case (the common one — no Canadian data
+// residency requested for this org, or a legacy record) and the
+// Cloud KMS-encrypted case (functions/src/kms.ts) — this function already
+// runs server-side with KMS access, so decrypting here just restores the
+// real name in the notification instead of falling back to the generic
+// string. A decrypt failure degrades to that same generic fallback rather
+// than failing the whole notification send.
+async function notificationBody(rawName: unknown): Promise<string> {
+  if (typeof rawName === 'string' && rawName) return rawName;
+  if (isEncryptedField(rawName)) {
+    try {
+      const decrypted = await decryptField(rawName);
+      if (decrypted) return decrypted;
+    } catch (error) {
+      logger.error('Failed to decrypt patient name for a new-patient alert', error);
+    }
+  }
+  return 'A new patient has been uploaded.';
 }
 
 // Proxies the Directions REST API server-side. The classic Directions API

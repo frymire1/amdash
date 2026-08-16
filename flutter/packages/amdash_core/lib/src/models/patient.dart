@@ -54,6 +54,39 @@ class PatientLocation {
   final String address;
 }
 
+/// Represents `patient.name`/`patient.healthcareNumber` as read off
+/// Firestore — either a plain string (the common case: no Canadian data
+/// residency requested for this org, or a legacy record written before
+/// encryption existed) or a Cloud KMS envelope-encrypted blob (shape
+/// `{ __enc: 1, ... }` — see `functions/src/kms.ts`'s `EncryptedField`)
+/// not yet decrypted. Call sites branch on [isEncrypted]/[plaintext]
+/// rather than assuming a raw `String` or guessing a value out of the raw
+/// JSON shape themselves. [isProvidedValue] below should only ever be
+/// called on a resolved [plaintext], never on this wrapper directly.
+class PatientField {
+  const PatientField._({this.plaintext, required this.isEncrypted});
+
+  factory PatientField.fromFirestore(Object? value) {
+    if (value is String) return PatientField._(plaintext: value, isEncrypted: false);
+    if (value is Map) return const PatientField._(isEncrypted: true);
+    return const PatientField._(plaintext: '', isEncrypted: false);
+  }
+
+  /// A `PatientField` already holding a known plaintext string — used to
+  /// splice a decrypted value (from `PatientDecryptionService`'s cache)
+  /// back into a [Patient] for display, without re-touching Firestore.
+  const PatientField.resolved(String value) : plaintext = value, isEncrypted = false;
+
+  /// The real value, once known — always non-null for a plain/legacy
+  /// field; null only while [isEncrypted] and not yet resolved by
+  /// `PatientDecryptionService`'s cache (see amdash_core's
+  /// `decryptedPatientFieldCacheProvider`).
+  final String? plaintext;
+  final bool isEncrypted;
+
+  bool get isResolved => plaintext != null;
+}
+
 /// Mirrors `libs/patients/src/lib/classes/patient.ts`. `status`/
 /// `submittedAt` are Firestore-only fields the shared TS interface omits
 /// but the physician/EMS query/order clauses rely on (see
@@ -81,10 +114,10 @@ class Patient {
     final locationData = data['location'] as Map<String, Object?>?;
     return Patient(
       id: id,
-      name: data['name'] as String? ?? '',
+      name: PatientField.fromFirestore(data['name']),
       gender: data['gender'] as String? ?? '',
       age: data['age'],
-      healthcareNumber: data['healthcareNumber'] as String? ?? '',
+      healthcareNumber: PatientField.fromFirestore(data['healthcareNumber']),
       vitals: PatientVitals.fromFirestore(vitalsData),
       location: locationData == null
           ? null
@@ -98,11 +131,32 @@ class Patient {
     );
   }
 
+  /// Returns a copy with [name]/[healthcareNumber] replaced by resolved
+  /// plaintext — used once `PatientDecryptionService` returns a value for
+  /// a patient whose fields arrived encrypted.
+  Patient withDecryptedFields({String? name, String? healthcareNumber}) {
+    return Patient(
+      id: id,
+      name: name != null ? PatientField.resolved(name) : this.name,
+      gender: gender,
+      age: age,
+      healthcareNumber: healthcareNumber != null ? PatientField.resolved(healthcareNumber) : this.healthcareNumber,
+      vitals: vitals,
+      location: location,
+      notes: notes,
+      destination: destination,
+      ivSize: ivSize,
+      ivPlacement: ivPlacement,
+      treatment: treatment,
+      status: status,
+    );
+  }
+
   final String? id;
-  final String name;
+  final PatientField name;
   final String gender;
   final Object? age;
-  final String healthcareNumber;
+  final PatientField healthcareNumber;
   final PatientVitals vitals;
   final PatientLocation? location;
   final String? notes;
@@ -111,6 +165,28 @@ class Patient {
   final String? ivPlacement;
   final String? treatment;
   final String? status;
+}
+
+/// The single place every display site should go through for
+/// `patient.name`/`patient.healthcareNumber` — centralizes the
+/// "Decrypting…"/blank/real-value tri-state so it isn't hand-rolled
+/// differently across patient_card.dart/patient_viewer.dart/
+/// patient_summary_card.dart.
+extension PatientFieldDisplay on PatientField {
+  /// [notAddedText] lets call sites keep their own copy for the "blank"
+  /// case (different screens phrase it differently — e.g. "Not added yet"
+  /// vs. "Not added by EMS yet"); the "still decrypting" case is always
+  /// the same message everywhere.
+  String display({String notAddedText = 'Not added yet'}) {
+    final value = plaintext;
+    if (value == null) return 'Decrypting…';
+    return isProvidedValue(value) ? value : notAddedText;
+  }
+
+  bool get isProvided {
+    final value = plaintext;
+    return value != null && isProvidedValue(value);
+  }
 }
 
 /// Mirrors the `isProvided()` helper duplicated in

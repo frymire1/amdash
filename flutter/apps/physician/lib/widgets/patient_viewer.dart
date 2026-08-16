@@ -267,8 +267,9 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
             Align(alignment: Alignment.centerLeft, child: widget.leading),
             const SizedBox(height: 12),
           ],
-          Text(
-            isProvidedValue(patient.name) ? patient.name : 'Not added by EMS yet',
+          PatientFieldText(
+            patient.name,
+            notAddedText: 'Not added by EMS yet',
             style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
           ),
           Text.rich(
@@ -291,8 +292,10 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
               ],
             ),
           ),
-          Text(
-            'Healthcare #: ${isProvidedValue(patient.healthcareNumber) ? patient.healthcareNumber : 'Not added by EMS yet'}',
+          PatientFieldText(
+            patient.healthcareNumber,
+            prefix: 'Healthcare #: ',
+            notAddedText: 'Not added by EMS yet',
             style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 16),

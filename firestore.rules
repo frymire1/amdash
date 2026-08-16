@@ -37,6 +37,26 @@ service cloud.firestore {
       return isSignedIn() && (role in callerDoc().get('role', []));
     }
 
+    // Same get()-another-document pattern as callerDoc() above, applied to
+    // organizations/{orgId} instead of the caller's own profile.
+    function orgRequiresCmek(orgId) {
+      return get(/databases/$(database)/documents/organizations/$(orgId)).data.get('cmekRequested', false) == true;
+    }
+
+    // Defense-in-depth for the patients rules below: a shape check, not a
+    // cryptographic guarantee (rules can't verify a blob actually decrypts
+    // correctly, only that it looks like one) — see functions/src/kms.ts's
+    // EncryptedField for what `__enc: 1` means. Real value is that even a
+    // bypassed/buggy EMS client can't silently write plaintext name/
+    // healthcareNumber for an org that requested Canadian data residency;
+    // the actual encryption decision still lives server-side in
+    // functions/src/patients.ts's encryptPatientFields.
+    function fieldsRespectCmek(data) {
+      return !orgRequiresCmek(data.organizationId)
+        || (data.name is map && data.name.get('__enc', null) == 1
+            && data.healthcareNumber is map && data.healthcareNumber.get('__enc', null) == 1);
+    }
+
     // Every user's own profile lives here, including their assigned `role`
     // and `organizationId`. Both are only ever set by Cloud Functions (Admin
     // SDK, bypasses these rules) — clients are explicitly blocked from
@@ -80,10 +100,13 @@ service cloud.firestore {
     // active transport straight through the SDK, bypassing the app UI.
     match /patients/{patientId} {
       allow read: if isSuperAdmin() || sameOrgAsCaller(resource.data.get('organizationId', null));
-      allow create: if callerHasRole('ems') && sameOrgAsCaller(request.resource.data.organizationId);
+      allow create: if callerHasRole('ems')
+        && sameOrgAsCaller(request.resource.data.organizationId)
+        && fieldsRespectCmek(request.resource.data);
       allow update: if callerHasRole('ems')
         && sameOrgAsCaller(resource.data.get('organizationId', null))
-        && request.resource.data.organizationId == resource.data.organizationId;
+        && request.resource.data.organizationId == resource.data.organizationId
+        && fieldsRespectCmek(request.resource.data);
       allow delete: if callerHasRole('ems') && sameOrgAsCaller(resource.data.get('organizationId', null));
     }
 

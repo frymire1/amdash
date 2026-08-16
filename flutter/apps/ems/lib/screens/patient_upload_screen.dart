@@ -114,10 +114,8 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
 
     final patient = uploaded.patient;
     _formPrefilled = true;
-    _nameController.text = patient.name;
     _gender = _genders.contains(patient.gender) ? patient.gender : null;
     _ageController.text = patient.age is num ? '${patient.age}' : '';
-    _healthcareNumberController.text = patient.healthcareNumber;
     _destination = patient.destination;
     _heartRateController.text = patient.vitals.heartRate is num ? '${patient.vitals.heartRate}' : '';
     if (isProvidedValue(patient.vitals.bloodPressure)) {
@@ -138,6 +136,31 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     _ivPlacement = patient.ivPlacement;
     _treatmentController.text = patient.treatment ?? '';
     _notesController.text = patient.notes ?? '';
+
+    // name/healthcareNumber are always pulled fresh here rather than read
+    // off patient.name/patient.healthcareNumber (which may be a stale
+    // cache hit, or still unresolved if nothing else on screen has
+    // decrypted this patient yet) — a wrong/stale prefill on an edit form
+    // headed back out to a hospital is a correctness issue, not a UX
+    // nicety. Fire-and-forget; results land via setState once resolved.
+    _prefillDecryptedFields(_editingId!);
+  }
+
+  Future<void> _prefillDecryptedFields(String patientId) async {
+    try {
+      final resolved = await ref.read(patientDecryptionServiceProvider).decryptFields([patientId]);
+      final fields = resolved[patientId];
+      if (mounted && fields != null) {
+        setState(() {
+          _nameController.text = fields.name ?? '';
+          _healthcareNumberController.text = fields.healthcareNumber ?? '';
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _errorMessage = "Failed to load this patient's name/healthcare number. Please try again.");
+      }
+    }
   }
 
   num? _parseNum(String text) => text.isEmpty ? null : num.tryParse(text);

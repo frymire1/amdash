@@ -23,6 +23,7 @@ import { SetOrganizationCountryRequest } from './classes/set-organization-countr
 import { SetOrganizationCmekRequest } from './classes/set-organization-cmek-request';
 import { GeocodeResult } from './classes/geocode-result';
 import { REGION, findUserByEmail, getCallerProfile } from './shared';
+import { getOrCreateOrgKey } from './kms';
 import { RESEND_API_KEY, sendWelcomeEmail } from './email';
 
 const GEOCODING_API_KEY = defineSecret('GEOCODING_API_KEY');
@@ -705,16 +706,15 @@ export const setOrganizationCountry = onCall<SetOrganizationCountryRequest>({ re
   return { country };
 });
 
-// Records a request for Canada-based Cloud KMS data residency — this
-// does NOT itself change how any data is stored. Firestore's native CMEK
-// applies to a whole database and can only be set at creation time, so it
-// can't be toggled per-org on the shared database this app runs on;
-// actually provisioning per-org encryption is a separate infrastructure
-// project. This flag is the honest version of that ask: it records intent
-// and is visible to admins as "requested," not "active." Restricted to
-// orgs with country 'CA' — the whole point of the flag — even though the
-// client UI already gates on this, since a client-side gate alone isn't
-// a real guarantee.
+// Turns Canada-based Cloud KMS data residency on/off for the caller's org.
+// Firestore's own CMEK applies to a whole database and can only be set at
+// creation time, so it can't be toggled per-org on the shared database
+// this app runs on — instead, patient.name/healthcareNumber get
+// application-level envelope encryption (see kms.ts/patients.ts) gated on
+// this flag, with a dedicated Cloud KMS key created per org on first
+// opt-in. Restricted to orgs with country 'CA' — the whole point of the
+// flag — checked server-side even though the client UI already gates on
+// this, since a client-side gate alone isn't a real guarantee.
 export const setOrganizationCmekPreference = onCall<SetOrganizationCmekRequest>({ region: REGION }, async (request) => {
   const profile = await getCallerProfile(request.auth?.uid);
   requireAdmin(profile, 'Only admins can change organization settings.');
@@ -725,6 +725,8 @@ export const setOrganizationCmekPreference = onCall<SetOrganizationCmekRequest>(
   }
 
   const orgRef = getFirestore().collection('organizations').doc(profile.organizationId as string);
+  const update: Record<string, unknown> = { cmekRequested };
+
   if (cmekRequested) {
     const orgDoc = await orgRef.get();
     if (orgDoc.data()?.['country'] !== 'CA') {
@@ -733,9 +735,22 @@ export const setOrganizationCmekPreference = onCall<SetOrganizationCmekRequest>(
         'Canadian data residency can only be requested for organizations with country set to Canada.',
       );
     }
+
+    // Idempotent — a re-toggle (off then on) reuses the same org key
+    // rather than minting a new one every time.
+    try {
+      update['kmsKeyName'] = await getOrCreateOrgKey(profile.organizationId as string);
+    } catch (error) {
+      logger.error('Failed to provision the Cloud KMS key for organization', { organizationId: profile.organizationId, error });
+      throw new HttpsError(
+        'internal',
+        "Couldn't set up the encryption key for this organization. This usually means the Cloud KMS key ring " +
+          "hasn't been provisioned yet — contact support before retrying.",
+      );
+    }
   }
 
-  await orgRef.update({ cmekRequested });
+  await orgRef.update(update);
 
   await logAudit({
     action: 'organization.setCmekPreference',
