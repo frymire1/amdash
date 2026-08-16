@@ -44,6 +44,7 @@ const auditActionLabels = {
   'user.roleAdd': 'Assigned role',
   'user.roleRemove': 'Removed role',
   'hospital.create': 'Added hospital',
+  'hospital.update': 'Updated hospital',
   'hospital.delete': 'Deleted hospital',
   'organization.create': 'Created organization',
   'organization.setRetention': 'Changed data retention',

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/admin_service.dart';
 import 'admin_page.dart';
+import 'edit_hospital_dialog.dart';
 
 /// Hospital management, embedded in [OrganizationSettingsScreen] rather
 /// than living on its own route/tab — hospitals are an org-level setting
@@ -129,7 +130,7 @@ class _HospitalManagementSectionState extends ConsumerState<HospitalManagementSe
                 const EmptyState(title: 'No hospitals yet', subtitle: 'Add a hospital above to get started')
               else
                 Table(
-                  columnWidths: const {0: FlexColumnWidth(2), 1: FlexColumnWidth(3), 2: FixedColumnWidth(56)},
+                  columnWidths: const {0: FlexColumnWidth(2), 1: FlexColumnWidth(3), 2: FixedColumnWidth(96)},
                   border: TableBorder(horizontalInside: BorderSide(color: context.palette.border)),
                   children: [
                     TableRow(
@@ -146,18 +147,32 @@ class _HospitalManagementSectionState extends ConsumerState<HospitalManagementSe
                           _cell(hospital.address),
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: _deletingId == hospital.id
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  )
-                                : IconButton(
-                                    key: Key('delete_hospital_${hospital.name}'),
-                                    onPressed: () => _deleteHospital(hospital.id),
-                                    icon: const Icon(Icons.delete_outline),
-                                    tooltip: 'Delete',
-                                  ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  key: Key('edit_hospital_${hospital.name}'),
+                                  onPressed: () => showEditHospitalDialog(context, hospital),
+                                  icon: const Icon(Icons.edit_outlined),
+                                  tooltip: 'Edit',
+                                ),
+                                _deletingId == hospital.id
+                                    ? const Padding(
+                                        padding: EdgeInsets.all(8),
+                                        child: SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        ),
+                                      )
+                                    : IconButton(
+                                        key: Key('delete_hospital_${hospital.name}'),
+                                        onPressed: () => _deleteHospital(hospital.id),
+                                        icon: const Icon(Icons.delete_outline),
+                                        tooltip: 'Delete',
+                                      ),
+                              ],
+                            ),
                           ),
                         ],
                       ),

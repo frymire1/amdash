@@ -110,6 +110,28 @@ class AdminService {
     );
   }
 
+  Future<Hospital> updateHospital({required String hospitalId, String? name, String? address}) async {
+    final callable = _functions.httpsCallable('updateHospital');
+    final result = await callable.call<Map<Object?, Object?>>({
+      'hospitalId': hospitalId,
+      'name': ?name,
+      'address': ?address,
+    });
+    final data = result.data;
+    return Hospital(
+      id: data['id'] as String? ?? '',
+      name: data['name'] as String? ?? '',
+      address: data['address'] as String? ?? '',
+      latitude: (data['latitude'] as num?)?.toDouble() ?? 0,
+      longitude: (data['longitude'] as num?)?.toDouble() ?? 0,
+      // Not returned by updateHospital (see createHospital's identical gap
+      // just above) — harmless here since no caller reads this field back;
+      // hospitalsProvider's live Firestore stream is the real source of
+      // truth for the table.
+      organizationId: '',
+    );
+  }
+
   Future<void> deleteHospital(String hospitalId) {
     return _functions.httpsCallable('deleteHospital').call<Map<Object?, Object?>>({
       'hospitalId': hospitalId,

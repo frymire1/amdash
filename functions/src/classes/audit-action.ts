@@ -11,6 +11,7 @@ export type AuditAction =
   | 'user.roleAdd'
   | 'user.roleRemove'
   | 'hospital.create'
+  | 'hospital.update'
   | 'hospital.delete'
   | 'organization.create'
   | 'organization.setRetention';

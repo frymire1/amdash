@@ -15,6 +15,7 @@ import { DeleteUserRequest } from './classes/delete-user-request';
 import { SetUserDisabledRequest } from './classes/set-user-disabled-request';
 import { ResendInviteRequest } from './classes/resend-invite-request';
 import { CreateHospitalRequest } from './classes/create-hospital-request';
+import { UpdateHospitalRequest } from './classes/update-hospital-request';
 import { DeleteHospitalRequest } from './classes/delete-hospital-request';
 import { CreateOrganizationRequest } from './classes/create-organization-request';
 import { SetOrganizationRetentionRequest } from './classes/set-organization-retention-request';
@@ -500,6 +501,58 @@ export const createHospital = onCall<CreateHospitalRequest>(
     });
 
     return { id: docRef.id, name, address, latitude, longitude };
+  },
+);
+
+// Re-geocodes if the address changes (same helper createHospital uses) —
+// lat/lng have to stay in sync with the displayed address, not just the
+// text itself, since the physician app's distance-sort feature reads
+// those coordinates directly.
+export const updateHospital = onCall<UpdateHospitalRequest>(
+  { region: REGION, secrets: [GEOCODING_API_KEY] },
+  async (request) => {
+    const profile = await getCallerProfile(request.auth?.uid);
+    requireAdmin(profile, 'Only admins can edit hospitals.');
+
+    const { hospitalId, name, address } = request.data;
+    if (!hospitalId || (!name && !address)) {
+      throw new HttpsError('invalid-argument', 'A hospitalId and at least one of name or address are required.');
+    }
+
+    const hospitalRef = getFirestore().collection('hospitals').doc(hospitalId);
+    const hospitalDoc = await hospitalRef.get();
+    if (!hospitalDoc.exists) {
+      throw new HttpsError('not-found', 'That hospital no longer exists.');
+    }
+    const hospitalData = hospitalDoc.data() ?? {};
+    requireSameOrg(profile, hospitalData['organizationId'], 'That hospital belongs to a different organization.');
+
+    const update: Record<string, string | number> = {};
+    if (name) update['name'] = name;
+    if (address) {
+      const { latitude, longitude } = await geocodeAddress(address);
+      update['address'] = address;
+      update['latitude'] = latitude;
+      update['longitude'] = longitude;
+    }
+
+    await hospitalRef.update(update);
+
+    await logAudit({
+      action: 'hospital.update',
+      actor: profile,
+      organizationId: profile.organizationId,
+      target: hospitalId,
+      details: { name: update['name'], address: update['address'] },
+    });
+
+    return {
+      id: hospitalId,
+      name: update['name'] ?? hospitalData['name'] ?? '',
+      address: update['address'] ?? hospitalData['address'] ?? '',
+      latitude: update['latitude'] ?? hospitalData['latitude'] ?? 0,
+      longitude: update['longitude'] ?? hospitalData['longitude'] ?? 0,
+    };
   },
 );
 
