@@ -143,18 +143,36 @@ class AdminService {
     required String adminEmail,
     required String adminFirstName,
     required String adminLastName,
+    required String country,
   }) {
     return _functions.httpsCallable('createOrganization').call<Map<Object?, Object?>>({
       'organizationName': organizationName,
       'adminEmail': adminEmail,
       'adminFirstName': adminFirstName,
       'adminLastName': adminLastName,
+      'country': country,
     });
   }
 
   Future<void> setOrganizationRetention(bool retainAllData) {
     return _functions.httpsCallable('setOrganizationRetention').call<Map<Object?, Object?>>({
       'retainAllData': retainAllData,
+    });
+  }
+
+  Future<void> setOrganizationCountry(String country) {
+    return _functions.httpsCallable('setOrganizationCountry').call<Map<Object?, Object?>>({
+      'country': country,
+    });
+  }
+
+  // Records a *request* for Canada-based Cloud KMS data residency — see
+  // setOrganizationCmekPreference's doc comment in admin.ts for why this
+  // isn't (and can't be, on Firestore's shared-database model) an actual
+  // live encryption toggle.
+  Future<void> setOrganizationCmekPreference(bool cmekRequested) {
+    return _functions.httpsCallable('setOrganizationCmekPreference').call<Map<Object?, Object?>>({
+      'cmekRequested': cmekRequested,
     });
   }
 }

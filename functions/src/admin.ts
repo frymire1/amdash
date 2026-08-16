@@ -19,6 +19,8 @@ import { UpdateHospitalRequest } from './classes/update-hospital-request';
 import { DeleteHospitalRequest } from './classes/delete-hospital-request';
 import { CreateOrganizationRequest } from './classes/create-organization-request';
 import { SetOrganizationRetentionRequest } from './classes/set-organization-retention-request';
+import { SetOrganizationCountryRequest } from './classes/set-organization-country-request';
+import { SetOrganizationCmekRequest } from './classes/set-organization-cmek-request';
 import { GeocodeResult } from './classes/geocode-result';
 import { REGION, findUserByEmail, getCallerProfile } from './shared';
 import { RESEND_API_KEY, sendWelcomeEmail } from './email';
@@ -593,11 +595,12 @@ export const createOrganization = onCall<CreateOrganizationRequest>({ region: RE
   const profile = await getCallerProfile(request.auth?.uid);
   requireSuperAdmin(profile, 'Only the super-admin can create organizations.');
 
-  const { organizationName, adminEmail, adminFirstName, adminLastName } = request.data;
-  if (!organizationName || !adminEmail || !adminFirstName || !adminLastName) {
+  const { organizationName, adminEmail, adminFirstName, adminLastName, country } = request.data;
+  const validCountries = ['CA', 'US', 'GB', 'AU', 'OTHER'];
+  if (!organizationName || !adminEmail || !adminFirstName || !adminLastName || !validCountries.includes(country)) {
     throw new HttpsError(
       'invalid-argument',
-      'An organization name and the first admin\'s email, first name, and last name are required.',
+      'An organization name, country, and the first admin\'s email, first name, and last name are required.',
     );
   }
 
@@ -618,7 +621,7 @@ export const createOrganization = onCall<CreateOrganizationRequest>({ region: RE
 
   const orgRef = await getFirestore()
     .collection('organizations')
-    .add({ name: organizationName, createdAt: FieldValue.serverTimestamp(), createdBy: request.auth?.uid });
+    .add({ name: organizationName, country, createdAt: FieldValue.serverTimestamp(), createdBy: request.auth?.uid });
 
   await getFirestore().collection('users').doc(newAdmin.uid).set({
     email: adminEmail,
@@ -635,7 +638,7 @@ export const createOrganization = onCall<CreateOrganizationRequest>({ region: RE
     actor: profile,
     organizationId: orgRef.id,
     target: newAdmin.uid,
-    details: { organizationName, adminEmail },
+    details: { organizationName, adminEmail, country },
   });
 
   return {
@@ -643,6 +646,7 @@ export const createOrganization = onCall<CreateOrganizationRequest>({ region: RE
     organizationName,
     adminUid: newAdmin.uid,
     adminEmail,
+    country,
   };
 });
 
@@ -674,13 +678,83 @@ export const setOrganizationRetention = onCall<SetOrganizationRetentionRequest>(
   },
 );
 
+// Lets an org's own admin set/correct their org's country — country is
+// required at createOrganization time now, but every org created before
+// this feature shipped has none, and this is how those get backfilled
+// (rather than a one-off migration script) without needing super-admin
+// involvement each time.
+export const setOrganizationCountry = onCall<SetOrganizationCountryRequest>({ region: REGION }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+  requireAdmin(profile, 'Only admins can change organization settings.');
+
+  const { country } = request.data;
+  const validCountries = ['CA', 'US', 'GB', 'AU', 'OTHER'];
+  if (!validCountries.includes(country)) {
+    throw new HttpsError('invalid-argument', `country must be one of: ${validCountries.join(', ')}.`);
+  }
+
+  await getFirestore().collection('organizations').doc(profile.organizationId as string).update({ country });
+
+  await logAudit({
+    action: 'organization.setCountry',
+    actor: profile,
+    organizationId: profile.organizationId,
+    details: { country },
+  });
+
+  return { country };
+});
+
+// Records a request for Canada-based Cloud KMS data residency — this
+// does NOT itself change how any data is stored. Firestore's native CMEK
+// applies to a whole database and can only be set at creation time, so it
+// can't be toggled per-org on the shared database this app runs on;
+// actually provisioning per-org encryption is a separate infrastructure
+// project. This flag is the honest version of that ask: it records intent
+// and is visible to admins as "requested," not "active." Restricted to
+// orgs with country 'CA' — the whole point of the flag — even though the
+// client UI already gates on this, since a client-side gate alone isn't
+// a real guarantee.
+export const setOrganizationCmekPreference = onCall<SetOrganizationCmekRequest>({ region: REGION }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+  requireAdmin(profile, 'Only admins can change organization settings.');
+
+  const { cmekRequested } = request.data;
+  if (typeof cmekRequested !== 'boolean') {
+    throw new HttpsError('invalid-argument', 'cmekRequested must be a boolean.');
+  }
+
+  const orgRef = getFirestore().collection('organizations').doc(profile.organizationId as string);
+  if (cmekRequested) {
+    const orgDoc = await orgRef.get();
+    if (orgDoc.data()?.['country'] !== 'CA') {
+      throw new HttpsError(
+        'failed-precondition',
+        'Canadian data residency can only be requested for organizations with country set to Canada.',
+      );
+    }
+  }
+
+  await orgRef.update({ cmekRequested });
+
+  await logAudit({
+    action: 'organization.setCmekPreference',
+    actor: profile,
+    organizationId: profile.organizationId,
+    details: { cmekRequested },
+  });
+
+  return { cmekRequested };
+});
+
 // Returns the caller's org's most recent audit entries — admin.ts's own
 // mutations only (createUser/updateUser/deleteUser/setUserDisabled/
-// resendInvite/setUserRole/removeUserRole/createHospital/deleteHospital/
-// createOrganization/setOrganizationRetention); EMS/physician actions
-// aren't logged here. No client ever reads the auditLog collection
-// directly (see firestore.rules) — this is the only read path, same
-// pattern as listUsersWithRoles.
+// resendInvite/setUserRole/removeUserRole/createHospital/updateHospital/
+// deleteHospital/createOrganization/setOrganizationRetention/
+// setOrganizationCountry/setOrganizationCmekPreference); EMS/physician
+// actions aren't logged here. No client ever reads the auditLog
+// collection directly (see firestore.rules) — this is the only read
+// path, same pattern as listUsersWithRoles.
 export const listAuditLog = onCall({ region: REGION }, async (request) => {
   const profile = await getCallerProfile(request.auth?.uid);
   requireAdmin(profile, 'Only admins can view the audit log.');

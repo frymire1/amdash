@@ -14,4 +14,6 @@ export type AuditAction =
   | 'hospital.update'
   | 'hospital.delete'
   | 'organization.create'
-  | 'organization.setRetention';
+  | 'organization.setRetention'
+  | 'organization.setCountry'
+  | 'organization.setCmekPreference';

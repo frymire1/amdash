@@ -48,4 +48,6 @@ const auditActionLabels = {
   'hospital.delete': 'Deleted hospital',
   'organization.create': 'Created organization',
   'organization.setRetention': 'Changed data retention',
+  'organization.setCountry': 'Set organization country',
+  'organization.setCmekPreference': 'Changed KMS data residency request',
 };

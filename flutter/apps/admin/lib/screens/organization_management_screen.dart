@@ -2,6 +2,7 @@ import 'package:amdash_core/amdash_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../classes/organization_country.dart';
 import '../services/admin_service.dart';
 import '../services/organization_service.dart';
 import '../widgets/admin_page.dart';
@@ -23,6 +24,7 @@ class _OrganizationManagementScreenState extends ConsumerState<OrganizationManag
   final _adminEmailController = TextEditingController();
   final _adminFirstNameController = TextEditingController();
   final _adminLastNameController = TextEditingController();
+  String? _country;
   bool _creating = false;
   String? _message;
   bool _isError = false;
@@ -41,7 +43,8 @@ class _OrganizationManagementScreenState extends ConsumerState<OrganizationManag
     final adminEmail = _adminEmailController.text.trim();
     final adminFirstName = _adminFirstNameController.text.trim();
     final adminLastName = _adminLastNameController.text.trim();
-    if (organizationName.isEmpty || adminEmail.isEmpty || adminFirstName.isEmpty || adminLastName.isEmpty) {
+    final country = _country;
+    if (organizationName.isEmpty || adminEmail.isEmpty || adminFirstName.isEmpty || adminLastName.isEmpty || country == null) {
       return;
     }
 
@@ -55,6 +58,7 @@ class _OrganizationManagementScreenState extends ConsumerState<OrganizationManag
         adminEmail: adminEmail,
         adminFirstName: adminFirstName,
         adminLastName: adminLastName,
+        country: country,
       );
       _orgNameController.clear();
       _adminEmailController.clear();
@@ -62,6 +66,7 @@ class _OrganizationManagementScreenState extends ConsumerState<OrganizationManag
       _adminLastNameController.clear();
       if (mounted) {
         setState(() {
+          _country = null;
           _message = 'Organization created.';
           _isError = false;
         });
@@ -116,6 +121,16 @@ class _OrganizationManagementScreenState extends ConsumerState<OrganizationManag
                 controller: _adminLastNameController,
                 decoration: const InputDecoration(labelText: 'Admin Last Name'),
               ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: _country,
+                decoration: const InputDecoration(labelText: 'Country'),
+                items: [
+                  for (final entry in organizationCountries.entries)
+                    DropdownMenuItem(value: entry.key, child: Text(entry.value)),
+                ],
+                onChanged: (value) => setState(() => _country = value),
+              ),
               if (_message != null) FormMessage(text: _message!, isError: _isError),
               const SizedBox(height: 16),
               FilledButton(
@@ -137,10 +152,12 @@ class _OrganizationManagementScreenState extends ConsumerState<OrganizationManag
                 const EmptyState(title: 'No organizations yet', subtitle: 'Create one above to get started')
               else
                 Table(
+                  columnWidths: const {0: FlexColumnWidth(2), 1: FlexColumnWidth(1)},
                   border: TableBorder(horizontalInside: BorderSide(color: context.palette.border)),
                   children: [
-                    TableRow(children: [_headerCell('Name')]),
-                    for (final org in organizations) TableRow(children: [_cell(org.name)]),
+                    TableRow(children: [_headerCell('Name'), _headerCell('Country')]),
+                    for (final org in organizations)
+                      TableRow(children: [_cell(org.name), _cell(organizationCountries[org.country] ?? 'Not set')]),
                   ],
                 ),
             ],
