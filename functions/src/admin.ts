@@ -1,13 +1,19 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
+import { logger } from 'firebase-functions/v2';
 import { defineSecret } from 'firebase-functions/params';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 import { AssignableRole } from './classes/assignable-role';
+import { AuditAction } from './classes/audit-action';
 import { CallerProfile } from './classes/caller-profile';
 import { CreateUserRequest } from './classes/create-user-request';
 import { SetUserRoleRequest } from './classes/set-user-role-request';
 import { RemoveUserRoleRequest } from './classes/remove-user-role-request';
+import { UpdateUserRequest } from './classes/update-user-request';
+import { DeleteUserRequest } from './classes/delete-user-request';
+import { SetUserDisabledRequest } from './classes/set-user-disabled-request';
+import { ResendInviteRequest } from './classes/resend-invite-request';
 import { CreateHospitalRequest } from './classes/create-hospital-request';
 import { DeleteHospitalRequest } from './classes/delete-hospital-request';
 import { CreateOrganizationRequest } from './classes/create-organization-request';
@@ -52,6 +58,60 @@ function requireSameOrg(caller: CallerProfile, targetOrganizationId: unknown, me
   }
 }
 
+// Best-effort — an audit log write failing shouldn't fail the mutation it
+// was recording, same non-critical-notification rationale as
+// sendWelcomeEmail in email.ts. No client ever reads/writes this
+// collection directly (see firestore.rules); listAuditLog below is the
+// only read path.
+async function logAudit(entry: {
+  action: AuditAction;
+  actor: CallerProfile;
+  organizationId: string | undefined;
+  target?: string;
+  details?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    await getFirestore()
+      .collection('auditLog')
+      .add({
+        action: entry.action,
+        actorUid: entry.actor.uid,
+        actorEmail: entry.actor.email,
+        organizationId: entry.organizationId ?? null,
+        target: entry.target ?? null,
+        details: entry.details ?? null,
+        timestamp: FieldValue.serverTimestamp(),
+      });
+  } catch (error) {
+    logger.error('Failed to write audit log entry', { entry, error });
+  }
+}
+
+// Blocks an action (delete or suspend) that would leave an organization
+// with zero enabled admins. The only in-app path to grant `admin` is
+// createOrganization (one per new org) — there's no "promote to admin"
+// flow — so an org that loses its last admin here has no way to recover
+// short of a super-admin editing Firestore directly. No-ops for a target
+// that isn't an admin at all.
+async function assertNotLastAdmin(organizationId: string, targetUid: string, action: string): Promise<void> {
+  const targetDoc = await getFirestore().collection('users').doc(targetUid).get();
+  const targetRoles = targetDoc.data()?.['role'];
+  if (!Array.isArray(targetRoles) || !targetRoles.includes('admin')) {
+    return;
+  }
+
+  const adminsSnapshot = await getFirestore()
+    .collection('users')
+    .where('organizationId', '==', organizationId)
+    .where('role', 'array-contains', 'admin')
+    .get();
+
+  const remaining = adminsSnapshot.docs.filter((doc) => doc.id !== targetUid);
+  if (remaining.length === 0) {
+    throw new HttpsError('failed-precondition', `Can't ${action} the last admin in this organization.`);
+  }
+}
+
 // Creates a brand-new account with no password set — the admin never
 // chooses or sees a credential. The new user sets their own password the
 // first time they enter this email on the login page (it checks
@@ -92,6 +152,14 @@ export const createUser = onCall<CreateUserRequest>({ region: REGION, secrets: [
   // fail the whole createUser call.
   await sendWelcomeEmail({ email, firstName, role });
 
+  await logAudit({
+    action: 'user.create',
+    actor: profile,
+    organizationId: profile.organizationId,
+    target: newUser.uid,
+    details: { email, role },
+  });
+
   return { uid: newUser.uid, email, firstName, lastName, role };
 });
 
@@ -115,6 +183,14 @@ export const setUserRole = onCall<SetUserRoleRequest>({ region: REGION }, async 
 
   await targetDocRef.set({ role: FieldValue.arrayUnion(role) }, { merge: true });
 
+  await logAudit({
+    action: 'user.roleAdd',
+    actor: profile,
+    organizationId: profile.organizationId,
+    target: targetUser.uid,
+    details: { role },
+  });
+
   return { uid: targetUser.uid, email: targetUser.email, role };
 });
 
@@ -134,7 +210,199 @@ export const removeUserRole = onCall<RemoveUserRoleRequest>({ region: REGION }, 
 
   await targetDocRef.update({ role: FieldValue.arrayRemove(role) });
 
+  await logAudit({
+    action: 'user.roleRemove',
+    actor: profile,
+    organizationId: profile.organizationId,
+    target: targetUser.uid,
+    details: { role },
+  });
+
   return { uid: targetUser.uid, email: targetUser.email, role };
+});
+
+// Backs the admin app's "Edit User" dialog — name and/or email, identified
+// by uid (not email, since email itself may be what's changing). Updates
+// Auth first (the step that can fail on a taken email) so a failure there
+// leaves Firestore untouched, same ordering rationale as createUser.
+export const updateUser = onCall<UpdateUserRequest>({ region: REGION }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+  requireAdmin(profile, 'Only admins can edit users.');
+
+  const { uid, email, firstName, lastName } = request.data;
+  if (!uid || (!email && !firstName && !lastName)) {
+    throw new HttpsError('invalid-argument', 'A uid and at least one of email, firstName, or lastName are required.');
+  }
+
+  const targetDocRef = getFirestore().collection('users').doc(uid);
+  const targetDoc = await targetDocRef.get();
+  if (!targetDoc.exists) {
+    throw new HttpsError('not-found', 'That user no longer exists.');
+  }
+  requireSameOrg(profile, targetDoc.data()?.['organizationId'], 'That user is not a member of your organization.');
+
+  if (email) {
+    try {
+      await getAuth().updateUser(uid, { email });
+    } catch (error) {
+      if ((error as { code?: string }).code === 'auth/email-already-exists') {
+        throw new HttpsError('already-exists', `An account with ${email} already exists.`);
+      }
+      throw new HttpsError('internal', 'Failed to update the email address.');
+    }
+  }
+
+  const firestoreUpdate: Record<string, string> = {};
+  if (email) firestoreUpdate['email'] = email;
+  if (firstName) firestoreUpdate['firstName'] = firstName;
+  if (lastName) firestoreUpdate['lastName'] = lastName;
+  await targetDocRef.update(firestoreUpdate);
+
+  await logAudit({
+    action: 'user.update',
+    actor: profile,
+    organizationId: profile.organizationId,
+    target: uid,
+    details: firestoreUpdate,
+  });
+
+  const data = targetDoc.data() ?? {};
+  const role = data['role'];
+  return {
+    uid,
+    email: firestoreUpdate['email'] ?? data['email'] ?? '',
+    firstName: firestoreUpdate['firstName'] ?? data['firstName'] ?? '',
+    lastName: firestoreUpdate['lastName'] ?? data['lastName'] ?? '',
+    role: Array.isArray(role) ? role : [],
+  };
+});
+
+// Deletes both the Auth account and the Firestore profile — Auth first,
+// same ordering rationale as createUser/updateUser (the step most likely to
+// fail leaves nothing behind to clean up). assertNotLastAdmin (rather than
+// a blanket "can't delete yourself" check) is what actually prevents an org
+// from losing its last admin — it also covers deleting a *different*
+// last-admin account, and still lets a co-admin org offboard themselves
+// once someone else can take over.
+export const deleteUser = onCall<DeleteUserRequest>({ region: REGION }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+  requireAdmin(profile, 'Only admins can delete users.');
+
+  const { uid } = request.data;
+  if (!uid) {
+    throw new HttpsError('invalid-argument', 'A uid is required.');
+  }
+
+  const targetDocRef = getFirestore().collection('users').doc(uid);
+  const targetDoc = await targetDocRef.get();
+  if (!targetDoc.exists) {
+    throw new HttpsError('not-found', 'That user no longer exists.');
+  }
+  const targetData = targetDoc.data() ?? {};
+  requireSameOrg(profile, targetData['organizationId'], 'That user is not a member of your organization.');
+
+  await assertNotLastAdmin(profile.organizationId as string, uid, 'delete');
+
+  await getAuth().deleteUser(uid);
+  await targetDocRef.delete();
+
+  await logAudit({
+    action: 'user.delete',
+    actor: profile,
+    organizationId: profile.organizationId,
+    target: uid,
+    details: { email: targetData['email'] },
+  });
+
+  return { uid };
+});
+
+// Suspends/reactivates an Auth account without deleting it — for e.g. "this
+// person is on leave" or "investigating this account", where deleteUser
+// would be destructive (and, via assertNotLastAdmin, is refused anyway for
+// an org's last admin — the same guard applies to suspending one). A
+// disabled account can't sign in (Firebase Auth enforces this directly)
+// but keeps its history, role assignments, and Firestore profile intact.
+export const setUserDisabled = onCall<SetUserDisabledRequest>({ region: REGION }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+  requireAdmin(profile, 'Only admins can suspend or reactivate users.');
+
+  const { uid, disabled } = request.data;
+  if (!uid || typeof disabled !== 'boolean') {
+    throw new HttpsError('invalid-argument', 'A uid and a disabled boolean are required.');
+  }
+
+  const targetDocRef = getFirestore().collection('users').doc(uid);
+  const targetDoc = await targetDocRef.get();
+  if (!targetDoc.exists) {
+    throw new HttpsError('not-found', 'That user no longer exists.');
+  }
+  requireSameOrg(profile, targetDoc.data()?.['organizationId'], 'That user is not a member of your organization.');
+
+  if (disabled) {
+    await assertNotLastAdmin(profile.organizationId as string, uid, 'suspend');
+  }
+
+  await getAuth().updateUser(uid, { disabled });
+
+  await logAudit({
+    action: disabled ? 'user.disable' : 'user.enable',
+    actor: profile,
+    organizationId: profile.organizationId,
+    target: uid,
+  });
+
+  return { uid, disabled };
+});
+
+// Resends the welcome email (see email.ts) for an account that hasn't set
+// a password yet — recovers a lost/bounced invite without recreating the
+// account (which would fail anyway: the email already exists in Auth).
+// Refuses once a password is set, same guard setInitialPassword itself
+// applies, since resending at that point would be misleading — the
+// account isn't waiting on this anymore.
+export const resendInvite = onCall<ResendInviteRequest>({ region: REGION, secrets: [RESEND_API_KEY] }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+  requireAdmin(profile, 'Only admins can resend invites.');
+
+  const { uid } = request.data;
+  if (!uid) {
+    throw new HttpsError('invalid-argument', 'A uid is required.');
+  }
+
+  const targetDocRef = getFirestore().collection('users').doc(uid);
+  const targetDoc = await targetDocRef.get();
+  if (!targetDoc.exists) {
+    throw new HttpsError('not-found', 'That user no longer exists.');
+  }
+  const targetData = targetDoc.data() ?? {};
+  requireSameOrg(profile, targetData['organizationId'], 'That user is not a member of your organization.');
+
+  const authUser = await getAuth().getUser(uid);
+  const hasPassword = authUser.providerData.some((provider) => provider.providerId === 'password');
+  if (hasPassword) {
+    throw new HttpsError('failed-precondition', 'This account already has a password set.');
+  }
+
+  const roles: unknown[] = Array.isArray(targetData['role']) ? targetData['role'] : [];
+  const assignableRole = roles.find((role): role is AssignableRole => ASSIGNABLE_ROLES.includes(role as AssignableRole));
+  if (!assignableRole) {
+    throw new HttpsError(
+      'failed-precondition',
+      "This user has no ems/physician/nurse role to base the invite's app link on.",
+    );
+  }
+
+  await sendWelcomeEmail({ email: targetData['email'], firstName: targetData['firstName'], role: assignableRole });
+
+  await logAudit({
+    action: 'user.resendInvite',
+    actor: profile,
+    organizationId: profile.organizationId,
+    target: uid,
+  });
+
+  return { uid };
 });
 
 // Firebase Auth has no organization concept, so listUsers(1000) (the old
@@ -142,6 +410,11 @@ export const removeUserRole = onCall<RemoveUserRoleRequest>({ region: REGION }, 
 // this queries Firestore's own users collection instead, which both scopes
 // the result to the caller's org and drops the old hard 1000-user,
 // no-pagination cap that came from misusing the Auth Admin API for this.
+//
+// disabled/hasPassword aren't in Firestore at all (Auth-only properties) —
+// getUsers() batch-fetches every org member's Auth record in one call
+// rather than one getUser() per row, so the table can show account status
+// without an N-request fan-out.
 export const listUsersWithRoles = onCall({ region: REGION }, async (request) => {
   const profile = await getCallerProfile(request.auth?.uid);
   requireAdmin(profile, 'Only admins can list users.');
@@ -151,15 +424,30 @@ export const listUsersWithRoles = onCall({ region: REGION }, async (request) => 
     .where('organizationId', '==', profile.organizationId)
     .get();
 
+  const uids = profileDocs.docs.map((docSnapshot) => docSnapshot.id);
+  const authByUid = new Map<string, { disabled: boolean; hasPassword: boolean }>();
+  if (uids.length > 0) {
+    const { users: authUsers } = await getAuth().getUsers(uids.map((uid) => ({ uid })));
+    for (const authUser of authUsers) {
+      authByUid.set(authUser.uid, {
+        disabled: authUser.disabled,
+        hasPassword: authUser.providerData.some((provider) => provider.providerId === 'password'),
+      });
+    }
+  }
+
   return profileDocs.docs.map((docSnapshot) => {
     const data = docSnapshot.data();
     const roles = data['role'];
+    const authInfo = authByUid.get(docSnapshot.id);
     return {
       uid: docSnapshot.id,
       email: data['email'] ?? '',
       firstName: data['firstName'] ?? '',
       lastName: data['lastName'] ?? '',
       role: Array.isArray(roles) ? roles : [],
+      disabled: authInfo?.disabled ?? false,
+      hasPassword: authInfo?.hasPassword ?? false,
     };
   });
 });
@@ -203,6 +491,14 @@ export const createHospital = onCall<CreateHospitalRequest>(
       .collection('hospitals')
       .add({ name, address, latitude, longitude, organizationId: profile.organizationId });
 
+    await logAudit({
+      action: 'hospital.create',
+      actor: profile,
+      organizationId: profile.organizationId,
+      target: docRef.id,
+      details: { name, address },
+    });
+
     return { id: docRef.id, name, address, latitude, longitude };
   },
 );
@@ -218,9 +514,18 @@ export const deleteHospital = onCall<DeleteHospitalRequest>({ region: REGION }, 
 
   const hospitalRef = getFirestore().collection('hospitals').doc(hospitalId);
   const hospitalDoc = await hospitalRef.get();
-  requireSameOrg(profile, hospitalDoc.data()?.['organizationId'], 'That hospital belongs to a different organization.');
+  const hospitalData = hospitalDoc.data() ?? {};
+  requireSameOrg(profile, hospitalData['organizationId'], 'That hospital belongs to a different organization.');
 
   await hospitalRef.delete();
+
+  await logAudit({
+    action: 'hospital.delete',
+    actor: profile,
+    organizationId: profile.organizationId,
+    target: hospitalId,
+    details: { name: hospitalData['name'] },
+  });
 
   return { hospitalId };
 });
@@ -270,6 +575,16 @@ export const createOrganization = onCall<CreateOrganizationRequest>({ region: RE
     organizationId: orgRef.id,
   });
 
+  // organizationId is the new org, not profile.organizationId — the caller
+  // is a super-admin, who has no organizationId of their own.
+  await logAudit({
+    action: 'organization.create',
+    actor: profile,
+    organizationId: orgRef.id,
+    target: newAdmin.uid,
+    details: { organizationName, adminEmail },
+  });
+
   return {
     organizationId: orgRef.id,
     organizationName,
@@ -295,9 +610,48 @@ export const setOrganizationRetention = onCall<SetOrganizationRetentionRequest>(
 
     await getFirestore().collection('organizations').doc(profile.organizationId as string).update({ retainAllData });
 
+    await logAudit({
+      action: 'organization.setRetention',
+      actor: profile,
+      organizationId: profile.organizationId,
+      details: { retainAllData },
+    });
+
     return { retainAllData };
   },
 );
+
+// Returns the caller's org's most recent audit entries — admin.ts's own
+// mutations only (createUser/updateUser/deleteUser/setUserDisabled/
+// resendInvite/setUserRole/removeUserRole/createHospital/deleteHospital/
+// createOrganization/setOrganizationRetention); EMS/physician actions
+// aren't logged here. No client ever reads the auditLog collection
+// directly (see firestore.rules) — this is the only read path, same
+// pattern as listUsersWithRoles.
+export const listAuditLog = onCall({ region: REGION }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+  requireAdmin(profile, 'Only admins can view the audit log.');
+
+  const snapshot = await getFirestore()
+    .collection('auditLog')
+    .where('organizationId', '==', profile.organizationId)
+    .orderBy('timestamp', 'desc')
+    .limit(100)
+    .get();
+
+  return snapshot.docs.map((docSnapshot) => {
+    const data = docSnapshot.data();
+    const timestamp = data['timestamp'];
+    return {
+      id: docSnapshot.id,
+      action: data['action'] ?? '',
+      actorEmail: data['actorEmail'] ?? '',
+      target: data['target'] ?? null,
+      details: data['details'] ?? null,
+      timestampMs: timestamp instanceof Timestamp ? timestamp.toMillis() : null,
+    };
+  });
+});
 
 const RETENTION_MS = 48 * 60 * 60 * 1000;
 

@@ -63,8 +63,8 @@ class _AdminNavBarState extends ConsumerState<AdminNavBar> {
         itemBuilder: (context) => [
           if (isAdmin) ...[
             const PopupMenuItem(value: '/users', child: Text('Users')),
-            const PopupMenuItem(value: '/hospitals', child: Text('Hospitals')),
             const PopupMenuItem(value: '/settings', child: Text('Settings')),
+            const PopupMenuItem(value: '/audit-log', child: Text('Audit Log')),
           ],
           if (isSuperAdmin) const PopupMenuItem(value: '/organizations', child: Text('Organizations')),
         ],

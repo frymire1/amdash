@@ -24,6 +24,8 @@ export async function getCallerProfile(uid: string | undefined): Promise<CallerP
   const data = snapshot.data();
   const role = data?.['role'];
   return {
+    uid,
+    email: data?.['email'] ?? '',
     role: Array.isArray(role) ? (role as UserRole[]) : [],
     organizationId: data?.['organizationId'],
   };

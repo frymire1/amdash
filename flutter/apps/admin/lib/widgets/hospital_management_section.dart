@@ -3,22 +3,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/admin_service.dart';
-import '../widgets/admin_page.dart';
+import 'admin_page.dart';
 
-/// Mirrors `hospital-management.component.ts`/`.html`: an "Add Hospital"
-/// form (name + free-text address — geocoding is fully server-side inside
-/// `createHospital`, lat/lng are never entered or shown here) and a table
-/// with per-row delete. The list itself is [hospitalsProvider] from
-/// `amdash_core` — a live Firestore query, not a Cloud Function — so a
-/// created/deleted hospital appears without any manual refresh.
-class HospitalManagementScreen extends ConsumerStatefulWidget {
-  const HospitalManagementScreen({super.key});
+/// Hospital management, embedded in [OrganizationSettingsScreen] rather
+/// than living on its own route/tab — hospitals are an org-level setting
+/// like data retention, not a separate management domain the way users
+/// are. Was previously `HospitalManagementScreen`, a full `AdminPage` of
+/// its own; now just the two cards (add form + table), title-less so the
+/// enclosing settings page supplies its own section heading.
+class HospitalManagementSection extends ConsumerStatefulWidget {
+  const HospitalManagementSection({super.key});
 
   @override
-  ConsumerState<HospitalManagementScreen> createState() => _HospitalManagementScreenState();
+  ConsumerState<HospitalManagementSection> createState() => _HospitalManagementSectionState();
 }
 
-class _HospitalManagementScreenState extends ConsumerState<HospitalManagementScreen> {
+class _HospitalManagementSectionState extends ConsumerState<HospitalManagementSection> {
   final _nameController = TextEditingController();
   final _addressController = TextEditingController();
   bool _creating = false;
@@ -89,10 +89,9 @@ class _HospitalManagementScreenState extends ConsumerState<HospitalManagementScr
   Widget build(BuildContext context) {
     final hospitals = ref.watch(hospitalsProvider).valueOrNull ?? const [];
 
-    return AdminPage(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text('Hospital Management', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 16),
         AdminCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -127,7 +126,7 @@ class _HospitalManagementScreenState extends ConsumerState<HospitalManagementScr
               const Text('Hospitals', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
               if (hospitals.isEmpty)
-                Text('No hospitals yet.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))
+                const EmptyState(title: 'No hospitals yet', subtitle: 'Add a hospital above to get started')
               else
                 Table(
                   columnWidths: const {0: FlexColumnWidth(2), 1: FlexColumnWidth(3), 2: FixedColumnWidth(56)},

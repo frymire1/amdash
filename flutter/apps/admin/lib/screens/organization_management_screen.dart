@@ -134,7 +134,7 @@ class _OrganizationManagementScreenState extends ConsumerState<OrganizationManag
               const Text('Organizations', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
               if (organizations.isEmpty)
-                Text('No organizations yet.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))
+                const EmptyState(title: 'No organizations yet', subtitle: 'Create one above to get started')
               else
                 Table(
                   border: TableBorder(horizontalInside: BorderSide(color: context.palette.border)),

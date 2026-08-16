@@ -104,5 +104,16 @@ service cloud.firestore {
       allow read: if isSuperAdmin() || sameOrgAsCaller(resource.data.get('organizationId', null));
       allow write: if false;
     }
+
+    // Written only by admin.ts's Cloud Functions (Admin SDK, bypasses these
+    // rules) as a side effect of createUser/updateUser/deleteUser/
+    // setUserDisabled/resendInvite/setUserRole/removeUserRole/
+    // createHospital/deleteHospital/createOrganization/
+    // setOrganizationRetention, and read back only through the
+    // listAuditLog Cloud Function — no client access at all, unlike
+    // hospitals/organizations above (which at least allow a direct read).
+    match /auditLog/{entryId} {
+      allow read, write: if false;
+    }
   }
 }

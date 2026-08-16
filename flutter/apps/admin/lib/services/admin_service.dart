@@ -2,6 +2,7 @@ import 'package:amdash_core/amdash_core.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../classes/audit_log_entry.dart';
 import '../classes/managed_user.dart';
 
 /// Every callable Cloud Function this app hits runs in this region — must
@@ -47,6 +48,43 @@ class AdminService {
       'email': email,
       'role': role.wireValue,
     });
+  }
+
+  Future<ManagedUser> updateUser({
+    required String uid,
+    String? email,
+    String? firstName,
+    String? lastName,
+  }) async {
+    final callable = _functions.httpsCallable('updateUser');
+    final result = await callable.call<Map<Object?, Object?>>({
+      'uid': uid,
+      'email': ?email,
+      'firstName': ?firstName,
+      'lastName': ?lastName,
+    });
+    return ManagedUser.fromJson(result.data);
+  }
+
+  Future<void> deleteUser(String uid) {
+    return _functions.httpsCallable('deleteUser').call<Map<Object?, Object?>>({'uid': uid});
+  }
+
+  Future<void> setUserDisabled({required String uid, required bool disabled}) {
+    return _functions.httpsCallable('setUserDisabled').call<Map<Object?, Object?>>({
+      'uid': uid,
+      'disabled': disabled,
+    });
+  }
+
+  Future<void> resendInvite(String uid) {
+    return _functions.httpsCallable('resendInvite').call<Map<Object?, Object?>>({'uid': uid});
+  }
+
+  Future<List<AuditLogEntry>> listAuditLog() async {
+    final callable = _functions.httpsCallable('listAuditLog');
+    final result = await callable.call<List<Object?>>();
+    return result.data.whereType<Map<Object?, Object?>>().map(AuditLogEntry.fromJson).toList();
   }
 
   Future<List<ManagedUser>> listUsersWithRoles() async {

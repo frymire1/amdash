@@ -5,12 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../classes/managed_user.dart';
 import '../services/admin_service.dart';
 import '../widgets/admin_page.dart';
+import '../widgets/edit_user_dialog.dart';
 
-/// Mirrors `user-management.component.ts`/`.html`: an "Add User" form, a
-/// separate "Assign a Role" form, and a table of the org's users with
-/// removable role chips (multi-role — `setUserRole`/`removeUserRole`
-/// arrayUnion/arrayRemove a single role at a time; there's no multi-select
-/// control, chips are the whole UI for it). List comes from
+/// Mirrors `user-management.component.ts`/`.html`: an "Add User" form and a
+/// table of the org's users. Per-user editing (roles, name, email, account
+/// deletion) lives in [showEditUserDialog], opened from each row's Edit
+/// button — replaces a separate "Assign a Role" card that required
+/// re-typing the target's email by hand. List comes from
 /// `listUsersWithRoles` (a Cloud Function, not a live Firestore query —
 /// regular admins have no legal direct `list` on `users`), loaded once and
 /// refreshed manually or after a mutation, not live.
@@ -34,18 +35,15 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
   String? _createMessage;
   bool _createIsError = false;
 
-  final _assignEmailController = TextEditingController();
-  UserRole? _assignRole;
-  bool _assigning = false;
-  String? _assignMessage;
-  bool _assignIsError = false;
-
-  String? _removingRoleKey;
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
+  UserRole? _roleFilter;
 
   @override
   void initState() {
     super.initState();
     _refreshUsers();
+    _searchController.addListener(() => setState(() => _searchQuery = _searchController.text.trim().toLowerCase()));
   }
 
   @override
@@ -53,8 +51,17 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
     _createEmailController.dispose();
     _createFirstNameController.dispose();
     _createLastNameController.dispose();
-    _assignEmailController.dispose();
+    _searchController.dispose();
     super.dispose();
+  }
+
+  List<ManagedUser> _filteredUsers() {
+    return _users.where((user) {
+      if (_roleFilter != null && !user.role.contains(_roleFilter)) return false;
+      if (_searchQuery.isEmpty) return true;
+      final haystack = '${user.email} ${user.firstName} ${user.lastName}'.toLowerCase();
+      return haystack.contains(_searchQuery);
+    }).toList();
   }
 
   // Every setState below an `await` is guarded with `mounted` — this
@@ -115,55 +122,6 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
       }
     } finally {
       if (mounted) setState(() => _creating = false);
-    }
-  }
-
-  Future<void> _assignRoleSubmit() async {
-    final email = _assignEmailController.text.trim();
-    final role = _assignRole;
-    if (email.isEmpty || role == null) return;
-
-    setState(() {
-      _assigning = true;
-      _assignMessage = null;
-    });
-    try {
-      await ref.read(adminServiceProvider).setUserRole(email: email, role: role);
-      _assignEmailController.clear();
-      if (mounted) {
-        setState(() {
-          _assignRole = null;
-          _assignMessage = 'Role assigned.';
-          _assignIsError = false;
-        });
-      }
-      await _refreshUsers();
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _assignMessage = _errorMessage(error, 'Failed to assign role.');
-          _assignIsError = true;
-        });
-      }
-    } finally {
-      if (mounted) setState(() => _assigning = false);
-    }
-  }
-
-  Future<void> _removeRole(ManagedUser user, UserRole role) async {
-    final key = '${user.uid}:${role.wireValue}';
-    setState(() => _removingRoleKey = key);
-    try {
-      await ref.read(adminServiceProvider).removeUserRole(email: user.email, role: role);
-      await _refreshUsers();
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_errorMessage(error, 'Failed to remove role.'))),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _removingRoleKey = null);
     }
   }
 
@@ -228,42 +186,6 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Assign a Role', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              TextField(controller: _assignEmailController, decoration: const InputDecoration(labelText: 'Email')),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<UserRole>(
-                key: const Key('assign_role_dropdown'),
-                initialValue: _assignRole,
-                decoration: const InputDecoration(labelText: 'Role'),
-                items: [
-                  for (final role in assignableRoles)
-                    DropdownMenuItem(
-                      value: role,
-                      child: KeyedSubtree(
-                        key: Key('assign_role_option_${role.wireValue}'),
-                        child: Text(role.wireValue),
-                      ),
-                    ),
-                ],
-                onChanged: (value) => setState(() => _assignRole = value),
-              ),
-              if (_assignMessage != null) FormMessage(text: _assignMessage!, isError: _assignIsError),
-              const SizedBox(height: 16),
-              FilledButton(
-                key: const Key('assign_role_submit'),
-                onPressed: _assigning ? null : _assignRoleSubmit,
-                child: _assigning
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Assign Role'),
-              ),
-            ],
-          ),
-        ),
-        AdminCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
               Row(
                 children: [
                   const Expanded(child: Text('Users', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
@@ -279,12 +201,50 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
               else if (_listError != null)
                 FormMessage(text: _listError!, isError: true)
               else if (_users.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text('No users yet.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                )
-              else
-                _UsersTable(users: _users, removingRoleKey: _removingRoleKey, onRemoveRole: _removeRole),
+                const EmptyState(title: 'No users yet', subtitle: 'Add a user above to get started')
+              else ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        decoration: const InputDecoration(
+                          labelText: 'Search',
+                          hintText: 'Name or email',
+                          prefixIcon: Icon(Icons.search),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 160,
+                      child: DropdownButtonFormField<UserRole?>(
+                        initialValue: _roleFilter,
+                        decoration: const InputDecoration(labelText: 'Role', isDense: true),
+                        items: [
+                          const DropdownMenuItem(value: null, child: Text('All roles')),
+                          for (final role in assignableRoles) DropdownMenuItem(value: role, child: Text(role.wireValue)),
+                        ],
+                        onChanged: (value) => setState(() => _roleFilter = value),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Builder(
+                  builder: (context) {
+                    final filtered = _filteredUsers();
+                    if (filtered.isEmpty) {
+                      return const EmptyState(title: 'No users match this search', graphic: EmptyStateGraphic.chartPulse);
+                    }
+                    return _UsersTable(
+                      users: filtered,
+                      onEdit: (user) => showEditUserDialog(context, user, _refreshUsers),
+                    );
+                  },
+                ),
+              ],
             ],
           ),
         ),
@@ -294,23 +254,30 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
 }
 
 class _UsersTable extends StatelessWidget {
-  const _UsersTable({required this.users, required this.removingRoleKey, required this.onRemoveRole});
+  const _UsersTable({required this.users, required this.onEdit});
 
   final List<ManagedUser> users;
-  final String? removingRoleKey;
-  final void Function(ManagedUser user, UserRole role) onRemoveRole;
+  final void Function(ManagedUser user) onEdit;
 
   @override
   Widget build(BuildContext context) {
     return Table(
-      columnWidths: const {0: FlexColumnWidth(2), 1: FlexColumnWidth(2), 2: FlexColumnWidth(3)},
+      columnWidths: const {
+        0: FlexColumnWidth(2),
+        1: FlexColumnWidth(2),
+        2: FixedColumnWidth(100),
+        3: FlexColumnWidth(3),
+        4: FixedColumnWidth(56),
+      },
       border: TableBorder(horizontalInside: BorderSide(color: context.palette.border)),
       children: [
         TableRow(
           children: [
             _headerCell(context, 'Email'),
             _headerCell(context, 'Name'),
+            _headerCell(context, 'Status'),
             _headerCell(context, 'Role'),
+            const SizedBox.shrink(),
           ],
         ),
         for (final user in users)
@@ -320,20 +287,30 @@ class _UsersTable extends StatelessWidget {
               _cell('${user.firstName} ${user.lastName}'),
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
+                child: StatusPill(
+                  kind: user.disabled
+                      ? StatusPillKind.critical
+                      : (user.hasPassword ? StatusPillKind.active : StatusPillKind.warning),
+                  label: user.disabled ? 'Suspended' : (user.hasPassword ? 'Active' : 'Invited'),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Wrap(
                   spacing: 6,
                   runSpacing: 6,
                   children: user.role.isEmpty
                       ? [_roleChip(context, label: 'Unassigned', unassigned: true)]
-                      : [
-                          for (final role in user.role)
-                            _roleChip(
-                              context,
-                              label: role.wireValue,
-                              removing: removingRoleKey == '${user.uid}:${role.wireValue}',
-                              onRemove: () => onRemoveRole(user, role),
-                            ),
-                        ],
+                      : [for (final role in user.role) _roleChip(context, label: role.wireValue)],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: IconButton(
+                  key: Key('edit_user_${user.email}'),
+                  onPressed: () => onEdit(user),
+                  icon: const Icon(Icons.edit_outlined),
+                  tooltip: 'Edit',
                 ),
               ),
             ],
@@ -349,42 +326,20 @@ class _UsersTable extends StatelessWidget {
 
   Widget _cell(String text) => Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(text));
 
-  Widget _roleChip(
-    BuildContext context, {
-    required String label,
-    bool unassigned = false,
-    bool removing = false,
-    VoidCallback? onRemove,
-  }) {
+  // Read-only now — role assignment/removal moved into the Edit User
+  // dialog (see edit_user_dialog.dart), which acts on one user at a time
+  // instead of requiring the admin to retype an email into a separate form.
+  Widget _roleChip(BuildContext context, {required String label, bool unassigned = false}) {
     final colorScheme = Theme.of(context).colorScheme;
     final accent = colorScheme.primary;
     return Container(
-      padding: const EdgeInsets.only(left: 10, right: 4, top: 4, bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: unassigned ? colorScheme.surfaceContainerHighest : accent.withValues(alpha: 0.16),
         borderRadius: BorderRadius.circular(999),
         border: unassigned ? null : Border.all(color: accent.withValues(alpha: 0.35)),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(label, style: TextStyle(color: unassigned ? colorScheme.onSurfaceVariant : accent)),
-          if (!unassigned) ...[
-            const SizedBox(width: 2),
-            if (removing)
-              const Padding(
-                padding: EdgeInsets.all(4),
-                child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
-              )
-            else
-              InkWell(
-                onTap: onRemove,
-                customBorder: const CircleBorder(),
-                child: const Padding(padding: EdgeInsets.all(4), child: Icon(Icons.close, size: 14)),
-              ),
-          ],
-        ],
-      ),
+      child: Text(label, style: TextStyle(color: unassigned ? colorScheme.onSurfaceVariant : accent)),
     );
   }
 }

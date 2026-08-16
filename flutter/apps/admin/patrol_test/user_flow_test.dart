@@ -5,7 +5,6 @@
 // email/password via --dart-define, same convention as the EMS/physician
 // apps' own tests.
 import 'package:admin/main.dart';
-import 'package:admin/screens/hospital_management_screen.dart';
 import 'package:admin/screens/organization_settings_screen.dart';
 import 'package:admin/screens/user_management_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -28,7 +27,7 @@ import 'package:admin/firebase_options.dart';
 Future<void> tapFinder(PatrolIntegrationTester $, Finder finder) async {
   // AdminPage wraps every screen's content in a SingleChildScrollView, and
   // this test's own actions (creating a user, etc.) grow the page tall
-  // enough that later controls — e.g. the "Assign Role" button — end up
+  // enough that later controls — e.g. the "Add Hospital" button — end up
   // below the fold of the fixed test viewport. $.tester.tap() only checks
   // that the widget exists and computes its center, it doesn't scroll it
   // into view first, so a real click dispatched by Playwright at that
@@ -99,45 +98,38 @@ void main() {
       await pumpUntil($, () => find.text(newUserEmail).evaluate().isNotEmpty);
       expect(find.text(newUserEmail), findsOneWidget, reason: 'user should have been created within the wait budget');
 
-      // Assign a second role (physician) to the same user. Verified
-      // manually against a real browser that this exact flow works
-      // correctly. Debug prints proved onChanged fires (role IS set to
-      // physician) and the button is found + enabled at tap time, yet
-      // neither plain find.text('Assign Role').tap() nor an
-      // ancestor-of-text FilledButton tap ever invoked
-      // _assignRoleSubmit — but every key-based tap in this whole test
-      // has been 100% reliable, so key the submit buttons directly
-      // instead of relying on their text.
-      await $(TextField).at(3).enterText(newUserEmail);
-      await tapKey($, 'assign_role_dropdown');
-      await tapKey($, 'assign_role_option_physician');
-      await tapKey($, 'assign_role_submit');
-      await pumpUntil($, () => find.text('Role assigned.').evaluate().isNotEmpty, maxIterations: 60);
-      expect(
-        find.text('Role assigned.'),
-        findsOneWidget,
-        reason: 'role assignment should have succeeded within the wait budget',
-      );
+      // Open the Edit User dialog for the user just created — keyed by
+      // email so this targets exactly that row, not "first in the table"
+      // (test-org accumulates other real/leftover users across runs).
+      await pumpUntil($, () => find.byKey(Key('edit_user_$newUserEmail')).evaluate().isNotEmpty, maxIterations: 20);
+      await tapKey($, 'edit_user_$newUserEmail');
+      await $.pump(const Duration(milliseconds: 300));
 
-      // Remove a role via its chip's close button. Not scoped to our own
-      // user's row specifically (Table rows aren't independently
-      // findable ancestors) — this only proves the remove action itself
-      // completes without error, against test-org's throwaway data.
-      //
-      // "Role assigned." is set before _assignRoleSubmit awaits its own
-      // _refreshUsers() call, and _refreshUsers() immediately flips
-      // _loadingUsers = true — which swaps the whole table (every close
-      // icon included) for a spinner until that refresh resolves. So the
-      // message can appear while the table is mid-reload; wait for a
-      // close icon to actually exist before tapping one.
+      // Assign a second role (physician) from inside the dialog. Keyed the
+      // same way the old top-level Assign a Role form was — key-based taps
+      // have been 100% reliable throughout this test, plain find.text taps
+      // on Material dropdown/button widgets have not.
+      await tapKey($, 'edit_role_dropdown');
+      await tapKey($, 'edit_role_option_physician');
+      await tapKey($, 'edit_role_add_button');
+      await pumpUntil($, () => find.text('physician').evaluate().isNotEmpty, maxIterations: 60);
+      expect(find.text('physician'), findsOneWidget, reason: 'role assignment should have succeeded within the wait budget');
+
+      // Remove a role via its chip's close button — scoped to this user
+      // already, since only their dialog is open (unlike the old table,
+      // whose remove buttons weren't independently scoped per row).
       await pumpUntil($, () => find.byIcon(Icons.close).evaluate().isNotEmpty, maxIterations: 40);
       await tapIcon($, Icons.close);
       await $.pump(const Duration(seconds: 2));
 
-      // Navigate to Hospitals via the hamburger menu.
+      await tapKey($, 'edit_user_dialog_close');
+      await $.pump(const Duration(milliseconds: 300));
+
+      // Navigate to Settings via the hamburger menu — hospital management
+      // now lives here instead of its own tab.
       await tapIcon($, Icons.menu);
-      await tapText($, 'Hospitals');
-      await pumpUntil($, () => find.byType(HospitalManagementScreen).evaluate().isNotEmpty);
+      await tapText($, 'Settings');
+      await pumpUntil($, () => find.byType(OrganizationSettingsScreen).evaluate().isNotEmpty);
 
       // Create a hospital. createHospital calls out to Google's
       // Geocoding API server-side (plus a possible Cloud Function cold
@@ -165,10 +157,7 @@ void main() {
       await pumpUntil($, () => find.text(hospitalName).evaluate().isEmpty, maxIterations: 50);
       expect(find.text(hospitalName), findsNothing);
 
-      // Navigate to Settings via the hamburger menu and toggle retention.
-      await tapIcon($, Icons.menu);
-      await tapText($, 'Settings');
-      await pumpUntil($, () => find.byType(OrganizationSettingsScreen).evaluate().isNotEmpty);
+      // Still on Settings — toggle retention.
 
       // The Switch's value reflects a live Firestore listener, not local
       // optimistic state (see the screen's own doc comment), so it only

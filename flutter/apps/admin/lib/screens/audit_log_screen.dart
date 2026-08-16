@@ -1,0 +1,158 @@
+import 'package:amdash_core/amdash_core.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../classes/audit_log_entry.dart';
+import '../services/admin_service.dart';
+import '../widgets/admin_page.dart';
+
+const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/// "Aug 15, 2026, 3:42 PM" — hand-rolled rather than pulling in `intl` for
+/// a single date format in a whole app that doesn't otherwise use it.
+String _formatTimestamp(DateTime timestamp) {
+  final local = timestamp.toLocal();
+  final hour24 = local.hour;
+  final hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
+  final minute = local.minute.toString().padLeft(2, '0');
+  final period = hour24 < 12 ? 'AM' : 'PM';
+  return '${_months[local.month - 1]} ${local.day}, ${local.year}, $hour12:$minute $period';
+}
+
+/// Mirrors the shape of the other admin management screens, but read-only —
+/// no create form, just a table. Backed by `listAuditLog`
+/// (`functions/src/admin.ts`), which records every admin.ts mutation
+/// (user/role/hospital/organization changes); EMS/physician actions aren't
+/// logged here.
+class AuditLogScreen extends ConsumerStatefulWidget {
+  const AuditLogScreen({super.key});
+
+  @override
+  ConsumerState<AuditLogScreen> createState() => _AuditLogScreenState();
+}
+
+class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
+  List<AuditLogEntry> _entries = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final entries = await ref.read(adminServiceProvider).listAuditLog();
+      if (mounted) setState(() => _entries = entries);
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Failed to load the audit log. Please try again.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AdminPage(
+      children: [
+        const Text('Audit Log', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text(
+          'The last 100 user/hospital/organization changes made through this app, most recent first.',
+          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 16),
+        AdminCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Expanded(child: Text('Recent Activity', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+                  IconButton(
+                    onPressed: _loading ? null : _refresh,
+                    icon: const Icon(Icons.refresh),
+                    tooltip: 'Refresh',
+                  ),
+                ],
+              ),
+              if (_loading)
+                const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()))
+              else if (_error != null)
+                FormMessage(text: _error!, isError: true)
+              else if (_entries.isEmpty)
+                const EmptyState(title: 'No activity yet', graphic: EmptyStateGraphic.chartPulse)
+              else
+                _AuditLogTable(entries: _entries),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AuditLogTable extends StatelessWidget {
+  const _AuditLogTable({required this.entries});
+
+  final List<AuditLogEntry> entries;
+
+  @override
+  Widget build(BuildContext context) {
+    final onSurfaceVariant = Theme.of(context).colorScheme.onSurfaceVariant;
+    return Table(
+      columnWidths: const {0: FixedColumnWidth(160), 1: FlexColumnWidth(2), 2: FlexColumnWidth(2), 3: FlexColumnWidth(2)},
+      border: TableBorder(horizontalInside: BorderSide(color: context.palette.border)),
+      children: [
+        TableRow(
+          children: [
+            _headerCell(context, 'When'),
+            _headerCell(context, 'Admin'),
+            _headerCell(context, 'Action'),
+            _headerCell(context, 'Details'),
+          ],
+        ),
+        for (final entry in entries)
+          TableRow(
+            children: [
+              _cell(
+                entry.timestamp != null ? _formatTimestamp(entry.timestamp!) : '—',
+                color: onSurfaceVariant,
+              ),
+              _cell(entry.actorEmail),
+              _cell(auditActionLabels[entry.action] ?? entry.action),
+              _cell(_detailsText(entry), color: onSurfaceVariant),
+            ],
+          ),
+      ],
+    );
+  }
+
+  // Renders whatever's in `details` (a free-form map — see logAudit in
+  // admin.ts) as "key: value, key: value" rather than a fixed per-action
+  // template, since new actions/fields shouldn't require a Flutter change
+  // to display sensibly.
+  String _detailsText(AuditLogEntry entry) {
+    final parts = <String>[
+      if (entry.target != null) 'target: ${entry.target}',
+      for (final e in entry.details.entries) '${e.key}: ${e.value}',
+    ];
+    return parts.isEmpty ? '—' : parts.join(', ');
+  }
+
+  Widget _headerCell(BuildContext context, String text) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Text(text, style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+  );
+
+  Widget _cell(String text, {Color? color}) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Text(text, style: TextStyle(color: color)),
+  );
+}

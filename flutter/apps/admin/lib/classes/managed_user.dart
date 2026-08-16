@@ -9,6 +9,8 @@ class ManagedUser {
     required this.firstName,
     required this.lastName,
     required this.role,
+    required this.disabled,
+    required this.hasPassword,
   });
 
   factory ManagedUser.fromJson(Map<Object?, Object?> json) {
@@ -21,6 +23,11 @@ class ManagedUser {
       role: rawRoles is List
           ? rawRoles.whereType<String>().map(UserRole.fromFirestore).whereType<UserRole>().toList()
           : const [],
+      // Absent from updateUser's response (it doesn't touch either) — only
+      // listUsersWithRoles ever actually populates these, so default to
+      // "active" rather than treating a missing field as suspended/pending.
+      disabled: json['disabled'] as bool? ?? false,
+      hasPassword: json['hasPassword'] as bool? ?? true,
     );
   }
 
@@ -29,6 +36,8 @@ class ManagedUser {
   final String firstName;
   final String lastName;
   final List<UserRole> role;
+  final bool disabled;
+  final bool hasPassword;
 }
 
 /// Mirrors `ASSIGNABLE_ROLES` (`functions/src/admin.ts`) — an admin can

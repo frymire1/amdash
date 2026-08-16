@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/admin_service.dart';
 import '../services/organization_service.dart';
 import '../widgets/admin_page.dart';
+import '../widgets/hospital_management_section.dart';
 
 /// Mirrors `organization-settings.component.ts`/`.html`: a single
 /// retention toggle for the caller's own org, bound to the live Firestore
@@ -14,6 +15,11 @@ import '../widgets/admin_page.dart';
 /// transports (+ their emsLocations doc) are deleted 48h after
 /// completion by the daily cleanup job; true → this org's completed
 /// patients are skipped by that job entirely.
+///
+/// Also hosts hospital management ([HospitalManagementSection]) — folded
+/// in here rather than kept on its own route/tab, since hospitals are an
+/// org-level setting like retention, not a separate management domain the
+/// way users are.
 class OrganizationSettingsScreen extends ConsumerStatefulWidget {
   const OrganizationSettingsScreen({super.key});
 
@@ -77,6 +83,10 @@ class _OrganizationSettingsScreenState extends ConsumerState<OrganizationSetting
             ],
           ),
         ),
+        const SizedBox(height: 8),
+        const Text('Hospitals', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 16),
+        const HospitalManagementSection(),
       ],
     );
   }

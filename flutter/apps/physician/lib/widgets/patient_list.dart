@@ -154,7 +154,7 @@ class _PatientListState extends ConsumerState<PatientList> {
           child: !_loadedOnce
               ? const Center(child: CircularProgressIndicator())
               : filtered.isEmpty
-              ? PatientsEmptyState(
+              ? EmptyState(
                   title: patients.isEmpty ? 'No patients uploaded yet' : 'No patients match this filter',
                   subtitle: patients.isEmpty ? null : 'Try a different destination',
                 )

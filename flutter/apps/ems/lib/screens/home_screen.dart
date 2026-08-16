@@ -63,7 +63,7 @@ class HomeScreen extends ConsumerWidget {
                         // sections, instead of shrink-wrapping to its own
                         // content width under the outer Column's .start.
                         data: (patients) => patients.isEmpty
-                            ? const PatientsEmptyState(
+                            ? const EmptyState(
                                 title: 'No patients uploaded yet',
                                 subtitle: 'Tap "Add Patient" above to get started',
                               )

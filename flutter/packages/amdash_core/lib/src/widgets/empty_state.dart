@@ -4,16 +4,17 @@ import '../theme/app_theme.dart';
 
 /// Which vector illustration to draw. `chartPulse` (clipboard + an active
 /// pulse line) is used for the physician desktop viewer pane when nothing
-/// is selected; `routePing` (map pin + radar sweep + dashed route) is used
-/// everywhere else a patient list/dashboard has nothing to show.
+/// is selected; `routePing` (map pin + radar sweep + dashed route) is the
+/// general-purpose one, used everywhere else a list/dashboard has nothing
+/// to show — patients, users, hospitals, organizations alike.
 enum EmptyStateGraphic { chartPulse, routePing }
 
-/// Small vector illustration for wherever there are no patients to show.
-/// Drawn with [CustomPainter] rather than a raster asset, so it stays crisp
-/// at any size/DPI and themes itself automatically via [AppPalette] — no
-/// separate light/dark image to ship or keep in sync.
-class PatientsEmptyIllustration extends StatelessWidget {
-  const PatientsEmptyIllustration({super.key, this.graphic = EmptyStateGraphic.routePing, this.size = 96});
+/// Small vector illustration for wherever a list/dashboard has nothing to
+/// show. Drawn with [CustomPainter] rather than a raster asset, so it stays
+/// crisp at any size/DPI and themes itself automatically via [AppPalette] —
+/// no separate light/dark image to ship or keep in sync.
+class EmptyStateIllustration extends StatelessWidget {
+  const EmptyStateIllustration({super.key, this.graphic = EmptyStateGraphic.routePing, this.size = 96});
 
   final EmptyStateGraphic graphic;
   final double size;
@@ -211,15 +212,16 @@ class _RoutePingPainter extends CustomPainter {
 }
 
 /// Illustration + title + subtitle — the standard "nothing here" layout
-/// shared by every patient list/dashboard/viewer-pane across the apps.
-/// Aligned to the top of the available space (not vertically centered) so
-/// it sits just under whatever heading/filter text precedes it rather than
-/// floating in the true middle of a tall pane. Defaults to
+/// shared by every list/dashboard/viewer-pane across the apps (patient
+/// lists, the EMS dashboard, and admin's users/hospitals/organizations
+/// tables alike). Aligned to the top of the available space (not vertically
+/// centered) so it sits just under whatever heading/filter text precedes it
+/// rather than floating in the true middle of a tall pane. Defaults to
 /// [EmptyStateGraphic.routePing] since that's the more common of the two
 /// placements (list/dashboard empty states outnumber the single desktop
 /// viewer-pane spot that uses `chartPulse`).
-class PatientsEmptyState extends StatelessWidget {
-  const PatientsEmptyState({super.key, required this.title, this.subtitle, this.graphic = EmptyStateGraphic.routePing});
+class EmptyState extends StatelessWidget {
+  const EmptyState({super.key, required this.title, this.subtitle, this.graphic = EmptyStateGraphic.routePing});
 
   final String title;
   final String? subtitle;
@@ -238,7 +240,7 @@ class PatientsEmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            PatientsEmptyIllustration(graphic: graphic),
+            EmptyStateIllustration(graphic: graphic),
             const SizedBox(height: 16),
             Text(
               title,
