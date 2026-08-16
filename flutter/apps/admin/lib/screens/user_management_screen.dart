@@ -265,7 +265,7 @@ class _UsersTable extends StatelessWidget {
       columnWidths: const {
         0: FlexColumnWidth(2),
         1: FlexColumnWidth(2),
-        2: FixedColumnWidth(100),
+        2: FixedColumnWidth(120),
         3: FlexColumnWidth(3),
         4: FixedColumnWidth(56),
       },
@@ -286,7 +286,7 @@ class _UsersTable extends StatelessWidget {
               _cell(user.email),
               _cell('${user.firstName} ${user.lastName}'),
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
+                padding: const EdgeInsets.fromLTRB(0, 8, 12, 8),
                 child: StatusPill(
                   kind: user.disabled
                       ? StatusPillKind.critical
@@ -295,7 +295,7 @@ class _UsersTable extends StatelessWidget {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
+                padding: const EdgeInsets.fromLTRB(0, 8, 12, 8),
                 child: Wrap(
                   spacing: 6,
                   runSpacing: 6,
@@ -320,11 +320,11 @@ class _UsersTable extends StatelessWidget {
   }
 
   Widget _headerCell(BuildContext context, String text) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 8),
+    padding: const EdgeInsets.fromLTRB(0, 8, 12, 8),
     child: Text(text, style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurfaceVariant)),
   );
 
-  Widget _cell(String text) => Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(text));
+  Widget _cell(String text) => Padding(padding: const EdgeInsets.fromLTRB(0, 8, 12, 8), child: Text(text));
 
   // Read-only now — role assignment/removal moved into the Edit User
   // dialog (see edit_user_dialog.dart), which acts on one user at a time
