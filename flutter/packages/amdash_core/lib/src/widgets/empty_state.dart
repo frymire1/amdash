@@ -210,11 +210,14 @@ class _RoutePingPainter extends CustomPainter {
       route != oldDelegate.route || accent != oldDelegate.accent;
 }
 
-/// Illustration + title + subtitle, centered — the standard "nothing here"
-/// layout shared by every patient list/dashboard/viewer-pane across the
-/// apps. Defaults to [EmptyStateGraphic.routePing] since that's the more
-/// common of the two placements (list/dashboard empty states outnumber the
-/// single desktop viewer-pane spot that uses `chartPulse`).
+/// Illustration + title + subtitle — the standard "nothing here" layout
+/// shared by every patient list/dashboard/viewer-pane across the apps.
+/// Aligned to the top of the available space (not vertically centered) so
+/// it sits just under whatever heading/filter text precedes it rather than
+/// floating in the true middle of a tall pane. Defaults to
+/// [EmptyStateGraphic.routePing] since that's the more common of the two
+/// placements (list/dashboard empty states outnumber the single desktop
+/// viewer-pane spot that uses `chartPulse`).
 class PatientsEmptyState extends StatelessWidget {
   const PatientsEmptyState({super.key, required this.title, this.subtitle, this.graphic = EmptyStateGraphic.routePing});
 
@@ -225,9 +228,13 @@ class PatientsEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final onSurfaceVariant = Theme.of(context).colorScheme.onSurfaceVariant;
-    return Center(
+    return Align(
+      alignment: Alignment.topCenter,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
+        // 75px top gap — puts the illustration a fixed distance below the
+        // heading/subtitle text above it instead of drifting to the middle
+        // of whatever space happens to be available.
+        padding: const EdgeInsets.fromLTRB(24, 75, 24, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

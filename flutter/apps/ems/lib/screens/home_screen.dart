@@ -63,12 +63,9 @@ class HomeScreen extends ConsumerWidget {
                         // sections, instead of shrink-wrapping to its own
                         // content width under the outer Column's .start.
                         data: (patients) => patients.isEmpty
-                            ? const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 24),
-                                child: PatientsEmptyState(
-                                  title: 'No patients uploaded yet',
-                                  subtitle: 'Tap "Add Patient" above to get started',
-                                ),
+                            ? const PatientsEmptyState(
+                                title: 'No patients uploaded yet',
+                                subtitle: 'Tap "Add Patient" above to get started',
                               )
                             : Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
