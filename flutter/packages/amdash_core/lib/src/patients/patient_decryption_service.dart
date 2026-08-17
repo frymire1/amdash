@@ -70,22 +70,22 @@ class PatientFieldCache extends Notifier<Map<String, DecryptedPatientFields>> {
   @override
   Map<String, DecryptedPatientFields> build() => const {};
 
-  void putAll(Map<String, DecryptedPatientFields> entries) {
-    if (entries.isEmpty) return;
-    state = {...state, ...entries};
-  }
-
   // A cached entry only ever gets refreshed by [pullMissingDecryptedPatientFields]
   // when a patient id is entirely absent from the cache — so once a patient's
   // fields are cached, they'd otherwise stay stuck at whatever they were the
   // first time they were decrypted, even after an edit changes the underlying
   // ciphertext. Callers that just wrote a new name/healthcareNumber for a
-  // patient (EMS's edit form) must evict it here so the next render re-pulls
-  // the real current value instead of showing stale data.
-  void evict(String patientId) {
-    if (!state.containsKey(patientId)) return;
-    final next = {...state}..remove(patientId);
-    state = next;
+  // patient (EMS's edit form) MUST call this with the known new value —
+  // confirmed via testing that removing the stale entry and waiting for
+  // [pullMissingDecryptedPatientFields] to notice and re-pull it doesn't
+  // reliably repaint an already-open screen (a fresh page load's own
+  // decrypt-pull works fine; an in-place cache invalidation did not).
+  // Writing the correct value directly, as this method already does for
+  // the normal decrypt-pull path, sidesteps that gap rather than
+  // depending on a `remove`-then-re-fetch round trip to work.
+  void putAll(Map<String, DecryptedPatientFields> entries) {
+    if (entries.isEmpty) return;
+    state = {...state, ...entries};
   }
 }
 

@@ -53,6 +53,12 @@ class PatientFormValues {
 
 const _optionalTopLevelFields = ['location', 'ivSize', 'ivPlacement', 'treatment'];
 
+/// The literal blank-field sentinel EMS writes when name/healthcareNumber
+/// are left empty — shared so `patient_upload_screen.dart` can resolve a
+/// just-saved value identically when seeding the decrypt cache (see
+/// `_onSubmit`), rather than duplicating this rule and risking drift.
+String resolveBlankField(String value) => value.isNotEmpty ? value : 'Unknown';
+
 /// Mirrors `apps/ems/src/app/services/patient-upload.service.ts`: direct
 /// Firestore writes to `patients` (no Cloud Function — EMS accounts write
 /// this collection directly, per firestore.rules). The one exception is
@@ -70,8 +76,8 @@ class PatientUploadService {
   Future<Map<String, Object?>> _patientFields(PatientFormValues value) async {
     final hasLocation = value.latitude != null && value.longitude != null;
 
-    final name = value.name.isNotEmpty ? value.name : 'Unknown';
-    final healthcareNumber = value.healthcareNumber.isNotEmpty ? value.healthcareNumber : 'Unknown';
+    final name = resolveBlankField(value.name);
+    final healthcareNumber = resolveBlankField(value.healthcareNumber);
 
     // Deliberately never falls back to writing the plaintext values above
     // on failure — that would make Canadian data residency fail silently
