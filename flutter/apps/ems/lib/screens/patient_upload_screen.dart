@@ -229,6 +229,16 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
       if (_editingId != null) {
         id = _editingId!;
         await uploadService.updatePatient(id, values);
+        // The decrypt cache (amdash_core) only re-pulls a patient it's never
+        // seen before — without this, this patient's name/healthcare number
+        // would keep showing whatever this app cached before the edit, even
+        // after navigating back to the list. The cache is per-app-instance,
+        // not shared across clients, so this only fixes this app's own
+        // view — a physician tab that already had this patient cached
+        // before the edit won't see the update until it reloads. Closing
+        // that gap for real would mean the push-bridge design explicitly
+        // deferred earlier, not a small fix.
+        ref.read(patientFieldCacheProvider.notifier).evict(id);
       } else {
         id = await uploadService.uploadPatient(values, organizationId ?? '');
         // If live tracking below fails, stay on this page to retry rather

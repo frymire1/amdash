@@ -74,6 +74,19 @@ class PatientFieldCache extends Notifier<Map<String, DecryptedPatientFields>> {
     if (entries.isEmpty) return;
     state = {...state, ...entries};
   }
+
+  // A cached entry only ever gets refreshed by [pullMissingDecryptedPatientFields]
+  // when a patient id is entirely absent from the cache — so once a patient's
+  // fields are cached, they'd otherwise stay stuck at whatever they were the
+  // first time they were decrypted, even after an edit changes the underlying
+  // ciphertext. Callers that just wrote a new name/healthcareNumber for a
+  // patient (EMS's edit form) must evict it here so the next render re-pulls
+  // the real current value instead of showing stale data.
+  void evict(String patientId) {
+    if (!state.containsKey(patientId)) return;
+    final next = {...state}..remove(patientId);
+    state = next;
+  }
 }
 
 final patientFieldCacheProvider = NotifierProvider<PatientFieldCache, Map<String, DecryptedPatientFields>>(
