@@ -11,6 +11,7 @@ export type AuditAction =
   | 'user.disable'
   | 'user.enable'
   | 'user.resendInvite'
+  | 'user.resetMfa'
   | 'user.roleAdd'
   | 'user.roleRemove'
   | 'hospital.create'

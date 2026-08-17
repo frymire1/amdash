@@ -9,8 +9,12 @@ import '../theme/app_theme.dart';
 /// submitting an email decides server-side (via `checkAccountStatus`)
 /// whether this lands on "not activated" (no account — AmDash has no
 /// self-registration), "set a password" (an admin-created account with no
-/// password yet), or a normal password sign-in.
-enum _LoginStep { email, notActivated, setPassword, signIn }
+/// password yet), or a normal password sign-in. `mfaChallenge` is newer
+/// than the Angular source this mirrors — reached only from `signIn` when
+/// Firebase itself throws `FirebaseAuthMultiFactorException` for an
+/// already-enrolled account (a brand-new account reaching `setPassword`
+/// can never have an enrolled factor yet, so that step never sees this).
+enum _LoginStep { email, notActivated, setPassword, signIn, mfaChallenge }
 
 /// Shared across every app (mirrors `libs/auth`'s NX-shared `LoginComponent`)
 /// — [appName] is the only per-app customization (e.g. `'AmDash — EMS'`).
@@ -27,6 +31,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _mfaCodeController = TextEditingController();
 
   _LoginStep _step = _LoginStep.email;
   bool _submitting = false;
@@ -35,6 +40,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _obscureConfirmPassword = true;
   String? _errorMessage;
   String? _resetMessage;
+
+  // Set only when Firebase throws FirebaseAuthMultiFactorException from
+  // _submitSignIn — carries the in-flight challenge until resolved.
+  MultiFactorResolver? _mfaResolver;
 
   @override
   void initState() {
@@ -48,6 +57,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _mfaCodeController.dispose();
     super.dispose();
   }
 
@@ -116,8 +126,46 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     try {
       await ref.read(authServiceProvider).signIn(_emailController.text.trim(), _passwordController.text);
+      // On success, authStateProvider picks up the new session and the
+      // app's router redirect takes over — nothing further to do here.
+    } on FirebaseAuthMultiFactorException catch (e) {
+      // Must come before the bare `on FirebaseAuthException` clause below
+      // — this extends it, and Dart matches catch clauses in source order,
+      // so the reverse order would silently misreport every real MFA
+      // challenge as "Invalid email or password" instead of prompting for
+      // the code. Firebase throws this mid-sign-in for an
+      // already-enrolled account; the session isn't fully established
+      // until resolveSignIn() below succeeds.
+      setState(() => _mfaResolver = e.resolver);
+      setState(() => _step = _LoginStep.mfaChallenge);
     } on FirebaseAuthException {
       setState(() => _errorMessage = 'Invalid email or password.');
+    } catch (error) {
+      setState(() => _errorMessage = 'Something went wrong. Please try again.');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  Future<void> _submitMfaChallenge() async {
+    final resolver = _mfaResolver;
+    final code = _mfaCodeController.text.trim();
+    if (resolver == null || code.isEmpty) return;
+
+    setState(() {
+      _submitting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final hint = resolver.hints.firstWhere((h) => h.factorId == 'totp');
+      final assertion = await TotpMultiFactorGenerator.getAssertionForSignIn(hint.uid, code);
+      await resolver.resolveSignIn(assertion);
+      // Same pattern as every other success path in this file — let the
+      // router's redirect react to authStateProvider rather than
+      // navigating explicitly.
+    } on FirebaseAuthException {
+      setState(() => _errorMessage = "That code didn't work. Please try again.");
     } catch (error) {
       setState(() => _errorMessage = 'Something went wrong. Please try again.');
     } finally {
@@ -149,6 +197,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _resetMessage = null;
       _passwordController.clear();
       _confirmPasswordController.clear();
+      _mfaCodeController.clear();
+      _mfaResolver = null;
     });
   }
 
@@ -320,6 +370,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           FilledButton(
             onPressed: _submitting ? null : _submitSignIn,
             child: _submitting ? _spinner(label: 'Signing in…') : const Text('Sign In'),
+          ),
+          const SizedBox(height: 4),
+          TextButton(onPressed: _useDifferentEmail, child: const Text('Use a different email')),
+        ];
+      case _LoginStep.mfaChallenge:
+        return [
+          const Text('Enter the 6-digit code from your authenticator app'),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _mfaCodeController,
+            decoration: const InputDecoration(labelText: '6-digit code'),
+            keyboardType: TextInputType.number,
+            maxLength: 6,
+            autofocus: true,
+            onSubmitted: (_) => _submitMfaChallenge(),
+          ),
+          if (_errorMessage != null) _errorText(context, _errorMessage!),
+          const SizedBox(height: 8),
+          FilledButton(
+            onPressed: _submitting ? null : _submitMfaChallenge,
+            child: _submitting ? _spinner(label: 'Verifying…') : const Text('Verify'),
           ),
           const SizedBox(height: 4),
           TextButton(onPressed: _useDifferentEmail, child: const Text('Use a different email')),

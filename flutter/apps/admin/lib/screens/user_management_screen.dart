@@ -265,7 +265,7 @@ class _UsersTable extends StatelessWidget {
       columnWidths: const {
         0: FlexColumnWidth(2),
         1: FlexColumnWidth(2),
-        2: FixedColumnWidth(120),
+        2: FixedColumnWidth(130),
         3: FlexColumnWidth(3),
         4: FixedColumnWidth(56),
       },
@@ -287,11 +287,22 @@ class _UsersTable extends StatelessWidget {
               _cell('${user.firstName} ${user.lastName}'),
               Padding(
                 padding: const EdgeInsets.fromLTRB(0, 8, 12, 8),
-                child: StatusPill(
-                  kind: user.disabled
-                      ? StatusPillKind.critical
-                      : (user.hasPassword ? StatusPillKind.active : StatusPillKind.warning),
-                  label: user.disabled ? 'Suspended' : (user.hasPassword ? 'Active' : 'Invited'),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    StatusPill(
+                      kind: user.disabled
+                          ? StatusPillKind.critical
+                          : (user.hasPassword ? StatusPillKind.active : StatusPillKind.warning),
+                      label: user.disabled ? 'Suspended' : (user.hasPassword ? 'Active' : 'Invited'),
+                    ),
+                    const SizedBox(height: 4),
+                    StatusPill(
+                      kind: user.mfaEnrolled ? StatusPillKind.active : StatusPillKind.warning,
+                      label: user.mfaEnrolled ? 'MFA on' : 'MFA off',
+                    ),
+                  ],
                 ),
               ),
               Padding(

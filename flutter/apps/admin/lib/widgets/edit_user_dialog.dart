@@ -57,6 +57,14 @@ class _EditUserDialogState extends ConsumerState<EditUserDialog> {
   String? _statusMessage;
   bool _statusIsError = false;
 
+  // Derived server-side (functions/src/admin.ts's listUsersWithRoles) from
+  // the real Auth-side enrollment state — resetUserMfa doesn't return an
+  // updated value, so this just latches "reset" locally rather than
+  // guessing a new enrolled/not-enrolled state; widget.onChanged()
+  // refreshes the real value from the table's next fetch.
+  late bool _mfaEnrolled = widget.user.mfaEnrolled;
+  bool _resettingMfa = false;
+
   bool _deleting = false;
   String? _deleteError;
 
@@ -221,6 +229,42 @@ class _EditUserDialogState extends ConsumerState<EditUserDialog> {
     }
   }
 
+  Future<void> _resetMfa() async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Reset two-step sign-in?',
+      message:
+          '${widget.user.firstName} ${widget.user.lastName} will be asked to set up two-step sign-in from '
+          "scratch the next time they sign in — use this if they've lost their authenticator device.",
+      confirmLabel: 'Reset',
+    );
+    if (!confirmed || !mounted) return;
+
+    setState(() {
+      _resettingMfa = true;
+      _statusMessage = null;
+    });
+    try {
+      await ref.read(adminServiceProvider).resetUserMfa(widget.user.uid);
+      if (mounted) {
+        setState(() {
+          _mfaEnrolled = false;
+          _statusMessage = 'Two-step sign-in reset.';
+          _statusIsError = false;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _statusMessage = _errorMessage(error, 'Failed to reset two-step sign-in.');
+          _statusIsError = true;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _resettingMfa = false);
+    }
+  }
+
   Future<void> _deleteAccount() async {
     final confirmed = await showConfirmDialog(
       context,
@@ -337,11 +381,21 @@ class _EditUserDialogState extends ConsumerState<EditUserDialog> {
               const Divider(height: 32),
               const Text('Account Status', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              StatusPill(
-                kind: _disabled
-                    ? StatusPillKind.critical
-                    : (_hasPassword ? StatusPillKind.active : StatusPillKind.warning),
-                label: _disabled ? 'Suspended' : (_hasPassword ? 'Active' : 'Invited'),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  StatusPill(
+                    kind: _disabled
+                        ? StatusPillKind.critical
+                        : (_hasPassword ? StatusPillKind.active : StatusPillKind.warning),
+                    label: _disabled ? 'Suspended' : (_hasPassword ? 'Active' : 'Invited'),
+                  ),
+                  StatusPill(
+                    kind: _mfaEnrolled ? StatusPillKind.active : StatusPillKind.warning,
+                    label: _mfaEnrolled ? 'Two-step sign-in on' : 'Two-step sign-in not set up',
+                  ),
+                ],
               ),
               if (_statusMessage != null) FormMessage(text: _statusMessage!, isError: _statusIsError),
               const SizedBox(height: 12),
@@ -371,6 +425,16 @@ class _EditUserDialogState extends ConsumerState<EditUserDialog> {
                           )
                         : Icon(_disabled ? Icons.play_circle_outline : Icons.pause_circle_outline),
                     label: Text(_togglingDisabled ? 'Updating…' : (_disabled ? 'Reactivate' : 'Suspend')),
+                  ),
+                  // Available regardless of _mfaEnrolled — an admin might
+                  // use this on a still-enrolled-but-locked-out user too,
+                  // not just an obviously-unenrolled one.
+                  OutlinedButton.icon(
+                    onPressed: _resettingMfa ? null : _resetMfa,
+                    icon: _resettingMfa
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.lock_reset),
+                    label: Text(_resettingMfa ? 'Resetting…' : 'Reset Two-Step Sign-In'),
                   ),
                 ],
               ),

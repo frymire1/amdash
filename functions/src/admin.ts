@@ -13,6 +13,7 @@ import { UpdateUserRequest } from './classes/update-user-request';
 import { DeleteUserRequest } from './classes/delete-user-request';
 import { SetUserDisabledRequest } from './classes/set-user-disabled-request';
 import { ResendInviteRequest } from './classes/resend-invite-request';
+import { ResetUserMfaRequest } from './classes/reset-user-mfa-request';
 import { CreateHospitalRequest } from './classes/create-hospital-request';
 import { UpdateHospitalRequest } from './classes/update-hospital-request';
 import { DeleteHospitalRequest } from './classes/delete-hospital-request';
@@ -331,6 +332,45 @@ export const setUserDisabled = onCall<SetUserDisabledRequest>({ region: REGION }
   return { uid, disabled };
 });
 
+// The only real recovery path for a user who's lost their authenticator
+// device: self-service can't fix a true lockout, since a user who can't
+// complete the second factor never gets an authenticated session to call
+// any self-service callable from (see flutter/packages/amdash_core/lib/
+// src/widgets/mfa_security_card.dart's own doc comment). Clearing
+// enrolledFactors just routes the target back through mandatory
+// /mfa-setup on their next successful sign-in, same as a brand-new
+// account — no special-casing needed client-side. Not gated on the
+// target's current enrollment status: an admin might use this on a
+// still-enrolled-but-locked-out user too, not just an obviously-disabled
+// one.
+export const resetUserMfa = onCall<ResetUserMfaRequest>({ region: REGION }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+  requireAdmin(profile, "Only admins can reset a user's two-step sign-in.");
+
+  const { uid } = request.data;
+  if (!uid) {
+    throw new HttpsError('invalid-argument', 'A uid is required.');
+  }
+
+  const targetDocRef = getFirestore().collection('users').doc(uid);
+  const targetDoc = await targetDocRef.get();
+  if (!targetDoc.exists) {
+    throw new HttpsError('not-found', 'That user no longer exists.');
+  }
+  requireSameOrg(profile, targetDoc.data()?.['organizationId'], 'That user is not a member of your organization.');
+
+  await getAuth().updateUser(uid, { multiFactor: { enrolledFactors: [] } });
+
+  await logAudit({
+    action: 'user.resetMfa',
+    actor: profile,
+    organizationId: profile.organizationId,
+    target: uid,
+  });
+
+  return { uid };
+});
+
 // Resends the welcome email (see email.ts) for an account that hasn't set
 // a password yet — recovers a lost/bounced invite without recreating the
 // account (which would fail anyway: the email already exists in Auth).
@@ -401,13 +441,19 @@ export const listUsersWithRoles = onCall({ region: REGION }, async (request) => 
     .get();
 
   const uids = profileDocs.docs.map((docSnapshot) => docSnapshot.id);
-  const authByUid = new Map<string, { disabled: boolean; hasPassword: boolean }>();
+  const authByUid = new Map<string, { disabled: boolean; hasPassword: boolean; mfaEnrolled: boolean }>();
   if (uids.length > 0) {
     const { users: authUsers } = await getAuth().getUsers(uids.map((uid) => ({ uid })));
     for (const authUser of authUsers) {
       authByUid.set(authUser.uid, {
         disabled: authUser.disabled,
         hasPassword: authUser.providerData.some((provider) => provider.providerId === 'password'),
+        // Derived server-side from the same batched lookup already used
+        // for disabled/hasPassword — never trust a client-written
+        // Firestore field for this, since firestore.rules' users/{userId}
+        // block would let a client self-report a fake value with no way
+        // to cross-check it against the real Auth-side enrollment state.
+        mfaEnrolled: (authUser.multiFactor?.enrolledFactors.length ?? 0) > 0,
       });
     }
   }
@@ -424,6 +470,7 @@ export const listUsersWithRoles = onCall({ region: REGION }, async (request) => 
       role: Array.isArray(roles) ? roles : [],
       disabled: authInfo?.disabled ?? false,
       hasPassword: authInfo?.hasPassword ?? false,
+      mfaEnrolled: authInfo?.mfaEnrolled ?? false,
     };
   });
 });

@@ -33,6 +33,20 @@ String? _adminRedirect(Ref ref, GoRouterState state) {
   }
   if (isLoggingIn) return '/';
 
+  // Mirrors AppRouteGuard's own MFA tier (physician/EMS get this for free
+  // via that shared guard; admin doesn't use it at all, so this is a
+  // hand-added copy of the same logic) — inserted before the
+  // /user-settings/access-denied any-signed-in-user exemption below, so
+  // that exemption itself requires MFA first too. See mfaEnrolledFactorsProvider's
+  // own doc comment for why this is a synchronous FutureProvider read
+  // rather than an inline await.
+  final mfaState = ref.read(mfaEnrolledFactorsProvider);
+  if (mfaState.isLoading) return null;
+  final hasMfa = (mfaState.valueOrNull ?? const []).isNotEmpty;
+  if (!hasMfa) {
+    return state.matchedLocation == '/mfa-setup' ? null : '/mfa-setup';
+  }
+
   final profileState = ref.read(userProfileProvider);
   if (profileState.isLoading) return null;
   final profile = profileState.valueOrNull;
@@ -80,6 +94,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/access-denied',
         pageBuilder: (context, state) =>
             fastFadePage(context, state, const AppBackground(child: AccessDeniedScreen(appName: 'Admin'))),
+      ),
+      GoRoute(
+        path: '/mfa-setup',
+        pageBuilder: (context, state) => fastFadePage(context, state, const AppBackground(child: MfaSetupScreen())),
       ),
       // Pure redirect target, same as `landing.guard.ts` — never renders
       // its real content. While the profile is still loading,

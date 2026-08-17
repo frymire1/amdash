@@ -11,6 +11,7 @@ class ManagedUser {
     required this.role,
     required this.disabled,
     required this.hasPassword,
+    required this.mfaEnrolled,
   });
 
   factory ManagedUser.fromJson(Map<Object?, Object?> json) {
@@ -28,6 +29,7 @@ class ManagedUser {
       // "active" rather than treating a missing field as suspended/pending.
       disabled: json['disabled'] as bool? ?? false,
       hasPassword: json['hasPassword'] as bool? ?? true,
+      mfaEnrolled: json['mfaEnrolled'] as bool? ?? false,
     );
   }
 
@@ -38,6 +40,7 @@ class ManagedUser {
   final List<UserRole> role;
   final bool disabled;
   final bool hasPassword;
+  final bool mfaEnrolled;
 }
 
 /// Mirrors `ASSIGNABLE_ROLES` (`functions/src/admin.ts`) — an admin can

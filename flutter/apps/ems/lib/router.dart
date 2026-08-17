@@ -33,6 +33,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) =>
             fastFadePage(context, state, const AppBackground(child: AccessDeniedScreen(appName: 'EMS'))),
       ),
+      GoRoute(
+        path: '/mfa-setup',
+        pageBuilder: (context, state) => fastFadePage(context, state, const AppBackground(child: MfaSetupScreen())),
+      ),
       // A persistent Scaffold+NavBar shell — kept outside GoRouter's normal
       // per-route page transition, so the navbar no longer visibly
       // unmounts/re-animates on every in-app navigation.

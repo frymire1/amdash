@@ -3,12 +3,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../auth/auth_service.dart';
+import '../auth/mfa_service.dart';
 import '../auth/user_profile_service.dart';
 import '../models/user_profile.dart';
 
-/// Mirrors `libs/auth/src/lib/guards/auth.guard.ts`'s 3-tier redirect
-/// chain (auth -> role -> work-location), each waiting for the relevant
-/// "loaded" state before deciding, same order as the Angular guards.
+/// Mirrors `libs/auth/src/lib/guards/auth.guard.ts`'s redirect chain (auth
+/// -> MFA -> role -> work-location), each waiting for the relevant
+/// "loaded" state before deciding, same order the Angular guards used for
+/// the first three tiers — the MFA tier is new here (Angular predates
+/// this feature). It sits right after the auth check and before the role
+/// check: MFA is account-wide, not app-specific, so "mandatory for every
+/// account" reads as "you cannot reach anything without it," rather than
+/// only being enforced once an app has already decided you belong there.
 /// `requiredRoles` matches `physicianAppGuard`/`emsAppGuard`/`adminGuard`
 /// (`roleGuard(...allowedRoles)` in the Angular source — a user needs only
 /// one of them, e.g. physician's own guard accepts `physician` OR `nurse`);
@@ -22,9 +28,11 @@ class AppRouteGuard {
     required GoRouterState state,
     required List<UserRole> requiredRoles,
     bool requireWorkLocation = false,
+    bool requireMfa = true,
     String loginPath = '/login',
     String accessDeniedPath = '/access-denied',
     String workLocationPath = '/work-location',
+    String mfaSetupPath = '/mfa-setup',
     String homePath = '/',
   }) {
     final authState = ref.read(authStateProvider);
@@ -37,6 +45,20 @@ class AppRouteGuard {
       return isLoggingIn ? null : loginPath;
     }
     if (isLoggingIn) return homePath;
+
+    if (requireMfa) {
+      // getEnrolledFactors() is a real async platform-channel call (no
+      // synchronous field exists on the SDK) — mfaEnrolledFactorsProvider
+      // wraps it in a FutureProvider keyed off authStateProvider so this
+      // stays a synchronous read like every other tier here, rather than
+      // firing a live call on every navigation attempt.
+      final mfaState = ref.read(mfaEnrolledFactorsProvider);
+      if (mfaState.isLoading) return null;
+      final hasMfa = (mfaState.valueOrNull ?? const []).isNotEmpty;
+      if (!hasMfa) {
+        return state.matchedLocation == mfaSetupPath ? null : mfaSetupPath;
+      }
+    }
 
     final profileState = ref.read(userProfileProvider);
     if (profileState.isLoading) return null;
@@ -78,5 +100,6 @@ class RouterRefreshNotifier extends ChangeNotifier {
   RouterRefreshNotifier(Ref ref) {
     ref.listen(authStateProvider, (_, _) => notifyListeners());
     ref.listen(userProfileProvider, (_, _) => notifyListeners());
+    ref.listen(mfaEnrolledFactorsProvider, (_, _) => notifyListeners());
   }
 }

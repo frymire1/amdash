@@ -37,11 +37,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/work-location',
         pageBuilder: (context, state) => fastFadePage(context, state, const AppBackground(child: WorkLocationScreen())),
       ),
+      GoRoute(
+        path: '/mfa-setup',
+        pageBuilder: (context, state) => fastFadePage(context, state, const AppBackground(child: MfaSetupScreen())),
+      ),
       // A persistent Scaffold+NavBar shell — kept outside GoRouter's normal
       // per-route page transition, so the navbar no longer visibly
       // unmounts/re-animates on every in-app navigation (only /login,
-      // /access-denied, /work-location are exempt, since those aren't
-      // "using the app" yet).
+      // /access-denied, /work-location, /mfa-setup are exempt, since those
+      // aren't "using the app" yet).
       ShellRoute(
         builder: (context, state, child) =>
             Scaffold(appBar: const NavBar(), body: AppBackground(child: child)),

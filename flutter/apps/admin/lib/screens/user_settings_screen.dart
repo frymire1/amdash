@@ -142,6 +142,8 @@ class _UserSettingsScreenState extends ConsumerState<UserSettingsScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
+                const MfaSecurityCard(),
+                const SizedBox(height: 16),
                 const _AppearanceCard(),
               ],
             ),

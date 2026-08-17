@@ -81,6 +81,13 @@ class AdminService {
     return _functions.httpsCallable('resendInvite').call<Map<Object?, Object?>>({'uid': uid});
   }
 
+  // The only real recovery path for a user locked out after losing their
+  // authenticator device — see resetUserMfa's own doc comment in
+  // functions/src/admin.ts for why self-service can't fix that case.
+  Future<void> resetUserMfa(String uid) {
+    return _functions.httpsCallable('resetUserMfa').call<Map<Object?, Object?>>({'uid': uid});
+  }
+
   Future<List<AuditLogEntry>> listAuditLog() async {
     final callable = _functions.httpsCallable('listAuditLog');
     final result = await callable.call<List<Object?>>();
