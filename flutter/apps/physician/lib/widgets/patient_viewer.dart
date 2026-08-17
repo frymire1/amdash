@@ -198,6 +198,7 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
             child: EmptyState(
               graphic: EmptyStateGraphic.chartPulse,
               title: 'Select a patient to view details',
+              centered: true,
             ),
           ),
         ],

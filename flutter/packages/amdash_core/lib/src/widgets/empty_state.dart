@@ -214,29 +214,43 @@ class _RoutePingPainter extends CustomPainter {
 /// Illustration + title + subtitle — the standard "nothing here" layout
 /// shared by every list/dashboard/viewer-pane across the apps (patient
 /// lists, the EMS dashboard, and admin's users/hospitals/organizations
-/// tables alike). Aligned to the top of the available space (not vertically
-/// centered) so it sits just under whatever heading/filter text precedes it
-/// rather than floating in the true middle of a tall pane. Defaults to
-/// [EmptyStateGraphic.routePing] since that's the more common of the two
-/// placements (list/dashboard empty states outnumber the single desktop
-/// viewer-pane spot that uses `chartPulse`).
+/// tables alike). Aligned to the top of the available space by default (not
+/// vertically centered) so it sits just under whatever heading/filter text
+/// precedes it rather than floating in the true middle of a tall pane.
+/// Defaults to [EmptyStateGraphic.routePing] since that's the more common of
+/// the two placements (list/dashboard empty states outnumber the single
+/// desktop viewer-pane spot that uses `chartPulse`).
 class EmptyState extends StatelessWidget {
-  const EmptyState({super.key, required this.title, this.subtitle, this.graphic = EmptyStateGraphic.routePing});
+  const EmptyState({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.graphic = EmptyStateGraphic.routePing,
+    this.centered = false,
+  });
 
   final String title;
   final String? subtitle;
   final EmptyStateGraphic graphic;
 
+  /// Vertically centers the illustration/title/subtitle instead of the
+  /// default top-alignment — for the rare spot (physician's `PatientViewer`
+  /// "select a patient" placeholder) with no heading/filter text above it to
+  /// sit under, where top-alignment just strands it near the top of an
+  /// otherwise-empty pane.
+  final bool centered;
+
   @override
   Widget build(BuildContext context) {
     final onSurfaceVariant = Theme.of(context).colorScheme.onSurfaceVariant;
     return Align(
-      alignment: Alignment.topCenter,
+      alignment: centered ? Alignment.center : Alignment.topCenter,
       child: Padding(
-        // 75px top gap — puts the illustration a fixed distance below the
-        // heading/subtitle text above it instead of drifting to the middle
-        // of whatever space happens to be available.
-        padding: const EdgeInsets.fromLTRB(24, 75, 24, 24),
+        // Top-aligned case: 75px top gap puts the illustration a fixed
+        // distance below the heading/subtitle text above it instead of
+        // drifting to the middle of whatever space happens to be available.
+        // Centered case: no heading to sit under, so plain even padding.
+        padding: centered ? const EdgeInsets.all(24) : const EdgeInsets.fromLTRB(24, 75, 24, 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
