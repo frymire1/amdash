@@ -37,10 +37,20 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
   bool _loading = true;
   String? _error;
 
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
+
   @override
   void initState() {
     super.initState();
     _refresh();
+    _searchController.addListener(() => setState(() => _searchQuery = _searchController.text.trim().toLowerCase()));
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _refresh() async {
@@ -56,6 +66,14 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  // Client-side, over the already-fetched last-100 entries — same reasoning
+  // as user_management_screen.dart's own search: no server round trip
+  // needed for a dataset this small that's already fully loaded.
+  List<AuditLogEntry> _filteredEntries() {
+    if (_searchQuery.isEmpty) return _entries;
+    return _entries.where((entry) => entry.actorEmail.toLowerCase().contains(_searchQuery)).toList();
   }
 
   @override
@@ -89,8 +107,27 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
                 FormMessage(text: _error!, isError: true)
               else if (_entries.isEmpty)
                 const EmptyState(title: 'No activity yet', graphic: EmptyStateGraphic.chartPulse)
-              else
-                _AuditLogTable(entries: _entries),
+              else ...[
+                TextField(
+                  controller: _searchController,
+                  decoration: const InputDecoration(
+                    labelText: 'Search',
+                    hintText: 'Filter by user email',
+                    prefixIcon: Icon(Icons.search),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Builder(
+                  builder: (context) {
+                    final filtered = _filteredEntries();
+                    if (filtered.isEmpty) {
+                      return const EmptyState(title: 'No activity matches this search', graphic: EmptyStateGraphic.chartPulse);
+                    }
+                    return _AuditLogTable(entries: filtered);
+                  },
+                ),
+              ],
             ],
           ),
         ),
