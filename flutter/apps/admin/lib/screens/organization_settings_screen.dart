@@ -48,6 +48,10 @@ class _OrganizationSettingsScreenState extends ConsumerState<OrganizationSetting
   String? _cmekMessage;
   bool _cmekIsError = false;
 
+  bool _savingAuditLogging = false;
+  String? _auditLoggingMessage;
+  bool _auditLoggingIsError = false;
+
   Future<void> _setRetention(bool value) async {
     setState(() {
       _saving = true;
@@ -115,6 +119,25 @@ class _OrganizationSettingsScreenState extends ConsumerState<OrganizationSetting
     }
   }
 
+  Future<void> _setAuditLoggingEnabled(bool value) async {
+    setState(() {
+      _savingAuditLogging = true;
+      _auditLoggingMessage = null;
+    });
+    try {
+      await ref.read(adminServiceProvider).setOrganizationAuditLogging(value);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _auditLoggingMessage = 'Failed to save. Please try again.';
+          _auditLoggingIsError = true;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _savingAuditLogging = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final organization = ref.watch(ownOrganizationProvider).valueOrNull;
@@ -122,6 +145,11 @@ class _OrganizationSettingsScreenState extends ConsumerState<OrganizationSetting
     if (organization != null) _prefillCountryIfNeeded(organization);
     final isCanadian = organization?.country == 'CA';
     final cmekRequested = organization?.cmekRequested ?? false;
+    // Missing/never-set defaults to enabled — matches audit.ts's own
+    // default, so an org that's never touched this toggle keeps getting
+    // patient-record audit logging exactly as it already did before this
+    // setting existed.
+    final auditLoggingEnabled = organization?.auditLoggingEnabled ?? true;
 
     return AdminPage(
       children: [
@@ -185,6 +213,37 @@ class _OrganizationSettingsScreenState extends ConsumerState<OrganizationSetting
             ],
           ),
         ),
+        AdminCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Patient Record Audit Logging', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              const Text(
+                'Log who creates, edits, completes, or deletes a patient record, and who views a patient\'s '
+                'decrypted name/healthcare number — visible on the Audit Log page. User, hospital, and '
+                'organization management actions are always logged regardless of this setting.',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Switch(
+                    value: auditLoggingEnabled,
+                    onChanged: _savingAuditLogging || organization == null ? null : _setAuditLoggingEnabled,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(auditLoggingEnabled ? 'Logging patient record actions' : 'Not logging patient record actions'),
+                  if (_savingAuditLogging) ...[
+                    const SizedBox(width: 12),
+                    const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                  ],
+                ],
+              ),
+              if (_auditLoggingMessage != null) FormMessage(text: _auditLoggingMessage!, isError: _auditLoggingIsError),
+            ],
+          ),
+        ),
         if (isCanadian)
           AdminCard(
             child: Column(
@@ -193,11 +252,10 @@ class _OrganizationSettingsScreenState extends ConsumerState<OrganizationSetting
                 const Text('Canadian Data Residency (Cloud KMS)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 const Text(
-                  "Request that this organization's patient data be encrypted with a Canada-based Cloud KMS "
-                  "key, as an added data-residency safeguard. Turning this on records your request only — it "
-                  "doesn't immediately change how data is stored. Enabling real per-organization encryption "
-                  "requires dedicated key infrastructure that gets provisioned and verified separately before "
-                  "it takes effect.",
+                  "Encrypt this organization's patient name and healthcare number with a dedicated, "
+                  "Canada-based Cloud KMS key, as a CLOUD Act / data-residency safeguard. Existing records "
+                  "aren't retroactively encrypted — this applies to patients created or edited from when "
+                  "it's turned on.",
                   style: TextStyle(fontSize: 13),
                 ),
                 const SizedBox(height: 12),

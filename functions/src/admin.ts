@@ -20,6 +20,7 @@ import { CreateOrganizationRequest } from './classes/create-organization-request
 import { SetOrganizationRetentionRequest } from './classes/set-organization-retention-request';
 import { SetOrganizationCountryRequest } from './classes/set-organization-country-request';
 import { SetOrganizationCmekRequest } from './classes/set-organization-cmek-request';
+import { SetOrganizationAuditLoggingRequest } from './classes/set-organization-audit-logging-request';
 import { GeocodeResult } from './classes/geocode-result';
 import { REGION, findUserByEmail, getCallerProfile } from './shared';
 import { getOrCreateOrgKey } from './kms';
@@ -733,11 +734,43 @@ export const setOrganizationCmekPreference = onCall<SetOrganizationCmekRequest>(
   return { cmekRequested };
 });
 
+// Toggles whether this org's patient-record actions (create/update/
+// complete/delete/decrypt) get written to the audit log — see audit.ts's
+// GATED_ACTIONS for exactly what this does and doesn't cover; org/user/
+// hospital management actions (including this one) are never gated by it.
+// Missing/never-set defaults to enabled (audit.ts), so this callable only
+// ever needs to persist an explicit true/false once an admin actually
+// touches the toggle.
+export const setOrganizationAuditLogging = onCall<SetOrganizationAuditLoggingRequest>(
+  { region: REGION },
+  async (request) => {
+    const profile = await getCallerProfile(request.auth?.uid);
+    requireAdmin(profile, 'Only admins can change audit logging settings.');
+
+    const { auditLoggingEnabled } = request.data;
+    if (typeof auditLoggingEnabled !== 'boolean') {
+      throw new HttpsError('invalid-argument', 'auditLoggingEnabled must be a boolean.');
+    }
+
+    await getFirestore().collection('organizations').doc(profile.organizationId as string).update({ auditLoggingEnabled });
+
+    await logAudit({
+      action: 'organization.setAuditLogging',
+      actor: profile,
+      organizationId: profile.organizationId,
+      details: { auditLoggingEnabled },
+    });
+
+    return { auditLoggingEnabled };
+  },
+);
+
 // Returns the caller's org's most recent audit entries — admin.ts's own
 // mutations (createUser/updateUser/deleteUser/setUserDisabled/
 // resendInvite/setUserRole/removeUserRole/createHospital/updateHospital/
 // deleteHospital/createOrganization/setOrganizationRetention/
-// setOrganizationCountry/setOrganizationCmekPreference) plus the
+// setOrganizationCountry/setOrganizationCmekPreference/
+// setOrganizationAuditLogging) plus the
 // patient-record events logged from patients.ts (patient.create/update/
 // complete/delete/decrypt — EMS's create/update/complete are attributed via
 // stamped createdBy/updatedBy since those stay direct Firestore writes; see

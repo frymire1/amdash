@@ -20,6 +20,7 @@ export type AuditAction =
   | 'organization.setRetention'
   | 'organization.setCountry'
   | 'organization.setCmekPreference'
+  | 'organization.setAuditLogging'
   | 'patient.create'
   | 'patient.update'
   | 'patient.complete'

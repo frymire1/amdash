@@ -12,6 +12,22 @@ import { AuditAction } from './classes/audit-action';
 // sendWelcomeEmail in email.ts. No client ever reads/writes this collection
 // directly (see firestore.rules); listAuditLog (admin.ts) is the only read
 // path.
+
+// The org-level toggle (organization_settings_screen.dart in the admin app,
+// set via setOrganizationAuditLogging in admin.ts) only ever gates these —
+// the day-to-day, potentially high-volume PHI actions. user.*/hospital.*/
+// organization.* actions (including the toggle's own
+// organization.setAuditLogging) are org governance history and always get
+// logged regardless of this setting — otherwise disabling the toggle could
+// hide the very act of disabling it.
+const GATED_ACTIONS: ReadonlySet<AuditAction> = new Set([
+  'patient.create',
+  'patient.update',
+  'patient.complete',
+  'patient.delete',
+  'patient.decrypt',
+]);
+
 export async function logAudit(entry: {
   action: AuditAction;
   actor: { uid: string; email: string };
@@ -20,6 +36,15 @@ export async function logAudit(entry: {
   details?: Record<string, unknown>;
 }): Promise<void> {
   try {
+    if (entry.organizationId && GATED_ACTIONS.has(entry.action)) {
+      const orgDoc = await getFirestore().collection('organizations').doc(entry.organizationId).get();
+      // Missing field (every org predating this toggle) defaults to
+      // enabled — this shipped logging patient actions unconditionally
+      // before the toggle existed, and an org that's never touched the
+      // setting shouldn't silently lose that coverage.
+      if (orgDoc.data()?.['auditLoggingEnabled'] === false) return;
+    }
+
     await getFirestore()
       .collection('auditLog')
       .add({

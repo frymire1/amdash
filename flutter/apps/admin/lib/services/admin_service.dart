@@ -166,13 +166,24 @@ class AdminService {
     });
   }
 
-  // Records a *request* for Canada-based Cloud KMS data residency — see
-  // setOrganizationCmekPreference's doc comment in admin.ts for why this
-  // isn't (and can't be, on Firestore's shared-database model) an actual
-  // live encryption toggle.
+  // Turns on real per-organization Cloud KMS envelope encryption for
+  // patient.name/healthcareNumber (functions/src/kms.ts, functions/src/
+  // patients.ts) — Firestore's own CMEK is whole-database and can only be
+  // set at creation, so it can't be toggled per-org on this app's shared
+  // database; this is the application-level equivalent.
   Future<void> setOrganizationCmekPreference(bool cmekRequested) {
     return _functions.httpsCallable('setOrganizationCmekPreference').call<Map<Object?, Object?>>({
       'cmekRequested': cmekRequested,
+    });
+  }
+
+  // Gates only the patient-record actions (create/update/complete/delete/
+  // decrypt) logged from functions/src/patients.ts — see audit.ts's
+  // GATED_ACTIONS. Org/user/hospital management actions are always logged
+  // regardless of this setting.
+  Future<void> setOrganizationAuditLogging(bool auditLoggingEnabled) {
+    return _functions.httpsCallable('setOrganizationAuditLogging').call<Map<Object?, Object?>>({
+      'auditLoggingEnabled': auditLoggingEnabled,
     });
   }
 }

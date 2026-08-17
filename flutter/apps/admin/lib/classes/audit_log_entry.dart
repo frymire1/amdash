@@ -52,6 +52,7 @@ const auditActionLabels = {
   'organization.setRetention': 'Changed data retention',
   'organization.setCountry': 'Set organization country',
   'organization.setCmekPreference': 'Changed KMS data residency request',
+  'organization.setAuditLogging': 'Changed patient audit logging setting',
   'patient.create': 'Created patient record',
   'patient.update': 'Updated patient record',
   'patient.complete': 'Completed patient transport',
