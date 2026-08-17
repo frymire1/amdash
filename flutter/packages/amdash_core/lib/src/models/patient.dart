@@ -64,25 +64,38 @@ class PatientLocation {
 /// JSON shape themselves. [isProvidedValue] below should only ever be
 /// called on a resolved [plaintext], never on this wrapper directly.
 class PatientField {
-  const PatientField._({this.plaintext, required this.isEncrypted});
+  const PatientField._({this.plaintext, required this.isEncrypted, this.fingerprint});
 
   factory PatientField.fromFirestore(Object? value) {
     if (value is String) return PatientField._(plaintext: value, isEncrypted: false);
-    if (value is Map) return const PatientField._(isEncrypted: true);
+    if (value is Map) {
+      final ciphertext = value['ciphertext'];
+      return PatientField._(isEncrypted: true, fingerprint: ciphertext is String ? ciphertext : null);
+    }
     return const PatientField._(plaintext: '', isEncrypted: false);
   }
 
   /// A `PatientField` already holding a known plaintext string — used to
   /// splice a decrypted value (from `PatientDecryptionService`'s cache)
   /// back into a [Patient] for display, without re-touching Firestore.
-  const PatientField.resolved(String value) : plaintext = value, isEncrypted = false;
+  const PatientField.resolved(String value) : plaintext = value, isEncrypted = false, fingerprint = null;
 
   /// The real value, once known — always non-null for a plain/legacy
   /// field; null only while [isEncrypted] and not yet resolved by
   /// `PatientDecryptionService`'s cache (see amdash_core's
-  /// `decryptedPatientFieldCacheProvider`).
+  /// `patientFieldCacheProvider`).
   final String? plaintext;
   final bool isEncrypted;
+
+  /// The raw encrypted blob's `ciphertext` — a fresh, effectively-unique
+  /// value every time a field is (re-)encrypted, since `kms.ts` uses a
+  /// random IV/DEK per call. Lets the decrypt cache tell "this patient's
+  /// value changed since I last cached it" apart from "I've simply never
+  /// seen this patient before" — comparing patient *id* alone can't make
+  /// that distinction, and silently kept showing a pre-edit value
+  /// indefinitely until this was added. Null whenever [isEncrypted] is
+  /// false — nothing to fingerprint for a plain string.
+  final String? fingerprint;
 
   bool get isResolved => plaintext != null;
 }

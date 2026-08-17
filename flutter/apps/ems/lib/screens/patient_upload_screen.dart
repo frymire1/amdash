@@ -226,11 +226,13 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
 
     String id;
     try {
+      final PatientSaveResult result;
       if (_editingId != null) {
         id = _editingId!;
-        await uploadService.updatePatient(id, values);
+        result = await uploadService.updatePatient(id, values);
       } else {
-        id = await uploadService.uploadPatient(values, organizationId ?? '');
+        result = await uploadService.uploadPatient(values, organizationId ?? '');
+        id = result.id;
         // If live tracking below fails, stay on this page to retry rather
         // than navigating away — treat the patient as already-created from
         // here on so a retry updates it instead of creating a duplicate.
@@ -247,11 +249,17 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
       // steps that entirely, and is instant besides. Scope note: the
       // cache is per-app-instance, not shared across clients — a
       // physician tab that already had this patient cached before the
-      // edit won't see the update until it reloads.
+      // edit won't see the update until its own fingerprint-checked pull
+      // notices this write's ciphertext (see PatientField.fingerprint).
+      // The fingerprints below are the actual ciphertext this save just
+      // produced, so that pull recognizes this seeded value as current
+      // rather than immediately re-fetching it as "stale".
       ref.read(patientFieldCacheProvider.notifier).putAll({
         id: DecryptedPatientFields(
           name: resolveBlankField(values.name),
           healthcareNumber: resolveBlankField(values.healthcareNumber),
+          nameFingerprint: result.nameFingerprint,
+          healthcareNumberFingerprint: result.healthcareNumberFingerprint,
         ),
       });
     } catch (error) {

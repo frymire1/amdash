@@ -59,6 +59,28 @@ const _optionalTopLevelFields = ['location', 'ivSize', 'ivPlacement', 'treatment
 /// `_onSubmit`), rather than duplicating this rule and risking drift.
 String resolveBlankField(String value) => value.isNotEmpty ? value : 'Unknown';
 
+/// The `ciphertext` off an `EncryptedField` blob (see
+/// `functions/src/kms.ts`) as written by `encryptPatientFields` — null for
+/// a plain (non-CMEK) org, where `field` is just a `String`. This is what
+/// `patient_upload_screen.dart` seeds into the decrypt cache alongside the
+/// just-saved plaintext, so a later read from a fresh `Patient` snapshot
+/// (carrying this same ciphertext) recognizes the cached value as current
+/// rather than treating it as stale — see `PatientField.fingerprint`.
+String? _fingerprintOf(Object? field) {
+  return field is Map ? field['ciphertext'] as String? : null;
+}
+
+/// `uploadPatient`/`updatePatient`'s return value: the patient id plus
+/// enough to seed `amdash_core`'s decrypt cache with a fingerprint that
+/// actually matches what was just written (see `_fingerprintOf`).
+class PatientSaveResult {
+  const PatientSaveResult({required this.id, this.nameFingerprint, this.healthcareNumberFingerprint});
+
+  final String id;
+  final String? nameFingerprint;
+  final String? healthcareNumberFingerprint;
+}
+
 /// Mirrors `apps/ems/src/app/services/patient-upload.service.ts`: direct
 /// Firestore writes to `patients` (no Cloud Function — EMS accounts write
 /// this collection directly, per firestore.rules). The one exception is
@@ -130,7 +152,7 @@ class PatientUploadService {
   static int debugCallCount = 0;
   static final List<StackTrace> debugCallStacks = [];
 
-  Future<String> uploadPatient(PatientFormValues value, String organizationId) async {
+  Future<PatientSaveResult> uploadPatient(PatientFormValues value, String organizationId) async {
     debugCallCount++;
     debugCallStacks.add(StackTrace.current);
 
@@ -143,7 +165,11 @@ class PatientUploadService {
       'submittedAt': FieldValue.serverTimestamp(),
       'status': 'active',
     });
-    return docRef.id;
+    return PatientSaveResult(
+      id: docRef.id,
+      nameFingerprint: _fingerprintOf(fields['name']),
+      healthcareNumberFingerprint: _fingerprintOf(fields['healthcareNumber']),
+    );
   }
 
   // updateDoc only touches fields present in the map — a field the form
@@ -151,7 +177,7 @@ class PatientUploadService {
   // FieldValue.delete() or it's silently left at its previous value.
   // organizationId is deliberately never included — rules block changing
   // it post-create.
-  Future<void> updatePatient(String id, PatientFormValues value) async {
+  Future<PatientSaveResult> updatePatient(String id, PatientFormValues value) async {
     final fields = await _patientFields(value);
     final update = <String, Object?>{...fields, 'updatedAt': FieldValue.serverTimestamp()};
     for (final field in _optionalTopLevelFields) {
@@ -160,6 +186,11 @@ class PatientUploadService {
       }
     }
     await _firestore.collection('patients').doc(id).update(update);
+    return PatientSaveResult(
+      id: id,
+      nameFingerprint: _fingerprintOf(fields['name']),
+      healthcareNumberFingerprint: _fingerprintOf(fields['healthcareNumber']),
+    );
   }
 
   Future<void> deletePatient(String id) {
