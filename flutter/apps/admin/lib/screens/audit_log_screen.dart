@@ -22,8 +22,9 @@ String _formatTimestamp(DateTime timestamp) {
 /// Mirrors the shape of the other admin management screens, but read-only —
 /// no create form, just a table. Backed by `listAuditLog`
 /// (`functions/src/admin.ts`), which records every admin.ts mutation
-/// (user/role/hospital/organization changes); EMS/physician actions aren't
-/// logged here.
+/// (user/role/hospital/organization changes) plus patient-record events
+/// logged from `functions/src/patients.ts` — EMS create/update/complete/
+/// delete and physician/EMS PHI decrypt reads.
 class AuditLogScreen extends ConsumerStatefulWidget {
   const AuditLogScreen({super.key});
 
@@ -64,7 +65,7 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
         const Text('Audit Log', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
         const SizedBox(height: 4),
         Text(
-          'The last 100 user/hospital/organization changes made through this app, most recent first.',
+          'The last 100 user/hospital/organization/patient-record actions across all AmDash apps, most recent first.',
           style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
         const SizedBox(height: 16),
@@ -113,7 +114,7 @@ class _AuditLogTable extends StatelessWidget {
         TableRow(
           children: [
             _headerCell(context, 'When'),
-            _headerCell(context, 'Admin'),
+            _headerCell(context, 'Who'),
             _headerCell(context, 'Action'),
             _headerCell(context, 'Details'),
           ],

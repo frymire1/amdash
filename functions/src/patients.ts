@@ -1,9 +1,12 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
+import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { getFirestore } from 'firebase-admin/firestore';
 import { DecryptPatientFieldsRequest } from './classes/decrypt-patient-fields-request';
+import { DeletePatientRecordRequest } from './classes/delete-patient-record-request';
 import { EncryptPatientFieldsRequest } from './classes/encrypt-patient-fields-request';
 import { REGION, getCallerProfile } from './shared';
 import { decryptField, encryptField, isEncryptedField } from './kms';
+import { logAudit, resolveActor } from './audit';
 
 // EMS calls this before every direct Firestore write to `patients` (see
 // flutter/apps/ems/lib/services/patient_upload_service.dart — EMS still
@@ -87,6 +90,24 @@ export const decryptPatientFields = onCall<DecryptPatientFieldsRequest>({ region
     }),
   );
 
+  // One entry per call, not per patient — this fires on every list
+  // render/refresh that has anything un-cached or stale (see amdash_core's
+  // pullMissingDecryptedPatientFields), so a patientId-per-entry log would
+  // balloon for no real compliance benefit; "who pulled which patients'
+  // identifying info, when" is fully answerable from this single entry.
+  // Only patients this caller was actually authorized for get logged (the
+  // not-found/wrong-org ones above already returned nulls without a real
+  // decrypt) — cheap to recompute here since the map above already has it.
+  const authorizedPatientIds = results.filter((r) => r.name !== null || r.healthcareNumber !== null).map((r) => r.patientId);
+  if (authorizedPatientIds.length > 0) {
+    await logAudit({
+      action: 'patient.decrypt',
+      actor: profile,
+      organizationId: profile.organizationId,
+      details: { patientIds: authorizedPatientIds, callerRole: profile.role.join(',') },
+    });
+  }
+
   return { results };
 });
 
@@ -95,3 +116,79 @@ async function resolveField(value: unknown): Promise<string | null> {
   if (isEncryptedField(value)) return decryptField(value);
   return null;
 }
+
+// The one patient mutation routed through a callable instead of EMS's usual
+// direct Firestore write (see encryptPatientFields' own comment on why
+// create/update/complete stay direct — offline queueing matters most for
+// those, in-the-field). Deleting a PHI record is the single most
+// compliance-sensitive thing this app does, so firestore.rules flatly
+// blocks a direct client delete (`allow delete: if false`) and this is the
+// only path left — giving every delete a guaranteed, unambiguous
+// `request.auth`-backed audit entry, rather than inferring "who" from
+// whatever the doc's own `updatedBy` last happened to say.
+export const deletePatientRecord = onCall<DeletePatientRecordRequest>({ region: REGION }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+  if (!profile.role.includes('ems')) {
+    throw new HttpsError('permission-denied', 'Only EMS accounts can delete a patient record.');
+  }
+
+  const { patientId } = request.data;
+  if (!patientId) {
+    throw new HttpsError('invalid-argument', 'patientId is required.');
+  }
+
+  const ref = getFirestore().collection('patients').doc(patientId);
+  const snapshot = await ref.get();
+  const organizationId = snapshot.data()?.['organizationId'];
+  if (!snapshot.exists || typeof organizationId !== 'string') {
+    throw new HttpsError('not-found', `No patient found with id ${patientId}.`);
+  }
+  if (organizationId !== profile.organizationId) {
+    throw new HttpsError('permission-denied', 'That patient belongs to a different organization.');
+  }
+
+  await ref.delete();
+  await logAudit({ action: 'patient.delete', actor: profile, organizationId, target: patientId });
+
+  return { deleted: true };
+});
+
+// Audit-only — EMS writes patients directly from the Flutter client (see
+// deletePatientRecord's comment for why create/update stay that way), so
+// there's no callable/`request.auth` to attribute these to. Instead the
+// client stamps `createdBy`/`updatedBy` (uids; firestore.rules enforces
+// each equals the actual writer, so this can't be spoofed to frame another
+// user), and resolveActor (audit.ts) turns that uid into the email the
+// audit log displays.
+export const onPatientCreated = onDocumentCreated({ document: 'patients/{patientId}', region: REGION }, async (event) => {
+  const data = event.data?.data();
+  if (!data) return;
+  const organizationId = data['organizationId'];
+  const actor = await resolveActor(data['createdBy']);
+  await logAudit({
+    action: 'patient.create',
+    actor,
+    organizationId: typeof organizationId === 'string' ? organizationId : undefined,
+    target: event.params.patientId,
+  });
+});
+
+// Distinguishes "marked transport complete" (apps/ems's completeTransport)
+// from a regular field edit purely from the status transition — there's no
+// separate signal for it in a plain document update, but this one is
+// reliable: completeTransport is the only write that ever sets
+// status: 'completed'.
+export const onPatientUpdated = onDocumentUpdated({ document: 'patients/{patientId}', region: REGION }, async (event) => {
+  const before = event.data?.before.data();
+  const after = event.data?.after.data();
+  if (!before || !after) return;
+  const organizationId = after['organizationId'];
+  const actor = await resolveActor(after['updatedBy']);
+  const justCompleted = before['status'] !== 'completed' && after['status'] === 'completed';
+  await logAudit({
+    action: justCompleted ? 'patient.complete' : 'patient.update',
+    actor,
+    organizationId: typeof organizationId === 'string' ? organizationId : undefined,
+    target: event.params.patientId,
+  });
+});

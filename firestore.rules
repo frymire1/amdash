@@ -94,20 +94,39 @@ service cloud.firestore {
     // Reads stay open to any same-org member — physicians/nurses need to
     // see incoming patients (physician/lib/services/patient_service.dart is
     // read-only). Writes are restricted to the `ems` role: EMS is the only
-    // client that creates/edits/deletes/completes patient records
+    // client that creates/edits/completes patient records
     // (ems/lib/services/patient_upload_service.dart), and without this a
-    // same-org physician/nurse/admin could falsify vitals or delete an
-    // active transport straight through the SDK, bypassing the app UI.
+    // same-org physician/nurse/admin could falsify vitals straight through
+    // the SDK, bypassing the app UI.
+    //
+    // create/update also require createdBy/updatedBy to name the actual
+    // writer (never a claimed-on-behalf-of-someone-else uid) — those are
+    // the only signal functions/src/patients.ts's onPatientCreated/
+    // onPatientUpdated triggers have to attribute an audit log entry to a
+    // real person, since a Firestore trigger carries no request.auth of its
+    // own. createdBy is additionally immutable post-create, same pattern as
+    // organizationId just below it.
+    //
+    // Deletes are blocked entirely here — patients.ts's deletePatientRecord
+    // Cloud Function is the only way to delete a patient record, so every
+    // delete has a guaranteed request.auth-backed audit entry instead of
+    // one inferred (unreliably) from a trigger. cleanupCompletedPatients'
+    // scheduled retention sweep still works: it deletes via the Admin SDK,
+    // which bypasses these rules entirely.
     match /patients/{patientId} {
       allow read: if isSuperAdmin() || sameOrgAsCaller(resource.data.get('organizationId', null));
       allow create: if callerHasRole('ems')
         && sameOrgAsCaller(request.resource.data.organizationId)
+        && request.resource.data.get('createdBy', null) == request.auth.uid
+        && request.resource.data.get('updatedBy', null) == request.auth.uid
         && fieldsRespectCmek(request.resource.data);
       allow update: if callerHasRole('ems')
         && sameOrgAsCaller(resource.data.get('organizationId', null))
         && request.resource.data.organizationId == resource.data.organizationId
+        && request.resource.data.get('createdBy', null) == resource.data.get('createdBy', null)
+        && request.resource.data.get('updatedBy', null) == request.auth.uid
         && fieldsRespectCmek(request.resource.data);
-      allow delete: if callerHasRole('ems') && sameOrgAsCaller(resource.data.get('organizationId', null));
+      allow delete: if false;
     }
 
     // Only ever written by the onEmsLocationEvent Cloud Function (Admin SDK,

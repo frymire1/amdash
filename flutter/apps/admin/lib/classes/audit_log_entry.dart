@@ -1,5 +1,7 @@
 /// Mirrors what `listAuditLog` (`functions/src/admin.ts`) returns for each
-/// entry — admin.ts's own mutations only, most recent first.
+/// entry — admin.ts's own mutations plus the patient-record events logged
+/// from `functions/src/patients.ts` (EMS/physician actions), most recent
+/// first.
 class AuditLogEntry {
   const AuditLogEntry({
     required this.id,
@@ -50,4 +52,9 @@ const auditActionLabels = {
   'organization.setRetention': 'Changed data retention',
   'organization.setCountry': 'Set organization country',
   'organization.setCmekPreference': 'Changed KMS data residency request',
+  'patient.create': 'Created patient record',
+  'patient.update': 'Updated patient record',
+  'patient.complete': 'Completed patient transport',
+  'patient.delete': 'Deleted patient record',
+  'patient.decrypt': 'Viewed decrypted patient info',
 };

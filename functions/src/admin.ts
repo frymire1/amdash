@@ -5,7 +5,6 @@ import { defineSecret } from 'firebase-functions/params';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 import { AssignableRole } from './classes/assignable-role';
-import { AuditAction } from './classes/audit-action';
 import { CallerProfile } from './classes/caller-profile';
 import { CreateUserRequest } from './classes/create-user-request';
 import { SetUserRoleRequest } from './classes/set-user-role-request';
@@ -25,6 +24,7 @@ import { GeocodeResult } from './classes/geocode-result';
 import { REGION, findUserByEmail, getCallerProfile } from './shared';
 import { getOrCreateOrgKey } from './kms';
 import { RESEND_API_KEY, sendWelcomeEmail } from './email';
+import { SYSTEM_ACTOR, logAudit } from './audit';
 
 const GEOCODING_API_KEY = defineSecret('GEOCODING_API_KEY');
 
@@ -59,35 +59,6 @@ function requireSuperAdmin(profile: CallerProfile, message = 'Only the head-admi
 function requireSameOrg(caller: CallerProfile, targetOrganizationId: unknown, message: string): void {
   if (targetOrganizationId !== caller.organizationId) {
     throw new HttpsError('permission-denied', message);
-  }
-}
-
-// Best-effort — an audit log write failing shouldn't fail the mutation it
-// was recording, same non-critical-notification rationale as
-// sendWelcomeEmail in email.ts. No client ever reads/writes this
-// collection directly (see firestore.rules); listAuditLog below is the
-// only read path.
-async function logAudit(entry: {
-  action: AuditAction;
-  actor: CallerProfile;
-  organizationId: string | undefined;
-  target?: string;
-  details?: Record<string, unknown>;
-}): Promise<void> {
-  try {
-    await getFirestore()
-      .collection('auditLog')
-      .add({
-        action: entry.action,
-        actorUid: entry.actor.uid,
-        actorEmail: entry.actor.email,
-        organizationId: entry.organizationId ?? null,
-        target: entry.target ?? null,
-        details: entry.details ?? null,
-        timestamp: FieldValue.serverTimestamp(),
-      });
-  } catch (error) {
-    logger.error('Failed to write audit log entry', { entry, error });
   }
 }
 
@@ -763,11 +734,15 @@ export const setOrganizationCmekPreference = onCall<SetOrganizationCmekRequest>(
 });
 
 // Returns the caller's org's most recent audit entries — admin.ts's own
-// mutations only (createUser/updateUser/deleteUser/setUserDisabled/
+// mutations (createUser/updateUser/deleteUser/setUserDisabled/
 // resendInvite/setUserRole/removeUserRole/createHospital/updateHospital/
 // deleteHospital/createOrganization/setOrganizationRetention/
-// setOrganizationCountry/setOrganizationCmekPreference); EMS/physician
-// actions aren't logged here. No client ever reads the auditLog
+// setOrganizationCountry/setOrganizationCmekPreference) plus the
+// patient-record events logged from patients.ts (patient.create/update/
+// complete/delete/decrypt — EMS's create/update/complete are attributed via
+// stamped createdBy/updatedBy since those stay direct Firestore writes; see
+// patients.ts) and cleanupCompletedPatients' own retention deletes below
+// (attributed to SYSTEM_ACTOR). No client ever reads the auditLog
 // collection directly (see firestore.rules) — this is the only read
 // path, same pattern as listUsersWithRoles.
 export const listAuditLog = onCall({ region: REGION }, async (request) => {
@@ -827,12 +802,26 @@ export const cleanupCompletedPatients = onSchedule(
       .where('completedAt', '<=', cutoff)
       .get();
 
+    // patients.ts blocks a direct client delete entirely (firestore.rules'
+    // `allow delete: if false`) so that every delete has a guaranteed audit
+    // entry from wherever it's actually issued, rather than relying on a
+    // Firestore trigger to infer "who" after the fact — this bulkWriter
+    // delete (Admin SDK, bypasses those rules) is the other of the two
+    // places that happens; log it here to match.
     const writer = getFirestore().bulkWriter();
     for (const patientDoc of completedSnapshot.docs) {
-      if (retainAllOrgIds.has(patientDoc.data()['organizationId'])) {
+      const organizationId = patientDoc.data()['organizationId'];
+      if (retainAllOrgIds.has(organizationId)) {
         continue;
       }
       writer.delete(patientDoc.ref);
+      await logAudit({
+        action: 'patient.delete',
+        actor: SYSTEM_ACTOR,
+        organizationId: typeof organizationId === 'string' ? organizationId : undefined,
+        target: patientDoc.id,
+        details: { reason: 'Automated retention policy (48h after transport completed)' },
+      });
     }
     await writer.close();
   },
