@@ -4,6 +4,35 @@ on:
   push:
 
 jobs:
+  # Scans the whole repo (not just marketing/ like every other job here) —
+  # the one job in this file that isn't Flutter-vs-Angular-scoped, since a
+  # leaked secret is exactly as bad in functions/ or a Flutter app as it is
+  # here. Runs independently of test/lint/build/deploy-marketing (no
+  # `needs:`), so a Flutter/functions-only push still gets scanned even
+  # though it wouldn't touch any of those other jobs' actual work.
+  # GITGUARDIAN_API_KEY is a GitGuardian dashboard-issued key (scoped to
+  # "scan") stored as a repo secret — GitHub → Settings → Secrets and
+  # variables → Actions.
+  secrets-scan:
+    name: GitGuardian scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Needed so ggshield can see the actual pushed commit range, not
+          # just a single-commit shallow clone.
+          fetch-depth: 0
+
+      - name: GitGuardian scan
+        uses: GitGuardian/ggshield-action@v1
+        env:
+          GITHUB_PUSH_BEFORE_SHA: ${{ github.event.before }}
+          GITHUB_PUSH_BASE_SHA: ${{ github.event.base }}
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
+
   test:
     runs-on: ubuntu-latest
     steps:
