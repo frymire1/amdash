@@ -8,7 +8,6 @@ import { DirectionsApiResult } from './classes/directions-api-result';
 import { FetchDirectionsRequest } from './classes/fetch-directions-request';
 import { FetchDirectionsResponse } from './classes/fetch-directions-response';
 import { REGION, getCallerProfile } from './shared';
-import { decryptField, isEncryptedField } from './kms';
 
 const DIRECTIONS_API_KEY = defineSecret('DIRECTIONS_API_KEY');
 
@@ -16,85 +15,177 @@ const DIRECTIONS_API_KEY = defineSecret('DIRECTIONS_API_KEY');
 // server-side, rather than client-side Firestore watching — that's what
 // makes delivery work even if a physician's tab (or browser) isn't open,
 // which a client-side listener could never do.
-export const sendNewPatientAlerts = onDocumentCreated({ document: 'patients/{patientId}', region: REGION }, async (event) => {
-  const patient = event.data?.data();
-  if (!patient?.['organizationId'] || !patient?.['destination']) {
-    return;
-  }
+export const sendNewPatientAlerts = onDocumentCreated(
+  { document: 'patients/{patientId}', region: REGION, secrets: [DIRECTIONS_API_KEY] },
+  async (event) => {
+    const patient = event.data?.data();
+    if (!patient?.['organizationId'] || !patient?.['destination']) {
+      return;
+    }
 
-  const matching = await getFirestore()
-    .collection('users')
-    .where('organizationId', '==', patient['organizationId'])
-    .where('workLocation', '==', patient['destination'])
-    .where('newPatientAlertsExpiresAt', '>', Timestamp.now())
-    .get();
+    const matching = await getFirestore()
+      .collection('users')
+      .where('organizationId', '==', patient['organizationId'])
+      .where('workLocation', '==', patient['destination'])
+      .where('newPatientAlertsExpiresAt', '>', Timestamp.now())
+      .get();
 
-  const tokensByUser = matching.docs.map((userDoc) => ({
-    ref: userDoc.ref,
-    tokens: (userDoc.data()['fcmTokens'] as string[] | undefined) ?? [],
-  }));
-  const allTokens = tokensByUser.flatMap((user) => user.tokens);
-  if (allTokens.length === 0) {
-    return;
-  }
+    const tokensByUser = matching.docs.map((userDoc) => ({
+      ref: userDoc.ref,
+      tokens: (userDoc.data()['fcmTokens'] as string[] | undefined) ?? [],
+    }));
+    const allTokens = tokensByUser.flatMap((user) => user.tokens);
+    if (allTokens.length === 0) {
+      return;
+    }
 
-  const response = await getMessaging().sendEachForMulticast({
-    tokens: allTokens,
-    data: {
-      title: 'New patient inbound',
-      body: await notificationBody(patient['name']),
-    },
-  });
-
-  if (response.failureCount > 0) {
-    response.responses.forEach((result, index) => {
-      if (!result.success) {
-        console.error(`sendNewPatientAlerts: token ${index} failed`, result.error?.code, result.error?.message);
-      }
+    const response = await getMessaging().sendEachForMulticast({
+      tokens: allTokens,
+      data: {
+        title: 'New patient inbound',
+        body: await notificationBody(patient),
+      },
     });
-  }
 
-  // A token FCM reports as unregistered/invalid is permanently dead — prune
-  // it from whichever user doc(s) held it so it doesn't keep silently
-  // failing on every future patient.
-  const deadTokens = new Set(
-    response.responses
-      .map((result, index) => (!result.success && isUnregisteredError(result.error) ? allTokens[index] : undefined))
-      .filter((token): token is string => !!token),
-  );
-  if (deadTokens.size === 0) {
-    return;
-  }
+    if (response.failureCount > 0) {
+      response.responses.forEach((result, index) => {
+        if (!result.success) {
+          console.error(`sendNewPatientAlerts: token ${index} failed`, result.error?.code, result.error?.message);
+        }
+      });
+    }
 
-  await Promise.all(
-    tokensByUser
-      .filter((user) => user.tokens.some((token) => deadTokens.has(token)))
-      .map((user) => user.ref.update({ fcmTokens: FieldValue.arrayRemove(...user.tokens.filter((token) => deadTokens.has(token))) })),
-  );
-});
+    // A token FCM reports as unregistered/invalid is permanently dead — prune
+    // it from whichever user doc(s) held it so it doesn't keep silently
+    // failing on every future patient.
+    const deadTokens = new Set(
+      response.responses
+        .map((result, index) => (!result.success && isUnregisteredError(result.error) ? allTokens[index] : undefined))
+        .filter((token): token is string => !!token),
+    );
+    if (deadTokens.size === 0) {
+      return;
+    }
+
+    await Promise.all(
+      tokensByUser
+        .filter((user) => user.tokens.some((token) => deadTokens.has(token)))
+        .map((user) => user.ref.update({ fcmTokens: FieldValue.arrayRemove(...user.tokens.filter((token) => deadTokens.has(token))) })),
+    );
+  },
+);
 
 function isUnregisteredError(error: { code?: string } | undefined): boolean {
   return error?.code === 'messaging/registration-token-not-registered';
 }
 
-// Handles the plain-string case (the common one — no Canadian data
-// residency requested for this org, or a legacy record) and the
-// Cloud KMS-encrypted case (functions/src/kms.ts) — this function already
-// runs server-side with KMS access, so decrypting here just restores the
-// real name in the notification instead of falling back to the generic
-// string. A decrypt failure degrades to that same generic fallback rather
-// than failing the whole notification send.
-async function notificationBody(rawName: unknown): Promise<string> {
-  if (typeof rawName === 'string' && rawName) return rawName;
-  if (isEncryptedField(rawName)) {
-    try {
-      const decrypted = await decryptField(rawName);
-      if (decrypted) return decrypted;
-    } catch (error) {
-      logger.error('Failed to decrypt patient name for a new-patient alert', error);
-    }
+// Deliberately never includes anything that identifies a specific patient —
+// name or healthcare number, encrypted or not. Firebase Cloud Messaging
+// isn't a HIPAA-covered product (unlike Firestore/Cloud Functions/Cloud
+// KMS — see the compliance checklist), so nothing patient-identifying
+// should transit it at all, not even decrypted server-side first. Age +
+// gender + an ETA is specific enough to be useful without naming anyone.
+async function notificationBody(patient: FirebaseFirestore.DocumentData): Promise<string> {
+  const demographic = demographicText(patient['age'], patient['gender']);
+  const duration = await estimateArrivalDuration(patient);
+  return duration ? `${demographic} is arriving in ${duration}.` : `${demographic} is inbound.`;
+}
+
+// Mirrors isProvidedValue (flutter/packages/amdash_core/lib/src/models/
+// patient.dart) — a field counts as "provided" if it's a number, or a
+// non-empty string that isn't the literal blank-field sentinel 'Unknown'
+// EMS writes for a field left blank.
+function isProvided(value: unknown): boolean {
+  if (typeof value === 'number') return true;
+  if (typeof value === 'string') return value.length > 0 && value !== 'Unknown';
+  return false;
+}
+
+function demographicText(age: unknown, gender: unknown): string {
+  const ageKnown = isProvided(age);
+  const genderKnown = isProvided(gender);
+  if (ageKnown && genderKnown) return `${age}, ${gender}`;
+  if (ageKnown) return `${age}`;
+  if (genderKnown) return `${gender}`;
+  return 'A patient';
+}
+
+// Best-effort, one-shot estimate from the patient's pickup location (not a
+// live-updating value the way PatientViewer's own map card is — that one
+// re-fetches as the vehicle's tracked position moves; this fires once, at
+// upload time, using wherever EMS was when they created the record). Null
+// whenever any input for a real estimate is missing — a patient uploaded
+// without a location, a destination that doesn't match any hospital on
+// record, or a route the Directions API couldn't find — so the caller
+// falls back to a demographic-only notification rather than a wrong or
+// placeholder ETA.
+async function estimateArrivalDuration(patient: FirebaseFirestore.DocumentData): Promise<string | null> {
+  const location = patient['location'] as { latitude?: unknown; longitude?: unknown } | undefined;
+  const originLat = location?.latitude;
+  const originLng = location?.longitude;
+  if (typeof originLat !== 'number' || typeof originLng !== 'number') {
+    return null;
   }
-  return 'A new patient has been uploaded.';
+
+  const organizationId = patient['organizationId'];
+  const destination = patient['destination'];
+  const hospitalSnapshot = await getFirestore()
+    .collection('hospitals')
+    .where('organizationId', '==', organizationId)
+    .where('name', '==', destination)
+    .limit(1)
+    .get();
+  const hospital = hospitalSnapshot.docs[0]?.data();
+  const destinationLat = hospital?.['latitude'];
+  const destinationLng = hospital?.['longitude'];
+  if (typeof destinationLat !== 'number' || typeof destinationLng !== 'number') {
+    return null;
+  }
+
+  try {
+    const route = await callDirectionsApi(originLat, originLng, destinationLat, destinationLng);
+    return route?.durationText ?? null;
+  } catch (error) {
+    logger.error('Failed to estimate arrival duration for a new-patient alert', error);
+    return null;
+  }
+}
+
+interface DirectionsRoute {
+  durationText: string;
+  distanceText: string;
+  polylinePoints: Array<[number, number]>;
+}
+
+// The actual Directions REST API call + response parsing, shared by
+// estimateArrivalDuration above (which only needs durationText) and the
+// fetchDirections callable below (which returns the full route) — one
+// implementation of the request/parsing logic rather than two.
+async function callDirectionsApi(
+  originLat: number,
+  originLng: number,
+  destinationLat: number,
+  destinationLng: number,
+): Promise<DirectionsRoute | null> {
+  const url =
+    `https://maps.googleapis.com/maps/api/directions/json?origin=${originLat},${originLng}` +
+    `&destination=${destinationLat},${destinationLng}&mode=driving&key=${DIRECTIONS_API_KEY.value()}`;
+  const response = await fetch(url);
+  const data = (await response.json()) as DirectionsApiResult;
+
+  const route = data.routes?.[0];
+  const leg = route?.legs?.[0];
+  if (data.status !== 'OK' || !route || !leg) {
+    // No route between two otherwise-valid points is a normal outcome
+    // (e.g. ZERO_RESULTS), not an error worth throwing over.
+    return null;
+  }
+
+  return {
+    durationText: leg.duration.text,
+    distanceText: leg.distance.text,
+    polylinePoints: decodePolyline(route.overview_polyline.points),
+  };
 }
 
 // Proxies the Directions REST API server-side. The classic Directions API
@@ -126,26 +217,12 @@ export const fetchDirections = onCall<FetchDirectionsRequest>(
       );
     }
 
-    const url =
-      `https://maps.googleapis.com/maps/api/directions/json?origin=${originLat},${originLng}` +
-      `&destination=${destinationLat},${destinationLng}&mode=driving&key=${DIRECTIONS_API_KEY.value()}`;
-    const response = await fetch(url);
-    const data = (await response.json()) as DirectionsApiResult;
-
-    const route = data.routes?.[0];
-    const leg = route?.legs?.[0];
-    if (data.status !== 'OK' || !route || !leg) {
-      // No route between two otherwise-valid points is a normal outcome
-      // (e.g. ZERO_RESULTS), not an error worth throwing over.
+    const route = await callDirectionsApi(originLat, originLng, destinationLat, destinationLng);
+    if (!route) {
       return { found: false };
     }
 
-    return {
-      found: true,
-      polylinePoints: decodePolyline(route.overview_polyline.points),
-      durationText: leg.duration.text,
-      distanceText: leg.distance.text,
-    };
+    return { found: true, ...route };
   },
 );
 
