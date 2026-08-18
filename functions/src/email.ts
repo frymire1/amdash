@@ -5,16 +5,11 @@ import { AssignableRole } from './classes/assignable-role';
 
 export const RESEND_API_KEY = defineSecret('RESEND_API_KEY');
 
-// Resend's shared sandbox sender — works immediately with zero setup, but
-// Resend restricts it to only deliver to the email address the Resend
-// account itself was signed up with (an anti-abuse limit on the shared
-// domain, not something this code can work around). So createUser's welcome
-// email will only actually land when testing with that one address; any
-// other new user's email will get the same silent-looking (now logged)
-// rejection this sender was swapped in to fix. Swap for a verified custom
-// domain's address once one's set up in the Resend dashboard (Domains ->
-// Add Domain -> add the DNS records shown) to send to arbitrary recipients.
-const FROM_ADDRESS = 'AmDash <onboarding@resend.dev>';
+// amdashtracking.com is verified in Resend's dashboard (Domains -> Add
+// Domain -> DNS records added at the registrar) — this can now deliver to
+// arbitrary recipients, not just the Resend account's own signup address
+// the way the old onboarding@resend.dev sandbox sender was restricted to.
+const FROM_ADDRESS = 'AmDash <noreply@amdashtracking.com>';
 
 // ems -> the EMS app; physician/nurse -> the physician app (nurses use the
 // same app as physicians, see physician/lib/router.dart's requiredRoles).
