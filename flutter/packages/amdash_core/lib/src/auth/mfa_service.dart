@@ -28,8 +28,18 @@ class MfaService {
   Future<T> _guardRecentLogin<T>(Future<T> Function() action) async {
     try {
       return await action();
-    } on FirebaseAuthException catch (error) {
-      if (error.code == 'requires-recent-login') {
+    } catch (error) {
+      // Deliberately not `on FirebaseAuthException catch` matching
+      // `error.code == 'requires-recent-login'` — confirmed via a real
+      // failure that the MFA enrollment endpoints don't surface this the
+      // same way core auth methods (updatePassword/updateEmail) do; the
+      // raw server error (CREDENTIAL_TOO_OLD_LOGIN_AGAIN) showed up in the
+      // exception's stringified form without matching that specific `.code`
+      // check. Matching on the stringified error for either the REST API's
+      // own error string or the SDK's usual mapped code catches it
+      // regardless of exactly how a given platform/API surface wraps it.
+      final text = error.toString().toLowerCase();
+      if (text.contains('requires-recent-login') || text.contains('credential_too_old_login_again')) {
         throw const MfaRequiresRecentLoginException();
       }
       rethrow;
