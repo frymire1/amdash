@@ -88,10 +88,12 @@ class AdminService {
     return _functions.httpsCallable('resetUserMfa').call<Map<Object?, Object?>>({'uid': uid});
   }
 
-  Future<List<AuditLogEntry>> listAuditLog() async {
+  // Omit beforeTimestampMs for the first (most recent) page; pass the
+  // previous page's oldest entry's timestamp to page further back.
+  Future<AuditLogPage> listAuditLog({int? beforeTimestampMs}) async {
     final callable = _functions.httpsCallable('listAuditLog');
-    final result = await callable.call<List<Object?>>();
-    return result.data.whereType<Map<Object?, Object?>>().map(AuditLogEntry.fromJson).toList();
+    final result = await callable.call<Map<Object?, Object?>>({'beforeTimestampMs': ?beforeTimestampMs});
+    return AuditLogPage.fromJson(result.data);
   }
 
   Future<List<ManagedUser>> listUsersWithRoles() async {

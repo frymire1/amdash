@@ -33,6 +33,27 @@ class AuditLogEntry {
   final DateTime? timestamp;
 }
 
+/// One page of `listAuditLog` results — the collection has no retention
+/// policy (audit trails are meant to be kept, not minimized), so it only
+/// grows; this is what lets the admin screen page back through it instead
+/// of only ever being able to see the most recent 100 entries org-wide.
+class AuditLogPage {
+  const AuditLogPage({required this.entries, required this.hasMore});
+
+  factory AuditLogPage.fromJson(Map<Object?, Object?> json) {
+    final rawEntries = json['entries'];
+    return AuditLogPage(
+      entries: rawEntries is List
+          ? rawEntries.whereType<Map<Object?, Object?>>().map(AuditLogEntry.fromJson).toList()
+          : const [],
+      hasMore: json['hasMore'] as bool? ?? false,
+    );
+  }
+
+  final List<AuditLogEntry> entries;
+  final bool hasMore;
+}
+
 /// `action` (e.g. `user.roleAdd`) -> a short human label for the table.
 /// Kept as a lookup rather than titlecasing the raw string, since a couple
 /// (`user.roleAdd`/`user.roleRemove`) read better hand-written.

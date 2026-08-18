@@ -35,6 +35,8 @@ class AuditLogScreen extends ConsumerStatefulWidget {
 class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
   List<AuditLogEntry> _entries = [];
   bool _loading = true;
+  bool _loadingMore = false;
+  bool _hasMore = false;
   String? _error;
 
   final _searchController = TextEditingController();
@@ -59,8 +61,13 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
       _error = null;
     });
     try {
-      final entries = await ref.read(adminServiceProvider).listAuditLog();
-      if (mounted) setState(() => _entries = entries);
+      final page = await ref.read(adminServiceProvider).listAuditLog();
+      if (mounted) {
+        setState(() {
+          _entries = page.entries;
+          _hasMore = page.hasMore;
+        });
+      }
     } catch (error) {
       if (mounted) setState(() => _error = 'Failed to load the audit log. Please try again.');
     } finally {
@@ -68,9 +75,37 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
     }
   }
 
-  // Client-side, over the already-fetched last-100 entries — same reasoning
-  // as user_management_screen.dart's own search: no server round trip
-  // needed for a dataset this small that's already fully loaded.
+  // The collection has no retention policy (see listAuditLog's own doc
+  // comment in admin.ts) — it only grows, so this is what keeps anything
+  // older than the first page actually reachable rather than permanently
+  // stuck behind a flat limit(). Pages back from the oldest entry loaded
+  // so far, appending rather than replacing.
+  Future<void> _loadMore() async {
+    final oldestLoadedMs = _entries.isEmpty ? null : _entries.last.timestamp?.millisecondsSinceEpoch;
+    if (oldestLoadedMs == null) return;
+
+    setState(() {
+      _loadingMore = true;
+      _error = null;
+    });
+    try {
+      final page = await ref.read(adminServiceProvider).listAuditLog(beforeTimestampMs: oldestLoadedMs);
+      if (mounted) {
+        setState(() {
+          _entries = [..._entries, ...page.entries];
+          _hasMore = page.hasMore;
+        });
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Failed to load more activity. Please try again.');
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
+
+  // Client-side, over whatever's already been fetched — same reasoning as
+  // user_management_screen.dart's own search. Only searches loaded pages;
+  // an email that only shows up further back needs Load More first.
   List<AuditLogEntry> _filteredEntries() {
     if (_searchQuery.isEmpty) return _entries;
     return _entries.where((entry) => entry.actorEmail.toLowerCase().contains(_searchQuery)).toList();
@@ -83,7 +118,7 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
         const Text('Audit Log', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
         const SizedBox(height: 4),
         Text(
-          'The last 100 user/hospital/organization/patient-record actions across all AmDash apps, most recent first.',
+          'User/hospital/organization/patient-record actions across all AmDash apps, most recent first.',
           style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
         const SizedBox(height: 16),
@@ -127,6 +162,17 @@ class _AuditLogScreenState extends ConsumerState<AuditLogScreen> {
                     return _AuditLogTable(entries: filtered);
                   },
                 ),
+                if (_hasMore) ...[
+                  const SizedBox(height: 12),
+                  Center(
+                    child: OutlinedButton(
+                      onPressed: _loadingMore ? null : _loadMore,
+                      child: _loadingMore
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Text('Load more'),
+                    ),
+                  ),
+                ],
               ],
             ],
           ),

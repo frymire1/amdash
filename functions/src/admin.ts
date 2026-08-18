@@ -22,6 +22,7 @@ import { SetOrganizationRetentionRequest } from './classes/set-organization-rete
 import { SetOrganizationCountryRequest } from './classes/set-organization-country-request';
 import { SetOrganizationCmekRequest } from './classes/set-organization-cmek-request';
 import { SetOrganizationAuditLoggingRequest } from './classes/set-organization-audit-logging-request';
+import { ListAuditLogRequest } from './classes/list-audit-log-request';
 import { GeocodeResult } from './classes/geocode-result';
 import { REGION, findUserByEmail, getCallerProfile } from './shared';
 import { getOrCreateOrgKey } from './kms';
@@ -812,10 +813,12 @@ export const setOrganizationAuditLogging = onCall<SetOrganizationAuditLoggingReq
   },
 );
 
-// Returns the caller's org's most recent audit entries — admin.ts's own
-// mutations (createUser/updateUser/deleteUser/setUserDisabled/
-// resendInvite/setUserRole/removeUserRole/createHospital/updateHospital/
-// deleteHospital/createOrganization/setOrganizationRetention/
+const AUDIT_LOG_PAGE_SIZE = 100;
+
+// Returns one page of the caller's org's audit entries, most recent first —
+// admin.ts's own mutations (createUser/updateUser/deleteUser/
+// setUserDisabled/resendInvite/setUserRole/removeUserRole/createHospital/
+// updateHospital/deleteHospital/createOrganization/setOrganizationRetention/
 // setOrganizationCountry/setOrganizationCmekPreference/
 // setOrganizationAuditLogging) plus the
 // patient-record events logged from patients.ts (patient.create/update/
@@ -825,18 +828,32 @@ export const setOrganizationAuditLogging = onCall<SetOrganizationAuditLoggingReq
 // (attributed to SYSTEM_ACTOR). No client ever reads the auditLog
 // collection directly (see firestore.rules) — this is the only read
 // path, same pattern as listUsersWithRoles.
-export const listAuditLog = onCall({ region: REGION }, async (request) => {
+//
+// Cursor-paginated rather than a single ever-growing limit(): the
+// collection has no retention/deletion policy (deliberately — audit trails
+// are generally something you want kept, not minimized), so it only grows,
+// and a flat limit(100) would make anything older than the most recent 100
+// org-wide events permanently unreachable through the app. beforeTimestampMs
+// (the previous page's oldest entry) keeps each query bounded via the same
+// organizationId+timestamp composite index regardless of total collection
+// size — this doesn't get slower as the collection grows.
+export const listAuditLog = onCall<ListAuditLogRequest>({ region: REGION }, async (request) => {
   const profile = await getCallerProfile(request.auth?.uid);
   requireAdmin(profile, 'Only admins can view the audit log.');
 
-  const snapshot = await getFirestore()
+  let query = getFirestore()
     .collection('auditLog')
     .where('organizationId', '==', profile.organizationId)
-    .orderBy('timestamp', 'desc')
-    .limit(100)
-    .get();
+    .orderBy('timestamp', 'desc') as FirebaseFirestore.Query;
 
-  return snapshot.docs.map((docSnapshot) => {
+  const { beforeTimestampMs } = request.data;
+  if (typeof beforeTimestampMs === 'number') {
+    query = query.where('timestamp', '<', Timestamp.fromMillis(beforeTimestampMs));
+  }
+
+  const snapshot = await query.limit(AUDIT_LOG_PAGE_SIZE).get();
+
+  const entries = snapshot.docs.map((docSnapshot) => {
     const data = docSnapshot.data();
     const timestamp = data['timestamp'];
     return {
@@ -848,6 +865,12 @@ export const listAuditLog = onCall({ region: REGION }, async (request) => {
       timestampMs: timestamp instanceof Timestamp ? timestamp.toMillis() : null,
     };
   });
+
+  // A full page doesn't guarantee there's more (could land exactly on the
+  // boundary), but an under-full one guarantees there isn't — cheap
+  // heuristic that avoids a second count query, and worst case just shows
+  // a "Load more" that returns an empty next page once.
+  return { entries, hasMore: entries.length === AUDIT_LOG_PAGE_SIZE };
 });
 
 const RETENTION_MS = 48 * 60 * 60 * 1000;
