@@ -1,7 +1,6 @@
 export 'src/app_urls.dart';
 export 'src/auth/auth_service.dart';
 export 'src/auth/mfa_service.dart';
-export 'src/auth/patient_alert_service.dart';
 export 'src/auth/user_profile_service.dart';
 export 'src/guards/app_guards.dart';
 export 'src/hospitals/hospital_service.dart';

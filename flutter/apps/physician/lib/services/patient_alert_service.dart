@@ -1,8 +1,7 @@
+import 'package:amdash_core/amdash_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import 'user_profile_service.dart';
 
 /// The Firebase Cloud Messaging Web Push certificate key — a public
 /// identifier, not a secret (mirrors `patient-alert.service.ts`'s
@@ -21,6 +20,14 @@ class EnableAlertsResult {
 /// `fcmTokens`/`newPatientAlertsExpiresAt` fields `sendNewPatientAlerts`
 /// (Cloud Function, unchanged) already reads — no server-side change
 /// needed for this to work from Flutter.
+///
+/// Lives here in the physician app rather than in `amdash_core` — this is
+/// the only app that ever arms new-patient alerts (EMS uploads patients,
+/// it doesn't need to be told about new ones; admin has no reason to be
+/// notified either), and `firebase_messaging` pulls in real native
+/// push-notification setup on mobile (APNs/FCM entitlements) — overhead
+/// EMS/admin were carrying for zero actual use while this lived in the
+/// shared package.
 class PatientAlertService {
   PatientAlertService(this._messaging, this._userProfileService);
 

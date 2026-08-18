@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../services/patient_alert_service.dart';
+
 /// Physician/nurse's own user-settings screen — name fields, the hospital
 /// (work-location) field for changing an already-set location (the
 /// mandatory first pick is `WorkLocationScreen`'s job), and new-patient

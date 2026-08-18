@@ -14,7 +14,6 @@ dependencies:
   firebase_auth: ^6.1.1
   cloud_firestore: ^6.0.3
   cloud_functions: ^6.0.3
-  firebase_messaging: ^16.0.4
   flutter_riverpod: ^2.6.1
   go_router: ^16.2.4
   # See physician/pubspec.yaml's identical pin — 7.1.0+ fails to compile
