@@ -879,8 +879,9 @@ const RETENTION_MS = 48 * 60 * 60 * 1000;
 // (apps/ems's patient-upload.service.ts) marked it done — unless the
 // patient's org has turned on "retain all data" via setOrganizationRetention
 // above, in which case that org's completed patients are skipped entirely.
-// The sibling emsLocations doc isn't deleted here directly; ems.ts's
-// onPatientDeleted trigger fires off this delete and cleans it up.
+// The sibling patients/{id}/location/current subdocument isn't deleted
+// here directly; ems.ts's onPatientDeleted trigger fires off this delete
+// and cleans it up.
 //
 // Cloud Scheduler (which onSchedule provisions under the hood) doesn't
 // support northamerica-northeast2 (Toronto), unlike every other function

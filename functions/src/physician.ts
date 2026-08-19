@@ -7,7 +7,7 @@ import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 import { DirectionsApiResult } from './classes/directions-api-result';
 import { FetchDirectionsRequest } from './classes/fetch-directions-request';
 import { FetchDirectionsResponse } from './classes/fetch-directions-response';
-import { REGION, getCallerProfile } from './shared';
+import { REGION, getCallerProfile, patientLocationRef } from './shared';
 
 const DIRECTIONS_API_KEY = defineSecret('DIRECTIONS_API_KEY');
 
@@ -43,7 +43,7 @@ export const sendNewPatientAlerts = onDocumentCreated(
       tokens: allTokens,
       data: {
         title: 'New patient inbound',
-        body: await notificationBody(patient),
+        body: await notificationBody(event.params.patientId, patient),
       },
     });
 
@@ -85,9 +85,9 @@ function isUnregisteredError(error: { code?: string } | undefined): boolean {
 // KMS — see the compliance checklist), so nothing patient-identifying
 // should transit it at all, not even decrypted server-side first. Age +
 // gender + an ETA is specific enough to be useful without naming anyone.
-async function notificationBody(patient: FirebaseFirestore.DocumentData): Promise<string> {
+async function notificationBody(patientId: string, patient: FirebaseFirestore.DocumentData): Promise<string> {
   const demographic = demographicText(patient['age'], patient['gender']);
-  const duration = await estimateArrivalDuration(patient);
+  const duration = await estimateArrivalDuration(patientId, patient);
   return duration ? `${demographic} is arriving in ${duration}.` : `${demographic} is inbound.`;
 }
 
@@ -110,19 +110,22 @@ function demographicText(age: unknown, gender: unknown): string {
   return 'A patient';
 }
 
-// Best-effort, one-shot estimate from the patient's pickup location (not a
-// live-updating value the way PatientViewer's own map card is — that one
-// re-fetches as the vehicle's tracked position moves; this fires once, at
-// upload time, using wherever EMS was when they created the record). Null
-// whenever any input for a real estimate is missing — a patient uploaded
-// without a location, a destination that doesn't match any hospital on
-// record, or a route the Directions API couldn't find — so the caller
-// falls back to a demographic-only notification rather than a wrong or
-// placeholder ETA.
-async function estimateArrivalDuration(patient: FirebaseFirestore.DocumentData): Promise<string | null> {
-  const location = patient['location'] as { latitude?: unknown; longitude?: unknown } | undefined;
-  const originLat = location?.latitude;
-  const originLng = location?.longitude;
+// Best-effort, one-shot estimate from the patient's live tracked position
+// (not a live-*updating* value the way PatientViewer's own map card is —
+// that one re-fetches as the vehicle keeps moving; this fires once, right
+// as the patient doc is created). Reads patients/{patientId}/location/
+// current rather than anything on the patient doc itself — reliably
+// already there by this point (not a race) because uploadPatientDocument
+// writes both in the same atomic batch, so this document and the trigger
+// that calls this function become visible together. Null whenever any
+// input for a real estimate is missing — live tracking was off, a
+// destination that doesn't match any hospital on record, or a route the
+// Directions API couldn't find — so the caller falls back to a
+// demographic-only notification rather than a wrong or placeholder ETA.
+async function estimateArrivalDuration(patientId: string, patient: FirebaseFirestore.DocumentData): Promise<string | null> {
+  const location = (await patientLocationRef(patientId).get()).data();
+  const originLat = location?.['latitude'];
+  const originLng = location?.['longitude'];
   if (typeof originLat !== 'number' || typeof originLng !== 'number') {
     return null;
   }

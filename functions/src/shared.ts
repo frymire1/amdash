@@ -11,6 +11,21 @@ initializeApp();
 
 export const REGION = 'northamerica-northeast2';
 
+// patients/{patientId}/location/current — the one place a patient's live
+// GPS position lives (written by ems.ts's onEmsLocationEvent for every
+// ongoing fix, and patients.ts's uploadPatientDocument for the very first
+// one). A subcollection rather than a field on the patient doc itself, and
+// rather than its own top-level collection: a sibling document means every
+// ~15s GPS tick never fires onPatientUpdated's audit trigger or re-emits
+// the patients-collection listener the whole patient list watches (a
+// Firestore subcollection write is invisible to both), while still living
+// naturally alongside the patient it belongs to. Read org-wide via a
+// collectionGroup('location') query (see EmsLocationController on the
+// physician client) rather than a per-patient listener each.
+export function patientLocationRef(patientId: string) {
+  return getFirestore().collection('patients').doc(patientId).collection('location').doc('current');
+}
+
 // The one place every Cloud Function reads a caller's role/org — a single
 // `users/{uid}` read, reused by every requireAdmin/requireSuperAdmin/manual
 // role check below, rather than each function re-implementing its own

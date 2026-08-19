@@ -25,8 +25,6 @@ class PatientFormValues {
     required this.temperature,
     required this.respiratoryRate,
     required this.gcs,
-    required this.latitude,
-    required this.longitude,
     required this.ivSize,
     required this.ivPlacement,
     required this.treatment,
@@ -44,15 +42,13 @@ class PatientFormValues {
   final num? temperature;
   final int? respiratoryRate;
   final int? gcs;
-  final double? latitude;
-  final double? longitude;
   final String ivSize;
   final String ivPlacement;
   final String treatment;
   final String notes;
 }
 
-const _optionalTopLevelFields = ['location', 'ivSize', 'ivPlacement', 'treatment'];
+const _optionalTopLevelFields = ['ivSize', 'ivPlacement', 'treatment'];
 
 /// The literal blank-field sentinel EMS writes when name/healthcareNumber
 /// are left empty — shared so `patient_upload_screen.dart` can resolve a
@@ -82,21 +78,23 @@ class PatientSaveResult {
   final String? healthcareNumberFingerprint;
 }
 
-/// Mirrors `apps/ems/src/app/services/patient-upload.service.ts`: mostly
-/// direct Firestore writes to `patients` (EMS accounts write this
-/// collection directly, per firestore.rules — kept that way so an
-/// ambulance with spotty connectivity gets offline queueing for free from
-/// the Firestore client SDK). `name`/`healthcareNumber` are always routed
-/// through `encryptPatientFields` (functions/src/patients.ts) first — that
-/// function itself decides encrypt-vs-passthrough from the caller's org, so
-/// this call site never branches on whether Canadian data residency is
-/// even on for the current org. `deletePatient` is the one write that
-/// isn't direct — see its own doc comment.
+/// Mirrors `apps/ems/src/app/services/patient-upload.service.ts`.
+/// `updatePatient`/`completeTransport` are direct Firestore writes to
+/// `patients` (EMS accounts write this collection directly, per
+/// firestore.rules — kept that way so an ambulance with spotty
+/// connectivity gets offline queueing for free from the Firestore client
+/// SDK); `updatePatient` routes name/healthcareNumber through
+/// `encryptPatientFields` (functions/src/patients.ts) first, which itself
+/// decides encrypt-vs-passthrough from the caller's org, so this call site
+/// never branches on whether Canadian data residency is even on for the
+/// current org. `uploadPatient`/`deletePatient` are callables instead —
+/// see each one's own doc comment for why.
 ///
-/// Every create/update also stamps `createdBy`/`updatedBy` with the
-/// signed-in user's uid (enforced by firestore.rules to actually match the
-/// writer) — the only way the server-side onPatientCreated/onPatientUpdated
-/// audit triggers can attribute a direct client write to a real person.
+/// Every write also stamps `createdBy`/`updatedBy` with the signed-in
+/// user's uid (enforced by firestore.rules for the direct writes, by
+/// `request.auth` server-side for the callables) — the only way the
+/// server-side onPatientCreated/onPatientUpdated audit triggers can
+/// attribute a write to a real person.
 class PatientUploadService {
   PatientUploadService(this._firestore, this._functions, this._auth);
 
@@ -104,18 +102,50 @@ class PatientUploadService {
   final FirebaseFunctions _functions;
   final FirebaseAuth _auth;
 
-  Future<Map<String, Object?>> _patientFields(PatientFormValues value) async {
-    final hasLocation = value.latitude != null && value.longitude != null;
+  // The 'Unknown'-defaulting/optional-field-omission shape shared by both
+  // create and update — everything except name/healthcareNumber (create
+  // encrypts them server-side inline; update encrypts them via
+  // encryptPatientFields first, see _updateFields below) and location
+  // (create-only, seeded through uploadPatientDocument itself — a
+  // patient's GPS position is never persisted as its own field, on the
+  // patient doc or otherwise; see that function's own doc comment for
+  // where it actually lives).
+  Map<String, Object?> _sharedFields(PatientFormValues value) {
+    return {
+      'gender': value.gender.isNotEmpty ? value.gender : 'Unknown',
+      'age': value.age ?? 'Unknown',
+      'destination': value.destination.isNotEmpty ? value.destination : 'Unknown',
+      'vitals': {
+        'heartRate': value.heartRate ?? 'Unknown',
+        'bloodPressure': value.bloodPressure.isNotEmpty ? value.bloodPressure : 'Unknown',
+        'oxygen': value.oxygen ?? 'Unknown',
+        'temperature': value.temperature ?? 'Unknown',
+        if (value.respiratoryRate != null) 'respiratoryRate': value.respiratoryRate,
+        if (value.gcs != null) 'gcs': value.gcs,
+      },
+      if (value.ivSize.isNotEmpty) 'ivSize': value.ivSize,
+      if (value.ivPlacement.isNotEmpty) 'ivPlacement': value.ivPlacement,
+      if (value.treatment.isNotEmpty) 'treatment': value.treatment,
+      'notes': value.notes,
+    };
+  }
 
+  // Only ever used by updatePatient — encrypts name/healthcareNumber via
+  // encryptPatientFields (a separate round trip ahead of the direct
+  // Firestore write updatePatient itself performs). uploadPatient doesn't
+  // call this: uploadPatientDocument encrypts inline as part of creating
+  // the document, in the same call.
+  //
+  // Deliberately never falls back to writing the plaintext values on
+  // failure — that would make Canadian data residency fail silently
+  // exactly when a flaky connection makes it most likely to fail. Lets the
+  // exception propagate; updatePatient's caller already surfaces any
+  // failure here as a blocking, retryable error and stays on the form
+  // rather than navigating away.
+  Future<Map<String, Object?>> _updateFields(PatientFormValues value) async {
     final name = resolveBlankField(value.name);
     final healthcareNumber = resolveBlankField(value.healthcareNumber);
 
-    // Deliberately never falls back to writing the plaintext values above
-    // on failure — that would make Canadian data residency fail silently
-    // exactly when a flaky connection makes it most likely to fail. Lets
-    // the exception propagate; uploadPatient/updatePatient's callers
-    // already surface any failure here as a blocking, retryable error and
-    // stay on the form rather than navigating away.
     final Object? encryptedName;
     final Object? encryptedHealthcareNumber;
     try {
@@ -127,30 +157,10 @@ class PatientUploadService {
       encryptedName = result.data['name'];
       encryptedHealthcareNumber = result.data['healthcareNumber'];
     } catch (error) {
-      throw PatientFieldEncryptionException(error);
+      throw PatientSaveException(error);
     }
 
-    return {
-      'name': encryptedName,
-      'gender': value.gender.isNotEmpty ? value.gender : 'Unknown',
-      'age': value.age ?? 'Unknown',
-      'healthcareNumber': encryptedHealthcareNumber,
-      'destination': value.destination.isNotEmpty ? value.destination : 'Unknown',
-      'vitals': {
-        'heartRate': value.heartRate ?? 'Unknown',
-        'bloodPressure': value.bloodPressure.isNotEmpty ? value.bloodPressure : 'Unknown',
-        'oxygen': value.oxygen ?? 'Unknown',
-        'temperature': value.temperature ?? 'Unknown',
-        if (value.respiratoryRate != null) 'respiratoryRate': value.respiratoryRate,
-        if (value.gcs != null) 'gcs': value.gcs,
-      },
-      if (hasLocation)
-        'location': {'latitude': value.latitude, 'longitude': value.longitude, 'address': ''},
-      if (value.ivSize.isNotEmpty) 'ivSize': value.ivSize,
-      if (value.ivPlacement.isNotEmpty) 'ivPlacement': value.ivPlacement,
-      if (value.treatment.isNotEmpty) 'treatment': value.treatment,
-      'notes': value.notes,
-    };
+    return {'name': encryptedName, 'healthcareNumber': encryptedHealthcareNumber, ..._sharedFields(value)};
   }
 
   // Diagnostic only, not console/print-based (which relays over the DWDS
@@ -161,32 +171,48 @@ class PatientUploadService {
   static int debugCallCount = 0;
   static final List<StackTrace> debugCallStacks = [];
 
-  Future<PatientSaveResult> uploadPatient(PatientFormValues value, String organizationId) async {
+  // Unlike every other write here, this is not a direct Firestore write —
+  // firestore.rules flatly blocks a direct client create now (see its own
+  // comment) because creation has to atomically seed this patient's
+  // initial location subdocument too, which only a Cloud Function can do.
+  // organizationId isn't a parameter here for that reason: unlike the old
+  // direct write, uploadPatientDocument derives it itself from the
+  // caller's own profile, never a client-supplied value. [latitude]/
+  // [longitude] are the EMS device's GPS fix at the moment of upload, if
+  // "live-track this patient" is on and a fix was obtained — omit both to
+  // create a patient with no known location at all (matches live tracking
+  // being off).
+  //
+  // The real cost of routing through a callable: no offline queueing for
+  // this specific write, unlike every other one here — see
+  // uploadPatientDocument's own doc comment. patient_upload_screen.dart
+  // shows an OfflineBanner so EMS sees this coming before they submit.
+  Future<PatientSaveResult> uploadPatient(PatientFormValues value, {double? latitude, double? longitude}) async {
     debugCallCount++;
     debugCallStacks.add(StackTrace.current);
 
-    final fields = await _patientFields(value);
-    final uid = _auth.currentUser?.uid;
-    final docRef = await _firestore.collection('patients').add({
-      ...fields,
-      // Stamped from the caller's own org, never client-chosen — matches
-      // firestore.rules' create check.
-      'organizationId': organizationId,
-      'submittedAt': FieldValue.serverTimestamp(),
-      'status': 'active',
-      // Enforced by firestore.rules to actually equal the writer's own
-      // uid — the only way functions/src/patients.ts's onPatientCreated
-      // trigger can attribute this to a real person, since a Firestore
-      // trigger carries no request.auth of its own. createdBy stays fixed
-      // from here on; updatedBy moves with every future save (see
-      // updatePatient/completeTransport below).
-      'createdBy': uid,
-      'updatedBy': uid,
-    });
+    final name = resolveBlankField(value.name);
+    final healthcareNumber = resolveBlankField(value.healthcareNumber);
+
+    final Map<Object?, Object?> data;
+    try {
+      final callable = _functions.httpsCallable('uploadPatientDocument');
+      final result = await callable.call<Map<Object?, Object?>>({
+        'name': name,
+        'healthcareNumber': healthcareNumber,
+        ..._sharedFields(value),
+        if (latitude != null && longitude != null) 'latitude': latitude,
+        if (latitude != null && longitude != null) 'longitude': longitude,
+      });
+      data = result.data;
+    } catch (error) {
+      throw PatientSaveException(error);
+    }
+
     return PatientSaveResult(
-      id: docRef.id,
-      nameFingerprint: _fingerprintOf(fields['name']),
-      healthcareNumberFingerprint: _fingerprintOf(fields['healthcareNumber']),
+      id: data['id'] as String,
+      nameFingerprint: _fingerprintOf(data['name']),
+      healthcareNumberFingerprint: _fingerprintOf(data['healthcareNumber']),
     );
   }
 
@@ -196,7 +222,7 @@ class PatientUploadService {
   // organizationId is deliberately never included — rules block changing
   // it post-create; createdBy is the same story, immutable once written.
   Future<PatientSaveResult> updatePatient(String id, PatientFormValues value) async {
-    final fields = await _patientFields(value);
+    final fields = await _updateFields(value);
     final update = <String, Object?>{
       ...fields,
       'updatedAt': FieldValue.serverTimestamp(),
@@ -234,18 +260,20 @@ class PatientUploadService {
   }
 }
 
-/// Thrown when `encryptPatientFields` fails — deliberately never caught
-/// and silently degraded to a plaintext write (see `_patientFields`'s own
-/// comment). The upload/edit screen's existing generic error handling
-/// already surfaces this as a blocking, retryable error and keeps the
-/// user on the form rather than navigating away.
-class PatientFieldEncryptionException implements Exception {
-  PatientFieldEncryptionException(this.cause);
+/// Thrown when either write path's server round trip fails — updatePatient's
+/// call to `encryptPatientFields`, or uploadPatient's call to
+/// `uploadPatientDocument`. Deliberately never caught and silently degraded
+/// to a plaintext/unsaved write (see `_updateFields`'s own comment). The
+/// upload/edit screen's existing generic error handling already surfaces
+/// this as a blocking, retryable error and keeps the user on the form
+/// rather than navigating away.
+class PatientSaveException implements Exception {
+  PatientSaveException(this.cause);
 
   final Object cause;
 
   @override
-  String toString() => 'Failed to prepare patient fields for saving: $cause';
+  String toString() => 'Failed to save this patient: $cause';
 }
 
 final patientUploadServiceProvider = Provider<PatientUploadService>((ref) {

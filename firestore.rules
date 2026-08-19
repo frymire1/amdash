@@ -115,11 +115,14 @@ service cloud.firestore {
     // which bypasses these rules entirely.
     match /patients/{patientId} {
       allow read: if isSuperAdmin() || sameOrgAsCaller(resource.data.get('organizationId', null));
-      allow create: if callerHasRole('ems')
-        && sameOrgAsCaller(request.resource.data.organizationId)
-        && request.resource.data.get('createdBy', null) == request.auth.uid
-        && request.resource.data.get('updatedBy', null) == request.auth.uid
-        && fieldsRespectCmek(request.resource.data);
+      // Only ever written by the uploadPatientDocument Cloud Function (Admin
+      // SDK, bypasses these rules) — creating a new patient also has to
+      // atomically seed this patient's initial location subdocument below,
+      // which firestore.rules blocks a direct client write to entirely, so
+      // both writes need to happen together server-side. Edits stay a
+      // direct client write (offline queueing matters most for those,
+      // in-the-field — see the function's own doc comment).
+      allow create: if false;
       allow update: if callerHasRole('ems')
         && sameOrgAsCaller(resource.data.get('organizationId', null))
         && request.resource.data.organizationId == resource.data.organizationId
@@ -127,14 +130,23 @@ service cloud.firestore {
         && request.resource.data.get('updatedBy', null) == request.auth.uid
         && fieldsRespectCmek(request.resource.data);
       allow delete: if false;
-    }
 
-    // Only ever written by the onEmsLocationEvent Cloud Function (Admin SDK,
-    // triggered via Pub/Sub from publishEmsLocation/stopEmsLocation) — no
-    // client writes here directly.
-    match /emsLocations/{locationId} {
-      allow read: if isSuperAdmin() || sameOrgAsCaller(resource.data.get('organizationId', null));
-      allow write: if false;
+      // The patient's live GPS position — a sibling document rather than a
+      // field on the patient doc itself, specifically so a location update
+      // (as often as every ~15s, for the life of a transport) never fires
+      // onPatientUpdated's audit trigger or re-emits the listener the whole
+      // patient list watches (a Firestore subcollection write is invisible
+      // to both). Only ever written by onEmsLocationEvent/
+      // uploadPatientDocument (Admin SDK) — no client writes here directly.
+      // Read org-wide via a collectionGroup('location') query (see
+      // EmsLocationController on the physician client), which is why
+      // organizationId is denormalized onto this document rather than
+      // resolved from the parent — a collection-group read has no cheap way
+      // to look up its own parent.
+      match /location/{locationId} {
+        allow read: if isSuperAdmin() || sameOrgAsCaller(resource.data.get('organizationId', null));
+        allow write: if false;
+      }
     }
 
     // Hospitals are only ever written by the createHospital/deleteHospital

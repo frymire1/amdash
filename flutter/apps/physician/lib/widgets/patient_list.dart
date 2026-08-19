@@ -75,13 +75,20 @@ class _PatientListState extends ConsumerState<PatientList> {
 
     final myHospital = _sortByDistance ? _findHospital(hospitals, profile?.workLocation) : null;
     if (myHospital != null) {
+      // Sorts by each patient's live tracked position
+      // (patients/{id}/location/current), not a stored pickup point —
+      // there is no such field anymore (see patient_upload_service.dart).
+      // A patient with no live fix yet (untracked, or not tracking at all)
+      // sorts last, same as before.
       filtered = [...filtered]..sort((a, b) {
-        final da = a.location == null
+        final aLocation = emsTrackingInfo(ref, a.id).location;
+        final bLocation = emsTrackingInfo(ref, b.id).location;
+        final da = (aLocation?.latitude == null || aLocation?.longitude == null)
             ? double.infinity
-            : distanceMeters(myHospital.latitude, myHospital.longitude, a.location!.latitude, a.location!.longitude);
-        final db = b.location == null
+            : distanceMeters(myHospital.latitude, myHospital.longitude, aLocation!.latitude!, aLocation.longitude!);
+        final db = (bLocation?.latitude == null || bLocation?.longitude == null)
             ? double.infinity
-            : distanceMeters(myHospital.latitude, myHospital.longitude, b.location!.latitude, b.location!.longitude);
+            : distanceMeters(myHospital.latitude, myHospital.longitude, bLocation!.latitude!, bLocation.longitude!);
         return da.compareTo(db);
       });
     }

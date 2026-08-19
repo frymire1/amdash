@@ -33,27 +33,6 @@ class PatientVitals {
   final int? gcs;
 }
 
-/// Mirrors `libs/patients/src/lib/classes/patient-location.ts`.
-class PatientLocation {
-  const PatientLocation({
-    required this.latitude,
-    required this.longitude,
-    required this.address,
-  });
-
-  factory PatientLocation.fromFirestore(Map<String, Object?> data) {
-    return PatientLocation(
-      latitude: (data['latitude'] as num?)?.toDouble() ?? 0,
-      longitude: (data['longitude'] as num?)?.toDouble() ?? 0,
-      address: data['address'] as String? ?? '',
-    );
-  }
-
-  final double latitude;
-  final double longitude;
-  final String address;
-}
-
 /// Represents `patient.name`/`patient.healthcareNumber` as read off
 /// Firestore — either a plain string (the common case: no Canadian data
 /// residency requested for this org, or a legacy record written before
@@ -113,7 +92,6 @@ class Patient {
     required this.age,
     required this.healthcareNumber,
     required this.vitals,
-    this.location,
     this.notes,
     this.destination,
     this.ivSize,
@@ -124,7 +102,6 @@ class Patient {
 
   factory Patient.fromFirestore(String id, Map<String, Object?> data) {
     final vitalsData = data['vitals'] as Map<String, Object?>? ?? const {};
-    final locationData = data['location'] as Map<String, Object?>?;
     return Patient(
       id: id,
       name: PatientField.fromFirestore(data['name']),
@@ -132,9 +109,6 @@ class Patient {
       age: data['age'],
       healthcareNumber: PatientField.fromFirestore(data['healthcareNumber']),
       vitals: PatientVitals.fromFirestore(vitalsData),
-      location: locationData == null
-          ? null
-          : PatientLocation.fromFirestore(locationData),
       notes: data['notes'] as String?,
       destination: data['destination'] as String?,
       ivSize: data['ivSize'] as String?,
@@ -155,7 +129,6 @@ class Patient {
       age: age,
       healthcareNumber: healthcareNumber != null ? PatientField.resolved(healthcareNumber) : this.healthcareNumber,
       vitals: vitals,
-      location: location,
       notes: notes,
       destination: destination,
       ivSize: ivSize,
@@ -171,7 +144,6 @@ class Patient {
   final Object? age;
   final PatientField healthcareNumber;
   final PatientVitals vitals;
-  final PatientLocation? location;
   final String? notes;
   final String? destination;
   final String? ivSize;

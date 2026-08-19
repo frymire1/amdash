@@ -36,7 +36,8 @@ class PatientUploadScreen extends ConsumerStatefulWidget {
   final String? patientId;
 
   @override
-  ConsumerState<PatientUploadScreen> createState() => _PatientUploadScreenState();
+  ConsumerState<PatientUploadScreen> createState() =>
+      _PatientUploadScreenState();
 }
 
 class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
@@ -117,7 +118,9 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     _gender = _genders.contains(patient.gender) ? patient.gender : null;
     _ageController.text = patient.age is num ? '${patient.age}' : '';
     _destination = patient.destination;
-    _heartRateController.text = patient.vitals.heartRate is num ? '${patient.vitals.heartRate}' : '';
+    _heartRateController.text = patient.vitals.heartRate is num
+        ? '${patient.vitals.heartRate}'
+        : '';
     if (isProvidedValue(patient.vitals.bloodPressure)) {
       final parts = patient.vitals.bloodPressure.split('/');
       _systolicController.text = parts[0];
@@ -126,12 +129,15 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
       _systolicController.text = '';
       _diastolicController.text = '';
     }
-    _oxygenController.text = patient.vitals.oxygen is num ? '${patient.vitals.oxygen}' : '';
-    _temperatureController.text = patient.vitals.temperature is num ? '${patient.vitals.temperature}' : '';
-    _respiratoryRateController.text = patient.vitals.respiratoryRate?.toString() ?? '';
+    _oxygenController.text = patient.vitals.oxygen is num
+        ? '${patient.vitals.oxygen}'
+        : '';
+    _temperatureController.text = patient.vitals.temperature is num
+        ? '${patient.vitals.temperature}'
+        : '';
+    _respiratoryRateController.text =
+        patient.vitals.respiratoryRate?.toString() ?? '';
     _gcsController.text = patient.vitals.gcs?.toString() ?? '';
-    _latitude = patient.location?.latitude;
-    _longitude = patient.location?.longitude;
     _ivSize = patient.ivSize;
     _ivPlacement = patient.ivPlacement;
     _treatmentController.text = patient.treatment ?? '';
@@ -148,7 +154,9 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
 
   Future<void> _prefillDecryptedFields(String patientId) async {
     try {
-      final resolved = await ref.read(patientDecryptionServiceProvider).decryptFields([patientId]);
+      final resolved = await ref
+          .read(patientDecryptionServiceProvider)
+          .decryptFields([patientId]);
       final fields = resolved[patientId];
       if (mounted && fields != null) {
         setState(() {
@@ -158,7 +166,10 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
       }
     } catch (error) {
       if (mounted) {
-        setState(() => _errorMessage = "Failed to load this patient's name/healthcare number. Please try again.");
+        setState(
+          () => _errorMessage =
+              "Failed to load this patient's name/healthcare number. Please try again.",
+        );
       }
     }
   }
@@ -207,8 +218,6 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
       temperature: _parseNum(_temperatureController.text),
       respiratoryRate: _parseInt(_respiratoryRateController.text),
       gcs: _parseInt(_gcsController.text),
-      latitude: _latitude,
-      longitude: _longitude,
       ivSize: _ivSize ?? '',
       ivPlacement: _ivPlacement ?? '',
       treatment: _treatmentController.text.trim(),
@@ -222,7 +231,6 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
 
     final uploadService = ref.read(patientUploadServiceProvider);
     final trackingController = ref.read(emsTrackingProvider.notifier);
-    final organizationId = ref.read(userProfileProvider).valueOrNull?.organizationId;
 
     String id;
     try {
@@ -231,7 +239,11 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
         id = _editingId!;
         result = await uploadService.updatePatient(id, values);
       } else {
-        result = await uploadService.uploadPatient(values, organizationId ?? '');
+        result = await uploadService.uploadPatient(
+          values,
+          latitude: _latitude,
+          longitude: _longitude,
+        );
         id = result.id;
         // If live tracking below fails, stay on this page to retry rather
         // than navigating away — treat the patient as already-created from
@@ -299,185 +311,288 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     final hospitalNames = ref.watch(hospitalNamesProvider);
 
     // No Scaffold/NavBar of its own — this screen lives inside the app's
-    // ShellRoute now, which owns those.
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+    // ShellRoute now, which owns those. OfflineBanner matters more here
+    // than most screens: creating a patient now requires connectivity (see
+    // uploadPatientDocument's own doc comment) rather than getting
+    // Firestore's usual offline queueing, so EMS should see this coming
+    // before they fill out the whole form, not just as a failure after
+    // they submit.
+    return Column(
+      children: [
+        const OfflineBanner(),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 720),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // NavBar (the shell's fixed appBar) has no back button
-                    // by design — this screen provides its own way back to
-                    // the dashboard.
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back),
-                      tooltip: 'Back',
-                      onPressed: () => context.canPop() ? context.pop() : context.go('/'),
+                    Row(
+                      children: [
+                        // NavBar (the shell's fixed appBar) has no back button
+                        // by design — this screen provides its own way back to
+                        // the dashboard.
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back),
+                          tooltip: 'Back',
+                          onPressed: () => context.canPop()
+                              ? context.pop()
+                              : context.go('/'),
+                        ),
+                        Expanded(
+                          child: Text(
+                            _isEditing
+                                ? 'Edit Patient Information'
+                                : 'Upload Patient Information',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        // Balances the leading IconButton's width so the title
+                        // is actually centered, not just centered within the
+                        // remaining space after it.
+                        const SizedBox(width: 48),
+                      ],
                     ),
-                    Expanded(
-                      child: Text(
-                        _isEditing ? 'Edit Patient Information' : 'Upload Patient Information',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                    // Balances the leading IconButton's width so the title
-                    // is actually centered, not just centered within the
-                    // remaining space after it.
-                    const SizedBox(width: 48),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                _section('Patient Details', [
-                  TextField(controller: _nameController, decoration: const InputDecoration(labelText: 'Full Name')),
-                  _dropdown('Gender', _gender, _genders, (value) => setState(() => _gender = value)),
-                  TextField(
-                    controller: _ageController,
-                    decoration: const InputDecoration(labelText: 'Age'),
-                    keyboardType: TextInputType.number,
-                  ),
-                  TextField(
-                    controller: _healthcareNumberController,
-                    decoration: const InputDecoration(labelText: 'Healthcare Number'),
-                  ),
-                  _dropdown('Destination Hospital', _destination, hospitalNames, (value) => setState(() => _destination = value)),
-                ]),
-                _section('Vitals', [
-                  TextField(
-                    controller: _heartRateController,
-                    decoration: const InputDecoration(labelText: 'Heart Rate (bpm)'),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  ),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _systolicController,
-                          decoration: const InputDecoration(labelText: 'Systolic BP'),
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                          textInputAction: TextInputAction.next,
-                          onSubmitted: (_) => _diastolicFocusNode.requestFocus(),
+                    const SizedBox(height: 20),
+                    _section('Patient Details', [
+                      TextField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Full Name',
                         ),
                       ),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 8),
-                        child: Text('/', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+                      _dropdown(
+                        'Gender',
+                        _gender,
+                        _genders,
+                        (value) => setState(() => _gender = value),
                       ),
-                      Expanded(
-                        child: TextField(
-                          controller: _diastolicController,
-                          focusNode: _diastolicFocusNode,
-                          decoration: const InputDecoration(labelText: 'Diastolic BP'),
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      TextField(
+                        controller: _ageController,
+                        decoration: const InputDecoration(labelText: 'Age'),
+                        keyboardType: TextInputType.number,
+                      ),
+                      TextField(
+                        controller: _healthcareNumberController,
+                        decoration: const InputDecoration(
+                          labelText: 'Healthcare Number',
+                        ),
+                      ),
+                      _dropdown(
+                        'Destination Hospital',
+                        _destination,
+                        hospitalNames,
+                        (value) => setState(() => _destination = value),
+                      ),
+                    ]),
+                    _section('Vitals', [
+                      TextField(
+                        controller: _heartRateController,
+                        decoration: const InputDecoration(
+                          labelText: 'Heart Rate (bpm)',
+                        ),
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                      ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _systolicController,
+                              decoration: const InputDecoration(
+                                labelText: 'Systolic BP',
+                              ),
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                              ],
+                              textInputAction: TextInputAction.next,
+                              onSubmitted: (_) =>
+                                  _diastolicFocusNode.requestFocus(),
+                            ),
+                          ),
+                          const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 8),
+                            child: Text(
+                              '/',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: TextField(
+                              controller: _diastolicController,
+                              focusNode: _diastolicFocusNode,
+                              decoration: const InputDecoration(
+                                labelText: 'Diastolic BP',
+                              ),
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      TextField(
+                        controller: _oxygenController,
+                        decoration: const InputDecoration(
+                          labelText: 'Oxygen (%)',
+                        ),
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                      ),
+                      TextField(
+                        controller: _temperatureController,
+                        decoration: const InputDecoration(
+                          labelText: 'Temperature (°C)',
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'^\d*\.?\d*$'),
+                          ),
+                        ],
+                      ),
+                      TextField(
+                        controller: _respiratoryRateController,
+                        decoration: const InputDecoration(
+                          labelText: 'Respiratory Rate (breaths/min)',
+                        ),
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                      ),
+                      TextField(
+                        controller: _gcsController,
+                        decoration: const InputDecoration(
+                          labelText: 'GCS',
+                          hintText: '3-15',
+                        ),
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                      ),
+                    ]),
+                    _section('IV Access', [
+                      _dropdown(
+                        'IV Size (Gauge)',
+                        _ivSize,
+                        _ivSizes,
+                        (value) => setState(() => _ivSize = value),
+                      ),
+                      _dropdown(
+                        'IV Placement',
+                        _ivPlacement,
+                        _ivPlacements,
+                        (value) => setState(() => _ivPlacement = value),
+                      ),
+                    ]),
+                    _section('Treatment', [
+                      TextField(
+                        controller: _treatmentController,
+                        decoration: const InputDecoration(
+                          labelText: 'Treatment / Medication Given',
+                          hintText:
+                              'IV fluids, medications administered, interventions, etc.',
+                        ),
+                        maxLines: 4,
+                      ),
+                    ]),
+                    _section('Notes', [
+                      TextField(
+                        controller: _notesController,
+                        decoration: const InputDecoration(
+                          labelText: 'Patient Notes',
+                          hintText: 'Observations, hazards, etc.',
+                        ),
+                        maxLines: 4,
+                      ),
+                    ]),
+                    _section('Location', [
+                      LocationTrackingSection(
+                        patientId: widget.patientId,
+                        // Mirrors the section's current values for _onSubmit to
+                        // read — no setState needed, nothing in this parent's
+                        // build() depends on these beyond submit time, and the
+                        // section is already the one rebuilding to reflect its
+                        // own status/toggle changes.
+                        onChanged: (value) {
+                          _latitude = value.latitude;
+                          _longitude = value.longitude;
+                          _liveTrackingEnabled = value.liveTrackingEnabled;
+                          _hasLocationError = value.hasLocationError;
+                          // Fires once, the first time the section reports an
+                          // error (typically right after it mounts) — not
+                          // re-shown on every 15s poll while permission stays
+                          // off. This callback can run mid-build (the section
+                          // reports its very first value from its own
+                          // initState), so the dialog itself has to wait for
+                          // the frame to finish rather than opening here
+                          // directly.
+                          if (_hasLocationError && !_locationErrorDialogShown) {
+                            _locationErrorDialogShown = true;
+                            WidgetsBinding.instance.addPostFrameCallback(
+                              (_) => _showLocationPermissionDialog(),
+                            );
+                          }
+                        },
+                      ),
+                    ]),
+                    if (_errorMessage != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        _errorMessage!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
                         ),
                       ),
                     ],
-                  ),
-                  TextField(
-                    controller: _oxygenController,
-                    decoration: const InputDecoration(labelText: 'Oxygen (%)'),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  ),
-                  TextField(
-                    controller: _temperatureController,
-                    decoration: const InputDecoration(labelText: 'Temperature (°C)'),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*$'))],
-                  ),
-                  TextField(
-                    controller: _respiratoryRateController,
-                    decoration: const InputDecoration(labelText: 'Respiratory Rate (breaths/min)'),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  ),
-                  TextField(
-                    controller: _gcsController,
-                    decoration: const InputDecoration(labelText: 'GCS', hintText: '3-15'),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  ),
-                ]),
-                _section('IV Access', [
-                  _dropdown('IV Size (Gauge)', _ivSize, _ivSizes, (value) => setState(() => _ivSize = value)),
-                  _dropdown('IV Placement', _ivPlacement, _ivPlacements, (value) => setState(() => _ivPlacement = value)),
-                ]),
-                _section('Treatment', [
-                  TextField(
-                    controller: _treatmentController,
-                    decoration: const InputDecoration(
-                      labelText: 'Treatment / Medication Given',
-                      hintText: 'IV fluids, medications administered, interventions, etc.',
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        key: const Key('patient_upload_submit'),
+                        onPressed: _submitting ? null : _onSubmit,
+                        child: _submitting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Text(
+                                _isEditing ? 'Save Changes' : 'Upload Patient',
+                              ),
+                      ),
                     ),
-                    maxLines: 4,
-                  ),
-                ]),
-                _section('Notes', [
-                  TextField(
-                    controller: _notesController,
-                    decoration: const InputDecoration(labelText: 'Patient Notes', hintText: 'Observations, hazards, etc.'),
-                    maxLines: 4,
-                  ),
-                ]),
-                _section('Location', [
-                  LocationTrackingSection(
-                    patientId: widget.patientId,
-                    initialLatitude: _latitude,
-                    initialLongitude: _longitude,
-                    // Mirrors the section's current values for _onSubmit to
-                    // read — no setState needed, nothing in this parent's
-                    // build() depends on these beyond submit time, and the
-                    // section is already the one rebuilding to reflect its
-                    // own status/toggle changes.
-                    onChanged: (value) {
-                      _latitude = value.latitude;
-                      _longitude = value.longitude;
-                      _liveTrackingEnabled = value.liveTrackingEnabled;
-                      _hasLocationError = value.hasLocationError;
-                      // Fires once, the first time the section reports an
-                      // error (typically right after it mounts) — not
-                      // re-shown on every 15s poll while permission stays
-                      // off. This callback can run mid-build (the section
-                      // reports its very first value from its own
-                      // initState), so the dialog itself has to wait for
-                      // the frame to finish rather than opening here
-                      // directly.
-                      if (_hasLocationError && !_locationErrorDialogShown) {
-                        _locationErrorDialogShown = true;
-                        WidgetsBinding.instance.addPostFrameCallback((_) => _showLocationPermissionDialog());
-                      }
-                    },
-                  ),
-                ]),
-                if (_errorMessage != null) ...[
-                  const SizedBox(height: 8),
-                  Text(_errorMessage!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                ],
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    key: const Key('patient_upload_submit'),
-                    onPressed: _submitting ? null : _onSubmit,
-                    child: _submitting
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                        : Text(_isEditing ? 'Save Changes' : 'Upload Patient'),
-                  ),
+                    const SizedBox(height: 24),
+                  ],
                 ),
-                const SizedBox(height: 24),
-              ],
+              ),
             ),
           ),
         ),
-      );
+      ],
+    );
   }
 
   Widget _section(String title, List<Widget> fields) {
@@ -488,21 +603,33 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            ),
             const SizedBox(height: 8),
-            for (final field in fields) Padding(padding: const EdgeInsets.only(bottom: 8), child: field),
+            for (final field in fields)
+              Padding(padding: const EdgeInsets.only(bottom: 8), child: field),
           ],
         ),
       ),
     );
   }
 
-  Widget _dropdown(String label, String? value, List<String> options, ValueChanged<String?> onChanged) {
+  Widget _dropdown(
+    String label,
+    String? value,
+    List<String> options,
+    ValueChanged<String?> onChanged,
+  ) {
     final safeValue = options.contains(value) ? value : null;
     return DropdownButtonFormField<String>(
       initialValue: safeValue,
       decoration: InputDecoration(labelText: label),
-      items: [for (final option in options) DropdownMenuItem(value: option, child: Text(option))],
+      items: [
+        for (final option in options)
+          DropdownMenuItem(value: option, child: Text(option)),
+      ],
       onChanged: onChanged,
     );
   }

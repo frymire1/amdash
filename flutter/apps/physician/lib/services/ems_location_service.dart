@@ -55,11 +55,12 @@ class EmsLocationState {
 }
 
 /// Mirrors `apps/physician/src/app/services/ems-location.service.ts`:
-/// subscribes to `emsLocations` (organizationId + active==true), carries
-/// each patient's previous fix forward onto the next one (so
-/// `PatientViewer` can lerp the marker between them over the real elapsed
-/// wall-clock gap), and sweeps for staleness every 5s independent of
-/// whether new Firestore snapshots arrive at all.
+/// subscribes to every patient's `location` subcollection org-wide via a
+/// `collectionGroup` query (organizationId + active==true), carries each
+/// patient's previous fix forward onto the next one (so `PatientViewer`
+/// can lerp the marker between them over the real elapsed wall-clock gap),
+/// and sweeps for staleness every 5s independent of whether new Firestore
+/// snapshots arrive at all.
 class EmsLocationController extends Notifier<EmsLocationState> {
   StreamSubscription<QuerySnapshot<Map<String, Object?>>>? _subscription;
   Timer? _staleTimer;
@@ -100,8 +101,13 @@ class EmsLocationController extends Notifier<EmsLocationState> {
 
     state = const EmsLocationState();
 
+    // A collection group query — patients/{patientId}/location/current is
+    // a subcollection, not its own top-level collection (see
+    // functions/src/shared.ts's patientLocationRef for why), so this reads
+    // every patient's location subdocument across the org in one query
+    // rather than one listener per patient.
     _subscription = FirebaseFirestore.instance
-        .collection('emsLocations')
+        .collectionGroup('location')
         .where('organizationId', isEqualTo: organizationId)
         .where('active', isEqualTo: true)
         .snapshots()
@@ -114,9 +120,12 @@ class EmsLocationController extends Notifier<EmsLocationState> {
     for (final doc in snapshot.docs) {
       final data = doc.data();
       final updatedAt = data['updatedAt'] as Timestamp?;
-      if (updatedAt == null) continue;
+      // doc.id is always 'current' here, not the patient id (every
+      // patient's location subdocument shares that same fixed id) — the
+      // actual patient id has to come from the document's own field.
+      final patientId = data['patientId'] as String?;
+      if (updatedAt == null || patientId == null) continue;
 
-      final patientId = doc.id;
       final previousFix = _latest[patientId];
       _latest[patientId] = ActiveLocation(
         patientId: patientId,

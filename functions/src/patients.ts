@@ -1,36 +1,26 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
-import { getFirestore } from 'firebase-admin/firestore';
+import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { DecryptPatientFieldsRequest } from './classes/decrypt-patient-fields-request';
 import { DeletePatientRecordRequest } from './classes/delete-patient-record-request';
+import { EmsLocationEvent } from './classes/ems-location-event';
 import { EncryptPatientFieldsRequest } from './classes/encrypt-patient-fields-request';
-import { REGION, getCallerProfile } from './shared';
+import { UploadPatientDocumentRequest } from './classes/upload-patient-document-request';
+import { REGION, getCallerProfile, patientLocationRef } from './shared';
 import { decryptField, encryptField, isEncryptedField } from './kms';
 import { logAudit, resolveActor } from './audit';
 
-// EMS calls this before every direct Firestore write to `patients` (see
-// flutter/apps/ems/lib/services/patient_upload_service.dart — EMS still
-// writes patients directly, this is the one server round trip inserted
-// ahead of that write). The function itself decides encrypt-vs-passthrough
-// from the caller's own org's `cmekRequested` — never a client-supplied
-// flag — which is what actually prevents a client from choosing to skip
-// encryption for an opted-in org. firestore.rules' fieldsRespectCmek check
-// closes the other half of that gap at the database level.
-export const encryptPatientFields = onCall<EncryptPatientFieldsRequest>({ region: REGION }, async (request) => {
-  const profile = await getCallerProfile(request.auth?.uid);
-  if (!profile.role.includes('ems')) {
-    throw new HttpsError('permission-denied', 'Only EMS accounts can prepare patient fields.');
-  }
-  if (!profile.organizationId) {
-    throw new HttpsError('failed-precondition', 'Your account is not part of an organization.');
-  }
-
-  const { name, healthcareNumber } = request.data;
-  if (typeof name !== 'string' || typeof healthcareNumber !== 'string') {
-    throw new HttpsError('invalid-argument', 'name and healthcareNumber (strings) are required.');
-  }
-
-  const orgDoc = await getFirestore().collection('organizations').doc(profile.organizationId).get();
+// Shared by encryptPatientFields (below — EMS's own direct-write update
+// path calls this first) and uploadPatientDocument (which encrypts inline
+// as part of creating the document itself) — one place decides
+// encrypt-vs-passthrough from the org's `cmekRequested` flag, rather than
+// two copies that could drift.
+async function encryptOrPassthroughFields(
+  name: string,
+  healthcareNumber: string,
+  organizationId: string,
+): Promise<{ name: string | object; healthcareNumber: string | object }> {
+  const orgDoc = await getFirestore().collection('organizations').doc(organizationId).get();
   if (orgDoc.data()?.['cmekRequested'] !== true) {
     return { name, healthcareNumber };
   }
@@ -52,6 +42,106 @@ export const encryptPatientFields = onCall<EncryptPatientFieldsRequest>({ region
   ]);
 
   return { name: encryptedName, healthcareNumber: encryptedHealthcareNumber };
+}
+
+// EMS calls this before every direct Firestore write that *updates* an
+// existing patient (see flutter/apps/ems/lib/services/
+// patient_upload_service.dart's updatePatient — edits stay a direct client
+// write for offline queueing, so this is the one server round trip
+// inserted ahead of that write). New patients go through
+// uploadPatientDocument below instead, which encrypts inline rather than
+// through this callable. firestore.rules' fieldsRespectCmek check closes
+// the other half of the gap this exists for — a client can't skip calling
+// this and write plaintext straight through for a CMEK-opted-in org.
+export const encryptPatientFields = onCall<EncryptPatientFieldsRequest>({ region: REGION }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+  if (!profile.role.includes('ems')) {
+    throw new HttpsError('permission-denied', 'Only EMS accounts can prepare patient fields.');
+  }
+  if (!profile.organizationId) {
+    throw new HttpsError('failed-precondition', 'Your account is not part of an organization.');
+  }
+
+  const { name, healthcareNumber } = request.data;
+  if (typeof name !== 'string' || typeof healthcareNumber !== 'string') {
+    throw new HttpsError('invalid-argument', 'name and healthcareNumber (strings) are required.');
+  }
+
+  return encryptOrPassthroughFields(name, healthcareNumber, profile.organizationId);
+});
+
+// Creates a new patient record — unlike every other patient mutation, this
+// one is *not* a direct client Firestore write (see updatePatient's own
+// comment on why edits stay direct: offline queueing matters most for
+// those, in-the-field). Routing creation through a callable is what makes
+// it possible to atomically seed patients/{id}/location/current's very
+// first fix in the same write as the patient doc itself (see the batch
+// below) — firestore.rules flatly blocks a direct client write there, and
+// the two documents need to become visible together, or functions/src/
+// physician.ts's one-shot new-patient-alert ETA (which fires the instant
+// the patient doc exists) would race a separate, slower publish chain.
+// The real cost: this requires connectivity — no offline queueing for a
+// brand-new patient the way EMS's other direct writes get. Accepted
+// deliberately; flutter/apps/ems/lib/screens/patient_upload_screen.dart
+// shows an OfflineBanner so EMS sees this coming before they even submit.
+export const uploadPatientDocument = onCall<UploadPatientDocumentRequest>({ region: REGION }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+  if (!profile.role.includes('ems')) {
+    throw new HttpsError('permission-denied', 'Only EMS accounts can create a patient record.');
+  }
+  if (!profile.organizationId) {
+    throw new HttpsError('failed-precondition', 'Your account is not part of an organization.');
+  }
+
+  const { name, healthcareNumber, gender, age, destination, vitals, ivSize, ivPlacement, treatment, notes, latitude, longitude } =
+    request.data;
+  if (typeof name !== 'string' || typeof healthcareNumber !== 'string' || typeof vitals !== 'object' || vitals === null) {
+    throw new HttpsError('invalid-argument', 'name, healthcareNumber, and vitals are required.');
+  }
+
+  const { name: encryptedName, healthcareNumber: encryptedHealthcareNumber } = await encryptOrPassthroughFields(
+    name,
+    healthcareNumber,
+    profile.organizationId,
+  );
+
+  const firestore = getFirestore();
+  const patientRef = firestore.collection('patients').doc();
+  const batch = firestore.batch();
+
+  batch.set(patientRef, {
+    name: encryptedName,
+    gender: gender || 'Unknown',
+    age: age ?? 'Unknown',
+    healthcareNumber: encryptedHealthcareNumber,
+    destination: destination || 'Unknown',
+    vitals,
+    ...(ivSize ? { ivSize } : {}),
+    ...(ivPlacement ? { ivPlacement } : {}),
+    ...(treatment ? { treatment } : {}),
+    notes: notes ?? '',
+    organizationId: profile.organizationId,
+    submittedAt: FieldValue.serverTimestamp(),
+    status: 'active',
+    createdBy: profile.uid,
+    updatedBy: profile.uid,
+  });
+
+  const hasLocation = typeof latitude === 'number' && typeof longitude === 'number';
+  if (hasLocation) {
+    const event: EmsLocationEvent = {
+      patientId: patientRef.id,
+      organizationId: profile.organizationId,
+      active: true,
+      latitude,
+      longitude,
+    };
+    batch.set(patientLocationRef(patientRef.id), { ...event, updatedAt: FieldValue.serverTimestamp() });
+  }
+
+  await batch.commit();
+
+  return { id: patientRef.id, name: encryptedName, healthcareNumber: encryptedHealthcareNumber };
 });
 
 // Pull-based read path for physician/EMS, batched to avoid an
@@ -117,10 +207,10 @@ async function resolveField(value: unknown): Promise<string | null> {
   return null;
 }
 
-// The one patient mutation routed through a callable instead of EMS's usual
-// direct Firestore write (see encryptPatientFields' own comment on why
-// create/update/complete stay direct — offline queueing matters most for
-// those, in-the-field). Deleting a PHI record is the single most
+// Another mutation routed through a callable rather than a direct client
+// Firestore write (see uploadPatientDocument above for the other one;
+// update/complete stay direct — offline queueing matters most for those,
+// in-the-field). Deleting a PHI record is the single most
 // compliance-sensitive thing this app does, so firestore.rules flatly
 // blocks a direct client delete (`allow delete: if false`) and this is the
 // only path left — giving every delete a guaranteed, unambiguous

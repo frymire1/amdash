@@ -7,7 +7,7 @@ import { CallerProfile } from './classes/caller-profile';
 import { EmsLocationEvent } from './classes/ems-location-event';
 import { PublishLocationRequest } from './classes/publish-location-request';
 import { StopLocationRequest } from './classes/stop-location-request';
-import { REGION, getCallerProfile } from './shared';
+import { REGION, getCallerProfile, patientLocationRef } from './shared';
 
 const LOCATION_TOPIC = 'ems-location-updates';
 const pubsub = new PubSub();
@@ -91,18 +91,19 @@ export const onEmsLocationEvent = onMessagePublished(
       update['longitude'] = data.longitude;
     }
 
-    await getFirestore().collection('emsLocations').doc(data.patientId).set(update, { merge: true });
+    await patientLocationRef(data.patientId).set(update, { merge: true });
   },
 );
 
-// emsLocations/{patientId} is only ever written by onEmsLocationEvent above
-// (firestore.rules blocks client writes there entirely), so nothing deletes
-// it when a patient is removed unless something does it here. Triggering
-// off the patients collection itself — rather than requiring every
-// deletion path (the EMS app's delete button, cleanupCompletedPatients'
-// retention sweep, manual console deletes) to remember a second delete —
-// means this can never drift out of sync with however a patient doc
-// actually disappears.
+// patients/{patientId}/location/current is written by onEmsLocationEvent
+// above and uploadPatientDocument (firestore.rules blocks client writes
+// there entirely) — deleting the parent patient doc does *not* cascade to
+// its subcollections in Firestore, so nothing removes this unless something
+// does it here. Triggering off the patients collection itself — rather than
+// requiring every deletion path (the EMS app's delete button,
+// cleanupCompletedPatients' retention sweep, manual console deletes) to
+// remember a second delete — means this can never drift out of sync with
+// however a patient doc actually disappears.
 export const onPatientDeleted = onDocumentDeleted({ document: 'patients/{patientId}', region: REGION }, async (event) => {
-  await getFirestore().collection('emsLocations').doc(event.params.patientId).delete();
+  await patientLocationRef(event.params.patientId).delete();
 });

@@ -15,7 +15,7 @@ import '../widgets/hospital_management_section.dart';
 /// success the listener reflects the confirmed write on its own; on
 /// failure there's nothing to roll back, so no local state to revert
 /// either. `retainAllData` semantics: default/missing/false → completed
-/// transports (+ their emsLocations doc) are deleted 48h after
+/// transports (+ their location subdocument) are deleted 48h after
 /// completion by the daily cleanup job; true → this org's completed
 /// patients are skipped by that job entirely.
 ///

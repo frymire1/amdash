@@ -12,7 +12,6 @@ import '../services/directions_service.dart';
 import '../services/ems_location_service.dart';
 import '../utils/geo.dart';
 
-const _defaultMarkerPosition = LatLng(40.7128, -74.006);
 const _directionsRefreshMs = 15000;
 const _directionsRefreshDistanceM = 75.0;
 
@@ -24,10 +23,14 @@ const _routeColor = Color(0xFF1A73E8);
 const _routeWidth = 6;
 
 /// Mirrors `patient-viewer.component.ts`/`.html` — the core screen: patient
-/// info/vitals cards, a live map with the static pickup location, the
-/// animated EMS vehicle marker (lerped between Firestore fixes over the
-/// real elapsed wall-clock gap — not a fixed-duration Tween), the
-/// destination hospital, and a throttled Directions route overlay.
+/// info/vitals cards, a live map with the animated EMS vehicle marker
+/// (lerped between Firestore fixes over the real elapsed wall-clock gap —
+/// not a fixed-duration Tween), the destination hospital, and a throttled
+/// Directions route overlay. There's no separate "pickup location" marker —
+/// EMS's device position at patient-creation time is only ever used to seed
+/// the very first `patients/{id}/location/current` fix (see
+/// `uploadPatientDocument`), never stored on the patient doc itself, so the
+/// vehicle marker above is the only location this screen ever has to show.
 ///
 /// Tracking status ([EmsTrackingStatus], from `emsTrackingInfo`) and the
 /// cached route ([DirectionsCacheEntry], from `directionsCacheProvider`) are
@@ -252,9 +255,6 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
       _maybeRequestDirections(patient.id!, vehiclePosition, destinationHospital);
     }
 
-    final markerPosition = patient.location == null
-        ? _defaultMarkerPosition
-        : LatLng(patient.location!.latitude, patient.location!.longitude);
     final hospitalPosition = destinationHospital == null
         ? null
         : LatLng(destinationHospital.latitude, destinationHospital.longitude);
@@ -317,15 +317,13 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
             _textCard('Patient Notes', patient.notes!),
             const SizedBox(height: 12),
           ],
-          if (patient.location != null)
+          if (vehiclePosition != null)
             _mapCard(
-              markerPosition,
+              vehiclePosition,
               hospitalPosition,
-              patient,
               destinationHospital,
               trackingStatus,
               trackedLocation,
-              vehiclePosition,
               cachedRoute?.result,
             ),
         ],
@@ -430,24 +428,22 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
   }
 
   Widget _mapCard(
-    LatLng markerPosition,
+    LatLng vehiclePosition,
     LatLng? hospitalPosition,
-    Patient patient,
     Hospital? destinationHospital,
     EmsTrackingStatus trackingStatus,
     ActiveLocation? trackedLocation,
-    LatLng? vehiclePosition,
     DirectionsResult? directionsResult,
   ) {
     final map = GoogleMap(
-      initialCameraPosition: CameraPosition(target: markerPosition, zoom: 15),
+      initialCameraPosition: CameraPosition(target: vehiclePosition, zoom: 15),
       onMapCreated: (controller) {
         _mapController = controller;
         // The route can finish loading before the platform view itself is
         // ready — confirmed via a real run: animateCamera was called with
         // _mapController still null (the fetch beat GoogleMap's own
         // initialization), so the very first camera-fit was silently
-        // dropped and the map stayed at its initial pickup-centered view.
+        // dropped and the map stayed at its initial vehicle-centered view.
         // If a route already arrived by the time the controller connects,
         // fit to it immediately instead of waiting for the next refresh.
         if (directionsResult != null && directionsResult.polylinePoints.isNotEmpty) {
@@ -457,13 +453,11 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
         }
       },
       markers: {
-        Marker(markerId: const MarkerId('pickup'), position: markerPosition),
-        if (vehiclePosition != null)
-          Marker(
-            markerId: const MarkerId('vehicle'),
-            position: vehiclePosition,
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-          ),
+        Marker(
+          markerId: const MarkerId('vehicle'),
+          position: vehiclePosition,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        ),
         if (hospitalPosition != null)
           Marker(
             markerId: const MarkerId('hospital'),
@@ -537,30 +531,24 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
               ),
             ),
             const SizedBox(height: 8),
-            if (patient.location!.address.isNotEmpty) Text(patient.location!.address),
-            Text(
-              '${patient.location!.latitude.toStringAsFixed(4)}, ${patient.location!.longitude.toStringAsFixed(4)}',
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
-            ),
-            if (vehiclePosition != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: trackingStatus == EmsTrackingStatus.active
-                    ? Text(
-                        'Live position: ${vehiclePosition.latitude.toStringAsFixed(4)}, '
-                        '${vehiclePosition.longitude.toStringAsFixed(4)}',
-                        style: TextStyle(color: AppColors.trackingAccent, fontSize: 12),
-                      )
-                    : Text(
-                        'Last updated at: '
-                        '${DateFormat('h:mm:ss a').format(DateTime.fromMillisecondsSinceEpoch(trackedLocation!.updatedAtMs))}',
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          fontSize: 12,
-                          fontStyle: FontStyle.italic,
-                        ),
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: trackingStatus == EmsTrackingStatus.active
+                  ? Text(
+                      'Live position: ${vehiclePosition.latitude.toStringAsFixed(4)}, '
+                      '${vehiclePosition.longitude.toStringAsFixed(4)}',
+                      style: TextStyle(color: AppColors.trackingAccent, fontSize: 12),
+                    )
+                  : Text(
+                      'Last updated at: '
+                      '${DateFormat('h:mm:ss a').format(DateTime.fromMillisecondsSinceEpoch(trackedLocation!.updatedAtMs))}',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 12,
+                        fontStyle: FontStyle.italic,
                       ),
-              ),
+                    ),
+            ),
             if (directionsResult != null && destinationHospital != null)
               Padding(
                 padding: const EdgeInsets.only(top: 8),

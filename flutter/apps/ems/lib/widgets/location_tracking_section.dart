@@ -13,24 +13,26 @@ import '../services/ems_tracking_service.dart';
 /// rechecking) that's independent of the rest of the form's fields.
 ///
 /// Reports its current values back up via [onChanged] whenever they change,
-/// so the parent can include them in the submitted `PatientFormValues` —
-/// the parent doesn't otherwise need to know how this section gets its
-/// data. [initialLatitude]/[initialLongitude] seed the very first frame
-/// (e.g. a previously-saved location when editing), before the section's
-/// own live fetch — which always runs on mount regardless — supersedes it.
+/// so the parent can include them when submitting — the parent doesn't
+/// otherwise need to know how this section gets its data. There's nothing
+/// to seed the very first frame with (e.g. when reopening an already-
+/// created patient to edit it): no location is ever persisted on the
+/// patient doc itself (see `patient_upload_service.dart`), so this section
+/// always starts from scratch and lets its own live fetch — which always
+/// runs on mount regardless — resolve the current position. On a create,
+/// [LocationTrackingValue.latitude]/[longitude] end up used exactly once,
+/// as the seed for this new patient's very first `patients/{id}/location/
+/// current` fix (see `uploadPatientDocument`) — nowhere does this fetched
+/// value get written on its own.
 class LocationTrackingSection extends ConsumerStatefulWidget {
   const LocationTrackingSection({
     super.key,
     required this.patientId,
-    required this.initialLatitude,
-    required this.initialLongitude,
     required this.onChanged,
   });
 
   /// Null in create mode.
   final String? patientId;
-  final double? initialLatitude;
-  final double? initialLongitude;
   final ValueChanged<LocationTrackingValue> onChanged;
 
   @override
@@ -67,15 +69,13 @@ class _LocationTrackingSectionState extends ConsumerState<LocationTrackingSectio
   @override
   void initState() {
     super.initState();
-    _latitude = widget.initialLatitude;
-    _longitude = widget.initialLongitude;
-    _locationShared = widget.initialLatitude != null;
     if (widget.patientId != null) {
       _liveTrackingEnabled = ref.read(emsTrackingProvider.notifier).isTracking(widget.patientId!);
     }
-    // Mirror the computed initial values up immediately — the parent's own
-    // copy shouldn't rely on guessing the same defaults this widget uses,
-    // and the first live location fetch below can take up to ~12s.
+    // Mirror the initial (still-unresolved) state up immediately — the
+    // parent's own copy shouldn't rely on guessing the same defaults this
+    // widget uses, and the first live location fetch below can take up to
+    // ~12s.
     _reportChange();
 
     // Runs for both create and edit — live tracking can be toggled on
