@@ -95,15 +95,18 @@ export const onEmsLocationEvent = onMessagePublished(
   },
 );
 
-// patients/{patientId}/location/current is written by onEmsLocationEvent
-// above and uploadPatientDocument (firestore.rules blocks client writes
-// there entirely) — deleting the parent patient doc does *not* cascade to
-// its subcollections in Firestore, so nothing removes this unless something
-// does it here. Triggering off the patients collection itself — rather than
+// A patient doc's subcollections — location/current, vitalsHistory/* —
+// are only ever written by other Cloud Functions (firestore.rules blocks
+// client writes there entirely), and deleting the parent patient doc does
+// *not* cascade to them in Firestore, so nothing removes them unless
+// something does it here. recursiveDelete sweeps every subcollection under
+// this path, present or future, rather than listing each one by name and
+// having to remember to add a new line here the next time a subcollection
+// gets added. Triggering off the patients collection itself — rather than
 // requiring every deletion path (the EMS app's delete button,
 // cleanupCompletedPatients' retention sweep, manual console deletes) to
-// remember a second delete — means this can never drift out of sync with
-// however a patient doc actually disappears.
+// remember this — means it can never drift out of sync with however a
+// patient doc actually disappears.
 export const onPatientDeleted = onDocumentDeleted({ document: 'patients/{patientId}', region: REGION }, async (event) => {
-  await patientLocationRef(event.params.patientId).delete();
+  await getFirestore().recursiveDelete(getFirestore().collection('patients').doc(event.params.patientId));
 });

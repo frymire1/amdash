@@ -147,6 +147,18 @@ service cloud.firestore {
         allow read: if isSuperAdmin() || sameOrgAsCaller(resource.data.get('organizationId', null));
         allow write: if false;
       }
+
+      // An append-only log of every distinct vitals reading this patient
+      // has had — only ever written by onPatientCreated/onPatientUpdated
+      // (Admin SDK; functions/src/patients.ts). Unlike location, this is
+      // only ever read per-patient (browsing one open patient's history),
+      // never org-wide, so there's no need to denormalize organizationId
+      // onto each entry — a single get() on the parent, same as every
+      // other per-patient read in this file, is enough.
+      match /vitalsHistory/{entryId} {
+        allow read: if isSuperAdmin() || sameOrgAsCaller(get(/databases/$(database)/documents/patients/$(patientId)).data.get('organizationId', null));
+        allow write: if false;
+      }
     }
 
     // Hospitals are only ever written by the createHospital/deleteHospital

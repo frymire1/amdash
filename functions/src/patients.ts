@@ -6,7 +6,8 @@ import { DeletePatientRecordRequest } from './classes/delete-patient-record-requ
 import { EmsLocationEvent } from './classes/ems-location-event';
 import { EncryptPatientFieldsRequest } from './classes/encrypt-patient-fields-request';
 import { UploadPatientDocumentRequest } from './classes/upload-patient-document-request';
-import { REGION, getCallerProfile, patientLocationRef } from './shared';
+import { VitalsHistoryEntry } from './classes/vitals-history-entry';
+import { REGION, getCallerProfile, patientLocationRef, patientVitalsHistoryCollection } from './shared';
 import { decryptField, encryptField, isEncryptedField } from './kms';
 import { logAudit, resolveActor } from './audit';
 
@@ -243,6 +244,38 @@ export const deletePatientRecord = onCall<DeletePatientRecordRequest>({ region: 
   return { deleted: true };
 });
 
+// Compares only the fields that actually make up a "vitals reading" —
+// deliberately not a blind deep-equal over the whole vitals map, so a
+// shape drift elsewhere (a field one side doesn't know about yet) can't
+// silently suppress a real history entry. undefined counts as a value —
+// EMS clearing a field (e.g. deleting a value they'd typed) is itself a
+// real change worth a new history entry, same as any other edit.
+const VITALS_HISTORY_FIELDS = ['heartRate', 'bloodPressure', 'oxygen', 'temperature', 'respiratoryRate', 'gcs'] as const;
+
+function vitalsEqual(a: FirebaseFirestore.DocumentData | undefined, b: FirebaseFirestore.DocumentData | undefined): boolean {
+  if (!a || !b) return a === b;
+  return VITALS_HISTORY_FIELDS.every((field) => a[field] === b[field]);
+}
+
+// Appends one entry to patients/{patientId}/vitalsHistory — called from
+// onPatientCreated (always, for the initial reading) and onPatientUpdated
+// (only when vitalsEqual says something actually changed) below. Never
+// called for a patient upload with no vitals object at all (shouldn't
+// happen — the client always sends one — but this is a trigger, not a
+// validated callable, so it can't assume the shape).
+async function appendVitalsHistory(patientId: string, vitals: FirebaseFirestore.DocumentData, recordedBy: unknown): Promise<void> {
+  const entry: VitalsHistoryEntry = {
+    heartRate: vitals['heartRate'],
+    bloodPressure: vitals['bloodPressure'],
+    oxygen: vitals['oxygen'],
+    temperature: vitals['temperature'],
+    ...(typeof vitals['respiratoryRate'] === 'number' ? { respiratoryRate: vitals['respiratoryRate'] } : {}),
+    ...(typeof vitals['gcs'] === 'number' ? { gcs: vitals['gcs'] } : {}),
+    ...(typeof recordedBy === 'string' ? { recordedBy } : {}),
+  };
+  await patientVitalsHistoryCollection(patientId).add({ ...entry, recordedAt: FieldValue.serverTimestamp() });
+}
+
 // Audit-only — EMS writes patients directly from the Flutter client (see
 // deletePatientRecord's comment for why create/update stay that way), so
 // there's no callable/`request.auth` to attribute these to. Instead the
@@ -255,12 +288,15 @@ export const onPatientCreated = onDocumentCreated({ document: 'patients/{patient
   if (!data) return;
   const organizationId = data['organizationId'];
   const actor = await resolveActor(data['createdBy']);
-  await logAudit({
-    action: 'patient.create',
-    actor,
-    organizationId: typeof organizationId === 'string' ? organizationId : undefined,
-    target: event.params.patientId,
-  });
+  await Promise.all([
+    logAudit({
+      action: 'patient.create',
+      actor,
+      organizationId: typeof organizationId === 'string' ? organizationId : undefined,
+      target: event.params.patientId,
+    }),
+    appendVitalsHistory(event.params.patientId, (data['vitals'] as FirebaseFirestore.DocumentData) ?? {}, data['createdBy']),
+  ]);
 });
 
 // Distinguishes "marked transport complete" (apps/ems's completeTransport)
@@ -275,10 +311,20 @@ export const onPatientUpdated = onDocumentUpdated({ document: 'patients/{patient
   const organizationId = after['organizationId'];
   const actor = await resolveActor(after['updatedBy']);
   const justCompleted = before['status'] !== 'completed' && after['status'] === 'completed';
-  await logAudit({
-    action: justCompleted ? 'patient.complete' : 'patient.update',
-    actor,
-    organizationId: typeof organizationId === 'string' ? organizationId : undefined,
-    target: event.params.patientId,
-  });
+
+  const tasks: Promise<unknown>[] = [
+    logAudit({
+      action: justCompleted ? 'patient.complete' : 'patient.update',
+      actor,
+      organizationId: typeof organizationId === 'string' ? organizationId : undefined,
+      target: event.params.patientId,
+    }),
+  ];
+  // Only a real change to vitals gets a new history entry — an edit that
+  // only touched notes/treatment/destination/etc. shouldn't produce a
+  // duplicate reading with a fresh timestamp.
+  if (!vitalsEqual(before['vitals'] as FirebaseFirestore.DocumentData, after['vitals'] as FirebaseFirestore.DocumentData)) {
+    tasks.push(appendVitalsHistory(event.params.patientId, (after['vitals'] as FirebaseFirestore.DocumentData) ?? {}, after['updatedBy']));
+  }
+  await Promise.all(tasks);
 });

@@ -26,6 +26,21 @@ export function patientLocationRef(patientId: string) {
   return getFirestore().collection('patients').doc(patientId).collection('location').doc('current');
 }
 
+// patients/{patientId}/vitalsHistory/{entryId} — an append-only log of
+// every distinct vitals reading a patient has had, in the order EMS
+// submitted them (see patients.ts's onPatientCreated/onPatientUpdated, the
+// only writers, and its own vitalsEqual/appendVitalsHistory). A
+// subcollection for the same reason location is one — a sibling write
+// never fires onPatientUpdated's own audit trigger or re-emits the
+// patients-collection listener the whole patient list watches — plus this
+// one is a genuine history (multiple documents, append-only), which
+// couldn't be a single field on the patient doc regardless. Read
+// per-patient, not org-wide like location, so this returns the whole
+// collection rather than one fixed document.
+export function patientVitalsHistoryCollection(patientId: string) {
+  return getFirestore().collection('patients').doc(patientId).collection('vitalsHistory');
+}
+
 // The one place every Cloud Function reads a caller's role/org — a single
 // `users/{uid}` read, reused by every requireAdmin/requireSuperAdmin/manual
 // role check below, rather than each function re-implementing its own

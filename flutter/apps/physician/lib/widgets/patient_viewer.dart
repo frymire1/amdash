@@ -8,8 +8,10 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
 
 import '../classes/active_location.dart';
+import '../classes/vitals_history_entry.dart';
 import '../services/directions_service.dart';
 import '../services/ems_location_service.dart';
+import '../services/vitals_history_service.dart';
 import '../utils/geo.dart';
 
 const _directionsRefreshMs = 15000;
@@ -77,6 +79,12 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
   // widget disposes mid-fetch, a freshly recreated instance deciding to
   // re-fetch is fine, since it checks the surviving cache's own timestamp.
   final Set<String> _pendingDirectionsFetches = {};
+
+  // Index into vitalsHistoryProvider's newest-first list — 0 is always
+  // "most recent" (see _vitalsCard). No dispose/reset logic needed:
+  // PatientViewer is keyed by patientId (see MainViewScreen), so switching
+  // patients recreates this whole State fresh.
+  int _vitalsHistoryIndex = 0;
 
   @override
   void dispose() {
@@ -302,14 +310,7 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
           const SizedBox(height: 16),
           _infoCard('Destination Hospital', [_infoRow('Destination', patient.destination)]),
           const SizedBox(height: 12),
-          _infoCard('Vital Signs', [
-            _infoRow('Heart Rate', patient.vitals.heartRate, suffix: 'bpm'),
-            _infoRow('Blood Pressure', patient.vitals.bloodPressure),
-            _infoRow('Oxygen', patient.vitals.oxygen, suffix: '%'),
-            _infoRow('Temperature', patient.vitals.temperature, suffix: '°C'),
-            _infoRow('Respiratory Rate', patient.vitals.respiratoryRate, suffix: 'breaths/min'),
-            _infoRow('GCS', patient.vitals.gcs),
-          ], accent: true),
+          _vitalsCard(patient),
           const SizedBox(height: 12),
           _treatmentCard(patient),
           const SizedBox(height: 12),
@@ -331,7 +332,7 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
     );
   }
 
-  Widget _infoCard(String title, List<Widget> rows, {bool accent = false}) {
+  Widget _infoCard(String title, List<Widget> rows) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -341,6 +342,85 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
             Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             Wrap(spacing: 16, runSpacing: 12, children: rows),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Same shape as _infoCard, but the header carries a "Recorded {time}"
+  // stamp plus back/forward arrows for stepping through
+  // vitalsHistoryProvider's newest-first list instead of a plain title —
+  // index 0 there is always the most recently recorded set, which is what
+  // shows by default. Falls back to patient.vitals with no timestamp and
+  // no arrows while history is still loading, or for a patient that
+  // predates this feature (no history entries exist for it at all) —
+  // there's nothing to browse in either case.
+  Widget _vitalsCard(Patient patient) {
+    final patientId = patient.id;
+    final history = patientId == null ? const <VitalsHistoryEntry>[] : ref.watch(vitalsHistoryProvider(patientId)).valueOrNull ?? const [];
+
+    if (_vitalsHistoryIndex > 0 && _vitalsHistoryIndex >= history.length) {
+      // The list can only ever grow shorter than a still-valid index if a
+      // patient somehow lost history entries mid-view (shouldn't happen —
+      // nothing deletes individual entries) — clamp defensively rather
+      // than risk a range error.
+      _vitalsHistoryIndex = history.isEmpty ? 0 : history.length - 1;
+    }
+
+    final selected = history.isEmpty ? null : history[_vitalsHistoryIndex];
+    final vitals = selected?.vitals ?? patient.vitals;
+    final canStepBack = _vitalsHistoryIndex + 1 < history.length;
+    final canStepForward = _vitalsHistoryIndex > 0;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('Vital Signs', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                ),
+                if (canStepForward)
+                  IconButton(
+                    icon: const Icon(Icons.arrow_forward, size: 18),
+                    tooltip: 'More recent vitals',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => setState(() => _vitalsHistoryIndex--),
+                  ),
+                if (canStepBack)
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, size: 18),
+                    tooltip: 'Previous vitals',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => setState(() => _vitalsHistoryIndex++),
+                  ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                selected?.recordedAt == null
+                    ? 'No upload history recorded for this patient'
+                    : 'Recorded ${DateFormat('MMM d, h:mm a').format(selected!.recordedAt!)}',
+                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+            ),
+            Wrap(
+              spacing: 16,
+              runSpacing: 12,
+              children: [
+                _infoRow('Heart Rate', vitals.heartRate, suffix: 'bpm'),
+                _infoRow('Blood Pressure', vitals.bloodPressure),
+                _infoRow('Oxygen', vitals.oxygen, suffix: '%'),
+                _infoRow('Temperature', vitals.temperature, suffix: '°C'),
+                _infoRow('Respiratory Rate', vitals.respiratoryRate, suffix: 'breaths/min'),
+                _infoRow('GCS', vitals.gcs),
+              ],
+            ),
           ],
         ),
       ),
