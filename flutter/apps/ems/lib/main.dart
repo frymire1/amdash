@@ -40,6 +40,7 @@ class EmsApp extends ConsumerWidget {
       themeMode: themeMode,
       debugShowCheckedModeBanner: false,
       routerConfig: router,
+      builder: (context, child) => IdleTimeoutWrapper(child: child ?? const SizedBox.shrink()),
     );
   }
 }
