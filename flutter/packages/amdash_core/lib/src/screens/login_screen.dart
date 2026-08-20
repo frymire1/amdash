@@ -204,6 +204,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Every app's router has '/login' as its initialLocation, and
+    // AppRouteGuard's redirect only ever re-runs once authStateProvider
+    // actually resolves (see its own `if (authState.isLoading) return
+    // null;`) — so without this, an already-signed-in user reloading the
+    // app sees this screen's real form flash on screen for the brief
+    // window Firebase Auth needs to restore the persisted session
+    // (notably async on web, which needs an IndexedDB lookup before its
+    // first authStateChanges() emission) before getting redirected past
+    // it. A neutral spinner in that window avoids the flash entirely.
+    if (ref.watch(authStateProvider).isLoading) {
+      return const Scaffold(backgroundColor: Colors.transparent, body: Center(child: CircularProgressIndicator()));
+    }
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Center(
