@@ -207,13 +207,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     // Every app's router has '/login' as its initialLocation, and
     // AppRouteGuard's redirect only ever re-runs once authStateProvider
     // actually resolves (see its own `if (authState.isLoading) return
-    // null;`) — so without this, an already-signed-in user reloading the
-    // app sees this screen's real form flash on screen for the brief
-    // window Firebase Auth needs to restore the persisted session
-    // (notably async on web, which needs an IndexedDB lookup before its
-    // first authStateChanges() emission) before getting redirected past
-    // it. A neutral spinner in that window avoids the flash entirely.
-    if (ref.watch(authStateProvider).isLoading) {
+    // null;`) — so without a guard here, an already-signed-in user
+    // reloading the app sees this screen's real form flash on screen for
+    // the brief window Firebase Auth needs to restore the persisted
+    // session (notably async on web, which needs an IndexedDB lookup
+    // before its first authStateChanges() emission) before getting
+    // redirected past it.
+    //
+    // Checking isLoading alone isn't quite enough, though: the moment
+    // authStateProvider actually resolves with a signed-in user, this
+    // widget's own `ref.watch` and RouterRefreshNotifier's `ref.listen`
+    // both react to the exact same state change, and there's no guarantee
+    // the router finishes its redirect-away-from-/login before this
+    // widget's next rebuild runs — if this widget wins that race, isLoading
+    // is already false and the form would flash for a frame anyway (this
+    // is the flash reappearing after MFA landed, not a new bug — MFA just
+    // added enough extra work on the redirect side to make the router
+    // reliably lose the race more often). A signed-in user should never be
+    // looking at this form regardless of who wins that race, so gate on
+    // "authenticated at all", not just "still loading" — the router is
+    // always about to navigate away momentarily in that case anyway.
+    final authState = ref.watch(authStateProvider);
+    if (authState.isLoading || authState.valueOrNull != null) {
       return const Scaffold(backgroundColor: Colors.transparent, body: Center(child: CircularProgressIndicator()));
     }
 
