@@ -159,8 +159,14 @@ jobs:
           key: pub-cache-${{ runner.os }}-patrol-cli
 
       - name: Install patrol_cli
+        # Pinned, not latest: patrol_cli's own compatibility checker rejects
+        # unpinned-latest (4.7.0) against this repo's `patrol: ^4.8.0` pin
+        # (all three apps) — hit this for real on a GHA run, patrol_cli
+        # lags patrol's release cadence. 4.6.1 is the version patrol_cli's
+        # compatibility table itself names as compatible with patrol 4.8.0;
+        # bump this alongside any future patrol/pubspec.yaml version bump.
         run: |
-          dart pub global activate patrol_cli
+          dart pub global activate patrol_cli 4.6.1
           echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
 
       - name: Install scripts dependencies
@@ -261,8 +267,9 @@ jobs:
           key: pub-cache-${{ runner.os }}-patrol-cli
 
       - name: Install patrol_cli
+        # Pinned — see the matching comment in flutter-web-e2e above.
         run: |
-          dart pub global activate patrol_cli
+          dart pub global activate patrol_cli 4.6.1
           echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
 
       - name: Install scripts dependencies
