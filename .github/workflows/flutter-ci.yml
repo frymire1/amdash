@@ -31,9 +31,27 @@ name: Flutter CI
 # Actions):
 #   - FIREBASE_SERVICE_ACCOUNT_KEY — already exists (used by ci.yml's
 #     deploy-marketing job already).
-#   - GCLOUD_TESTLAB_SERVICE_ACCOUNT_KEY — new; copy the same value
-#     already configured in Codemagic's firebase_testlab group (Codemagic
-#     -> Team settings -> Environment variables).
+#
+# flutter-android-e2e authenticates to Google Cloud via Workload Identity
+# Federation, not a service account key — this org has
+# iam.managed.disableServiceAccountKeyCreation enforced (a real security
+# improvement, not something to work around), which blocks minting a new
+# key for the codemagic-testlab service account entirely. WIF is Google's
+# recommended keyless replacement for exactly this scenario: GitHub issues
+# a short-lived OIDC token per run, which Google exchanges for that
+# service account's permissions, scoped so only the frymire1/amdash repo
+# can do this at all — no long-lived credential stored anywhere. One-time
+# setup already done (Cloud Shell, project amdash-dev):
+#   - Workload identity pool: github-actions-pool
+#   - Provider: github-actions-provider (OIDC issuer
+#     https://token.actions.githubusercontent.com, attribute-condition
+#     restricting to assertion.repository=='frymire1/amdash')
+#   - codemagic-testlab@amdash-dev.iam.gserviceaccount.com granted
+#     roles/iam.workloadIdentityUser to that pool's principalSet, scoped
+#     to this repo.
+# The job below needs `permissions: id-token: write` for GitHub to be
+# allowed to mint that OIDC token in the first place — without it, the
+# auth step fails even with everything above configured correctly.
 
 on:
   push:
@@ -205,6 +223,16 @@ jobs:
     runs-on: ubuntu-latest
     needs: flutter-analyze-test
     if: github.ref == 'refs/heads/master'
+    # id-token: write is what lets this job request the short-lived OIDC
+    # token Workload Identity Federation exchanges for GCP credentials
+    # (see the file-level comment above) — required for the auth step
+    # below to work at all. Setting `permissions` here replaces the
+    # default token permissions for this job rather than adding to them,
+    # so contents: read has to be listed explicitly too (actions/checkout
+    # needs it) — it's not implied just because id-token is granted.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -253,7 +281,8 @@ jobs:
       - name: Authenticate gcloud to Test Lab
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCLOUD_TESTLAB_SERVICE_ACCOUNT_KEY }}
+          workload_identity_provider: 'projects/577422583971/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
+          service_account: 'codemagic-testlab@amdash-dev.iam.gserviceaccount.com'
 
       - name: Set gcloud project
         run: gcloud config set project amdash-dev
