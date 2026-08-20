@@ -131,23 +131,6 @@ service cloud.firestore {
         && fieldsRespectCmek(request.resource.data);
       allow delete: if false;
 
-      // The patient's live GPS position — a sibling document rather than a
-      // field on the patient doc itself, specifically so a location update
-      // (as often as every ~15s, for the life of a transport) never fires
-      // onPatientUpdated's audit trigger or re-emits the listener the whole
-      // patient list watches (a Firestore subcollection write is invisible
-      // to both). Only ever written by onEmsLocationEvent/
-      // uploadPatientDocument (Admin SDK) — no client writes here directly.
-      // Read org-wide via a collectionGroup('location') query (see
-      // EmsLocationController on the physician client), which is why
-      // organizationId is denormalized onto this document rather than
-      // resolved from the parent — a collection-group read has no cheap way
-      // to look up its own parent.
-      match /location/{locationId} {
-        allow read: if isSuperAdmin() || sameOrgAsCaller(resource.data.get('organizationId', null));
-        allow write: if false;
-      }
-
       // An append-only log of every distinct vitals reading this patient
       // has had — only ever written by onPatientCreated/onPatientUpdated
       // (Admin SDK; functions/src/patients.ts). Unlike location, this is
@@ -159,6 +142,29 @@ service cloud.firestore {
         allow read: if isSuperAdmin() || sameOrgAsCaller(get(/databases/$(database)/documents/patients/$(patientId)).data.get('organizationId', null));
         allow write: if false;
       }
+    }
+
+    // The patient's live GPS position — a sibling document rather than a
+    // field on the patient doc itself, specifically so a location update
+    // (as often as every ~15s, for the life of a transport) never fires
+    // onPatientUpdated's audit trigger or re-emits the listener the whole
+    // patient list watches (a Firestore subcollection write is invisible to
+    // both). Only ever written by onEmsLocationEvent/uploadPatientDocument
+    // (Admin SDK) — no client writes here directly. A top-level wildcard
+    // match (`{path=**}`) rather than nested inside `match /patients
+    // /{patientId}` above — confirmed via a real failure that the nested
+    // form doesn't authorize a collectionGroup('location') query (see
+    // EmsLocationController on the physician client): it throws
+    // permission-denied even though the identical resource.data-based
+    // check works fine for a plain, non-collection-group query (like
+    // `patients`'s own list query above). The wildcard form is Firestore's
+    // documented pattern for securing collection group reads. organizationId
+    // is denormalized onto this document rather than resolved from the
+    // parent since a collection-group read has no cheap way to look up its
+    // own parent.
+    match /{path=**}/location/{locationId} {
+      allow read: if isSuperAdmin() || sameOrgAsCaller(resource.data.get('organizationId', null));
+      allow write: if false;
     }
 
     // Hospitals are only ever written by the createHospital/deleteHospital

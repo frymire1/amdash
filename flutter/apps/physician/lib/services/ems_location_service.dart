@@ -105,13 +105,25 @@ class EmsLocationController extends Notifier<EmsLocationState> {
     // a subcollection, not its own top-level collection (see
     // functions/src/shared.ts's patientLocationRef for why), so this reads
     // every patient's location subdocument across the org in one query
-    // rather than one listener per patient.
+    // rather than one listener per patient. firestore.rules secures this
+    // with a top-level wildcard match (`match /{path=**}/location/
+    // {locationId}`) rather than one nested under `patients/{patientId}` —
+    // confirmed via a real permission-denied failure that the nested form
+    // doesn't authorize a collectionGroup query, even though the identical
+    // resource.data-based check works fine for a plain, non-collection-
+    // group query (like the patients list itself).
+    //
+    // onError swallows a query failure (permission/index issues, mainly)
+    // rather than leaving it as an unhandled stream error — there's
+    // nothing this controller could usefully do to recover on its own;
+    // the tracking chip just silently stays at whatever it last knew,
+    // same failure mode as a transient network drop.
     _subscription = FirebaseFirestore.instance
         .collectionGroup('location')
         .where('organizationId', isEqualTo: organizationId)
         .where('active', isEqualTo: true)
         .snapshots()
-        .listen(_onSnapshot);
+        .listen(_onSnapshot, onError: (_) {});
 
     _staleTimer = Timer.periodic(const Duration(seconds: 5), (_) => _recompute());
   }

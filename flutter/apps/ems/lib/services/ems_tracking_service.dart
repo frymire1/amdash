@@ -67,6 +67,12 @@ class EmsTrackingController extends Notifier<Set<String>> {
   // [evaluateHealth].
   int? _lastFixMs;
 
+  // Wall-clock ms of the last fix the iOS stream actually *published* —
+  // distinct from _lastFixMs above, which records every fix CoreLocation
+  // delivers regardless of whether this throttle let it through. See
+  // _ensureIOSPositionStream for why this exists.
+  int? _lastIOSPublishMs;
+
   @override
   Set<String> build() {
     _functions = FirebaseFunctions.instanceFor(region: functionsRegion);
@@ -214,6 +220,7 @@ class EmsTrackingController extends Notifier<Set<String>> {
       if (state.isEmpty) {
         await _iosPositionSubscription?.cancel();
         _iosPositionSubscription = null;
+        _lastIOSPublishMs = null;
       }
       return;
     }
@@ -242,7 +249,28 @@ class EmsTrackingController extends Notifier<Set<String>> {
       ),
     ).listen(
       (position) {
+        // _recordFix() always runs, regardless of the throttle below — a
+        // fix genuinely arrived, so "No GPS Signal" freshness detection
+        // (evaluateHealth) should reflect that immediately, even on a tick
+        // this throttle ends up skipping.
         _recordFix();
+
+        // distanceFilter: 0 above means CoreLocation can deliver a new
+        // position close to once a second — far more often than anything
+        // downstream needs (the staleness threshold alone is 35s — see
+        // ems_location_service.dart's _staleAfterMs) and far more often
+        // than Android/web's own 15s poll. Each one is a full round trip
+        // (a Cloud Function call, a Pub/Sub publish, a Firestore write),
+        // so without this throttle iOS was publishing roughly 15x more
+        // often than the other two platforms for no real benefit. Still
+        // fully event-driven, not a poll — this just bounds *how often*
+        // a real event is allowed to actually publish.
+        final nowMs = DateTime.now().millisecondsSinceEpoch;
+        if (_lastIOSPublishMs != null && nowMs - _lastIOSPublishMs! < _updateInterval.inMilliseconds) {
+          return;
+        }
+        _lastIOSPublishMs = nowMs;
+
         for (final patientId in state.toList()) {
           unawaited(_publishPosition(patientId, position));
         }
