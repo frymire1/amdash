@@ -37,7 +37,13 @@ async function createSmokeAdminAccount(db) {
   const organizationId = await findOrganizationId(db, 'test-org');
   const email = `smoke-admin-${Date.now()}@amdash-e2e.test`;
   const password = 'SmokeTest123';
-  const user = await getAuth().createUser({ email, password });
+  // emailVerified: true is required here, not just convenient — mandatory
+  // MFA (AppRouteGuard's requireMfa tier) blocks a never-enrolled account
+  // behind /mfa-setup immediately after sign-in, and that screen itself
+  // requires a verified email before it'll even show the TOTP enrollment
+  // step. The test drives the real enrollment (see user_flow_test.dart's
+  // completeMfaEnrollment), so this only needs to skip straight to that.
+  const user = await getAuth().createUser({ email, password, emailVerified: true });
   await db.doc(`users/${user.uid}`).set(
     { email, role: ['admin'], organizationId, firstName: 'Smoke', lastName: 'Admin' },
     { merge: true },

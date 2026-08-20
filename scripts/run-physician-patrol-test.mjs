@@ -65,7 +65,10 @@ async function createSmokePhysicianAccount(db) {
   const organizationId = await findOrganizationId(db, 'test-org');
   const email = `smoke-physician-${RUN_ID}@amdash-e2e.test`;
   const password = 'SmokeTest123';
-  const user = await getAuth().createUser({ email, password });
+  // emailVerified: true — required for mandatory MFA's /mfa-setup screen to
+  // skip straight to TOTP enrollment (see run-admin-patrol-test.mjs's fuller
+  // comment on this same line).
+  const user = await getAuth().createUser({ email, password, emailVerified: true });
   await db.doc(`users/${user.uid}`).set(
     { email, role: ['physician'], organizationId, firstName: 'Smoke', lastName: 'Physician' },
     { merge: true },

@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:otp/otp.dart';
 import 'package:patrol/patrol.dart';
 import 'package:physician/firebase_options.dart';
 import 'package:physician/main.dart';
@@ -37,7 +38,54 @@ Future<void> tapFinder(PatrolIntegrationTester $, Finder finder) async {
   await $.pump(const Duration(milliseconds: 400));
 }
 
-Future<void> tapText(PatrolIntegrationTester $, String text) => tapFinder($, find.text(text));
+Future<void> tapText(PatrolIntegrationTester $, String text) =>
+    tapFinder($, find.text(text));
+
+/// Polls with fixed pumps rather than a one-shot wait — see admin's
+/// user_flow_test.dart, whose equivalent helper this mirrors.
+Future<void> pumpUntil(
+  PatrolIntegrationTester $,
+  bool Function() condition, {
+  int maxIterations = 50,
+}) async {
+  for (var i = 0; i < maxIterations; i++) {
+    if (condition()) return;
+    await $.pump(const Duration(milliseconds: 400));
+  }
+}
+
+/// Every account requires TOTP MFA (`AppRouteGuard`'s `requireMfa` tier,
+/// checked right after auth and before the work-location tier below) — a
+/// freshly created throwaway account has never enrolled, so sign-in always
+/// lands on /mfa-setup first. See admin's user_flow_test.dart for the full
+/// rationale (no server-side shortcut exists; this drives the real
+/// enrollment UI with a computed code instead of bypassing it). The
+/// account is created with emailVerified: true already (see
+/// run-physician-patrol-test.mjs), so /mfa-setup skips straight to the
+/// TOTP step.
+Future<void> completeMfaEnrollment(PatrolIntegrationTester $) async {
+  await pumpUntil(
+    $,
+    () => find.byKey(const Key('mfa_secret_key')).evaluate().isNotEmpty,
+    maxIterations: 40,
+  );
+  final secret = $.tester
+      .widget<SelectableText>(find.byKey(const Key('mfa_secret_key')))
+      .data!;
+  final code = OTP.generateTOTPCodeString(
+    secret,
+    DateTime.now().millisecondsSinceEpoch,
+    algorithm: Algorithm.SHA1,
+    isGoogle: true,
+  );
+  await $(TextField).enterText(code);
+  await tapText($, 'Confirm');
+  await pumpUntil(
+    $,
+    () => find.byKey(const Key('mfa_secret_key')).evaluate().isEmpty,
+    maxIterations: 30,
+  );
+}
 
 void main() {
   patrolTest(
@@ -46,12 +94,25 @@ void main() {
       const email = String.fromEnvironment('SMOKE_EMAIL');
       const password = String.fromEnvironment('SMOKE_PASSWORD');
       const hospitalName = String.fromEnvironment('SMOKE_HOSPITAL');
-      const patientName = String.fromEnvironment('SMOKE_PATIENT_NAME', defaultValue: 'Physician Verify Patient');
+      const patientName = String.fromEnvironment(
+        'SMOKE_PATIENT_NAME',
+        defaultValue: 'Physician Verify Patient',
+      );
       expect(email, isNotEmpty, reason: 'pass --dart-define=SMOKE_EMAIL=...');
-      expect(password, isNotEmpty, reason: 'pass --dart-define=SMOKE_PASSWORD=...');
-      expect(hospitalName, isNotEmpty, reason: 'pass --dart-define=SMOKE_HOSPITAL=...');
+      expect(
+        password,
+        isNotEmpty,
+        reason: 'pass --dart-define=SMOKE_PASSWORD=...',
+      );
+      expect(
+        hospitalName,
+        isNotEmpty,
+        reason: 'pass --dart-define=SMOKE_HOSPITAL=...',
+      );
 
-      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
       await $.pumpWidgetAndSettle(const ProviderScope(child: PhysicianApp()));
 
       // Sign in.
@@ -62,6 +123,8 @@ void main() {
       await $(TextField).at(0).enterText(password);
       await tapText($, 'Sign In');
 
+      await completeMfaEnrollment($);
+
       // Work location — only asked once; skip if this account already has
       // one from a previous run.
       await $.pump(const Duration(seconds: 2));
@@ -70,7 +133,12 @@ void main() {
         await $(hospitalName).waitUntilVisible();
         // The autocomplete overlay renders the option in its own overlay
         // route — the last match is the option, not the field's own text.
-        await tapFinder($, find.text(hospitalName).at(find.text(hospitalName).evaluate().length - 1));
+        await tapFinder(
+          $,
+          find
+              .text(hospitalName)
+              .at(find.text(hospitalName).evaluate().length - 1),
+        );
         // The Autocomplete's options overlay stays mounted (a full-screen
         // AbsorbPointer, confirmed via --show-flutter-logs's hit-test
         // warning) as long as the field keeps focus and its query still
@@ -89,17 +157,25 @@ void main() {
 
       // Self-heals a cache-flicker bounce back to /work-location, thanks
       // to the reactive guard fix — just needs enough time to settle.
-      await $(MainViewScreen).waitUntilVisible(timeout: const Duration(seconds: 20));
+      await $(
+        MainViewScreen,
+      ).waitUntilVisible(timeout: const Duration(seconds: 20));
 
       // The seeded patient should appear in the list.
-      await $(patientName).waitUntilVisible(timeout: const Duration(seconds: 15));
+      await $(
+        patientName,
+      ).waitUntilVisible(timeout: const Duration(seconds: 15));
       await tapFinder($, find.text(patientName).first);
 
       // Patient viewer should now show this patient's info/vitals, and a
       // real Google Map for its uploaded pickup location.
       await $('Destination Hospital').waitUntilVisible();
       expect($('Vital Signs'), findsOneWidget);
-      expect($(GoogleMap), findsOneWidget, reason: 'patient has a location, so the map should render');
+      expect(
+        $(GoogleMap),
+        findsOneWidget,
+        reason: 'patient has a location, so the map should render',
+      );
     },
   );
 }

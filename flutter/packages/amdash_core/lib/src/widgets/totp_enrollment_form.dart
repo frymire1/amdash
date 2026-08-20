@@ -53,9 +53,15 @@ class _TotpEnrollmentFormState extends ConsumerState<TotpEnrollmentForm> {
       _error = null;
     });
     try {
-      final secret = await ref.read(mfaServiceProvider).beginEnrollment().timeout(const Duration(seconds: 15));
+      final secret = await ref
+          .read(mfaServiceProvider)
+          .beginEnrollment()
+          .timeout(const Duration(seconds: 15));
       final email = ref.read(authServiceProvider).currentUser?.email ?? '';
-      final qrCodeUrl = await secret.generateQrCodeUrl(accountName: email, issuer: 'AmDash');
+      final qrCodeUrl = await secret.generateQrCodeUrl(
+        accountName: email,
+        issuer: 'AmDash',
+      );
       if (mounted) {
         setState(() {
           _secret = secret;
@@ -67,7 +73,10 @@ class _TotpEnrollmentFormState extends ConsumerState<TotpEnrollmentForm> {
       await _reauthenticateThenRetry(_begin);
       return;
     } catch (error) {
-      if (mounted) setState(() => _error = 'Could not start enrollment. Please try again.');
+      if (mounted)
+        setState(
+          () => _error = 'Could not start enrollment. Please try again.',
+        );
     } finally {
       if (mounted) setState(() => _starting = false);
     }
@@ -80,7 +89,10 @@ class _TotpEnrollmentFormState extends ConsumerState<TotpEnrollmentForm> {
       await ref.read(mfaServiceProvider).reauthenticate(password);
       await retry();
     } catch (error) {
-      if (mounted) setState(() => _error = "Couldn't verify your password. Please try again.");
+      if (mounted)
+        setState(
+          () => _error = "Couldn't verify your password. Please try again.",
+        );
     }
   }
 
@@ -94,7 +106,10 @@ class _TotpEnrollmentFormState extends ConsumerState<TotpEnrollmentForm> {
       _error = null;
     });
     try {
-      await ref.read(mfaServiceProvider).confirmEnrollment(secret, code).timeout(const Duration(seconds: 15));
+      await ref
+          .read(mfaServiceProvider)
+          .confirmEnrollment(secret, code)
+          .timeout(const Duration(seconds: 15));
       ref.invalidate(mfaEnrolledFactorsProvider);
       if (mounted) widget.onEnrolled();
     } on MfaRequiresRecentLoginException {
@@ -103,7 +118,10 @@ class _TotpEnrollmentFormState extends ConsumerState<TotpEnrollmentForm> {
       return;
     } catch (error) {
       if (mounted) {
-        setState(() => _error = "That code didn't work — double-check your authenticator app and try again.");
+        setState(
+          () => _error =
+              "That code didn't work — double-check your authenticator app and try again.",
+        );
       }
     } finally {
       if (mounted) setState(() => _confirming = false);
@@ -124,7 +142,10 @@ class _TotpEnrollmentFormState extends ConsumerState<TotpEnrollmentForm> {
                 children: [
                   if (_error != null) _messageText(context, _error!),
                   const SizedBox(height: 8),
-                  OutlinedButton(onPressed: _begin, child: const Text('Try again')),
+                  OutlinedButton(
+                    onPressed: _begin,
+                    child: const Text('Try again'),
+                  ),
                 ],
               ),
       );
@@ -142,11 +163,18 @@ class _TotpEnrollmentFormState extends ConsumerState<TotpEnrollmentForm> {
           ),
         ),
         const SizedBox(height: 12),
-        const Text("Can't scan? Enter this code manually:", style: TextStyle(fontSize: 12)),
+        const Text(
+          "Can't scan? Enter this code manually:",
+          style: TextStyle(fontSize: 12),
+        ),
         const SizedBox(height: 4),
         SelectableText(
           secret.secretKey,
-          style: const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold),
+          key: const Key('mfa_secret_key'),
+          style: const TextStyle(
+            fontFamily: 'monospace',
+            fontWeight: FontWeight.bold,
+          ),
         ),
         const SizedBox(height: 20),
         TextField(
@@ -160,7 +188,9 @@ class _TotpEnrollmentFormState extends ConsumerState<TotpEnrollmentForm> {
         const SizedBox(height: 8),
         FilledButton(
           onPressed: _confirming ? null : _confirm,
-          child: _confirming ? _spinner(label: 'Confirming…') : const Text('Confirm'),
+          child: _confirming
+              ? _spinner(label: 'Confirming…')
+              : const Text('Confirm'),
         ),
         TextButton(
           onPressed: () => setState(() {
@@ -177,7 +207,11 @@ class _TotpEnrollmentFormState extends ConsumerState<TotpEnrollmentForm> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+        const SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
         if (label != null) ...[const SizedBox(width: 12), Text(label)],
       ],
     );
@@ -186,7 +220,10 @@ class _TotpEnrollmentFormState extends ConsumerState<TotpEnrollmentForm> {
   Widget _messageText(BuildContext context, String text) {
     return Padding(
       padding: const EdgeInsets.only(top: 8),
-      child: Text(text, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+      child: Text(
+        text,
+        style: TextStyle(color: Theme.of(context).colorScheme.error),
+      ),
     );
   }
 }
