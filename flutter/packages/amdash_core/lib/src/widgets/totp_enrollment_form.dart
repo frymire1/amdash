@@ -73,10 +73,11 @@ class _TotpEnrollmentFormState extends ConsumerState<TotpEnrollmentForm> {
       await _reauthenticateThenRetry(_begin);
       return;
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         setState(
           () => _error = 'Could not start enrollment. Please try again.',
         );
+      }
     } finally {
       if (mounted) setState(() => _starting = false);
     }
@@ -89,10 +90,11 @@ class _TotpEnrollmentFormState extends ConsumerState<TotpEnrollmentForm> {
       await ref.read(mfaServiceProvider).reauthenticate(password);
       await retry();
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         setState(
           () => _error = "Couldn't verify your password. Please try again.",
         );
+      }
     }
   }
 
