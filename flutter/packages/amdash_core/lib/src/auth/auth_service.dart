@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -39,7 +40,42 @@ class AuthService {
     return _auth.signInWithEmailAndPassword(email: email, password: password);
   }
 
-  Future<void> signOut() => _auth.signOut();
+  // Firestore's client SDK caches locally by default — every patient
+  // record (vitals, notes, treatment, and more, per the CMEK toggle's own
+  // scope) either app has ever read sits in that cache until something
+  // clears it, on every device, indefinitely. That cache shouldn't outlive
+  // the session that justified it being there, especially on a device
+  // shared across shifts (an ambulance tablet). Called from every sign-out
+  // path, including IdleTimeoutWrapper's own idle-triggered call to this
+  // same method — so the auto-logoff clears it too, not just an explicit
+  // sign-out.
+  //
+  // terminate() first: clearPersistence() throws if any Firestore listener
+  // is still open, and this app has several non-autoDispose StreamProviders
+  // (userProfileProvider, the patient list providers, EmsLocationController)
+  // that don't necessarily tear down the instant sign-out fires — reliably
+  // tracking down and cancelling every one of them here isn't realistic.
+  // terminate() sidesteps that by forcibly closing every open
+  // listener/connection at the SDK level, whatever's holding it. Firestore
+  // transparently reconnects on its own next use regardless (e.g. a
+  // different worker signing into the same shared device right after), so
+  // this doesn't leave the app in any kind of broken state.
+  //
+  // Best-effort: swallows any failure rather than blocking sign-out on it —
+  // this is defense in depth on top of encryption/access control, not the
+  // primary goal of signing out.
+  Future<void> _clearLocalCache() async {
+    try {
+      final firestore = FirebaseFirestore.instance;
+      await firestore.terminate();
+      await firestore.clearPersistence();
+    } catch (_) {}
+  }
+
+  Future<void> signOut() async {
+    await _auth.signOut();
+    await _clearLocalCache();
+  }
 
   Future<void> resetPassword(String email) {
     return _auth.sendPasswordResetEmail(email: email);

@@ -726,15 +726,18 @@ export const setOrganizationCountry = onCall<SetOrganizationCountryRequest>({ re
   return { country };
 });
 
-// Turns Canada-based Cloud KMS data residency on/off for the caller's org.
-// Firestore's own CMEK applies to a whole database and can only be set at
-// creation time, so it can't be toggled per-org on the shared database
-// this app runs on — instead, patient.name/healthcareNumber get
-// application-level envelope encryption (see kms.ts/patients.ts) gated on
-// this flag, with a dedicated Cloud KMS key created per org on first
-// opt-in. Restricted to orgs with country 'CA' — the whole point of the
-// flag — checked server-side even though the client UI already gates on
-// this, since a client-side gate alone isn't a real guarantee.
+// Turns application-level Cloud KMS envelope encryption on/off for the
+// caller's org — patient.name/healthcareNumber get encrypted with a
+// dedicated per-org Cloud KMS key (see kms.ts/patients.ts) whenever this
+// flag is set, on top of Firestore's own encryption at rest. Originally
+// restricted to orgs with country 'CA' (the key ring lives in
+// northamerica-northeast2, so this doubled as a CLOUD Act / data-residency
+// safeguard for Canadian orgs specifically) — opened up to every org
+// regardless of country, since the extra encryption layer itself is a
+// genuine benefit independent of residency, and the key ring's fixed
+// location was never actually tied to where a given org's own data lives
+// (Firestore itself is already in that same region for every org, Canadian
+// or not).
 export const setOrganizationCmekPreference = onCall<SetOrganizationCmekRequest>({ region: REGION }, async (request) => {
   const profile = await getCallerProfile(request.auth?.uid);
   requireAdmin(profile, 'Only admins can change organization settings.');
@@ -748,14 +751,6 @@ export const setOrganizationCmekPreference = onCall<SetOrganizationCmekRequest>(
   const update: Record<string, unknown> = { cmekRequested };
 
   if (cmekRequested) {
-    const orgDoc = await orgRef.get();
-    if (orgDoc.data()?.['country'] !== 'CA') {
-      throw new HttpsError(
-        'failed-precondition',
-        'Canadian data residency can only be requested for organizations with country set to Canada.',
-      );
-    }
-
     // Idempotent — a re-toggle (off then on) reuses the same org key
     // rather than minting a new one every time.
     try {

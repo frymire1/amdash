@@ -9,8 +9,10 @@ import '../widgets/admin_page.dart';
 import '../widgets/hospital_management_section.dart';
 
 /// Mirrors `organization-settings.component.ts`/`.html`: a retention
-/// toggle, a country picker, and (Canadian orgs only) a Cloud KMS
-/// data-residency request — all bound to the live Firestore value
+/// toggle, a country picker, and a Cloud KMS patient-data-encryption
+/// request (open to every org, not just Canadian ones — see
+/// `setOrganizationCmekPreference`'s own doc comment) — all bound to the
+/// live Firestore value
 /// ([ownOrganizationProvider]) rather than local optimistic state — on
 /// success the listener reflects the confirmed write on its own; on
 /// failure there's nothing to roll back, so no local state to revert
@@ -27,10 +29,12 @@ class OrganizationSettingsScreen extends ConsumerStatefulWidget {
   const OrganizationSettingsScreen({super.key});
 
   @override
-  ConsumerState<OrganizationSettingsScreen> createState() => _OrganizationSettingsScreenState();
+  ConsumerState<OrganizationSettingsScreen> createState() =>
+      _OrganizationSettingsScreenState();
 }
 
-class _OrganizationSettingsScreenState extends ConsumerState<OrganizationSettingsScreen> {
+class _OrganizationSettingsScreenState
+    extends ConsumerState<OrganizationSettingsScreen> {
   bool _saving = false;
   String? _errorMessage;
 
@@ -60,7 +64,9 @@ class _OrganizationSettingsScreenState extends ConsumerState<OrganizationSetting
     try {
       await ref.read(adminServiceProvider).setOrganizationRetention(value);
     } catch (error) {
-      if (mounted) setState(() => _errorMessage = 'Failed to save. Please try again.');
+      if (mounted) {
+        setState(() => _errorMessage = 'Failed to save. Please try again.');
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -153,31 +159,50 @@ class _OrganizationSettingsScreenState extends ConsumerState<OrganizationSetting
 
     return AdminPage(
       children: [
-        const Text('Organization Settings', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+        const Text(
+          'Organization Settings',
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 16),
         AdminCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Organization Details', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const Text(
+                'Organization Details',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: _countrySelection,
                 decoration: const InputDecoration(labelText: 'Country'),
                 items: [
                   for (final entry in organizationCountries.entries)
-                    DropdownMenuItem(value: entry.key, child: Text(entry.value)),
+                    DropdownMenuItem(
+                      value: entry.key,
+                      child: Text(entry.value),
+                    ),
                 ],
                 onChanged: (value) => setState(() => _countrySelection = value),
               ),
-              if (_countryMessage != null) FormMessage(text: _countryMessage!, isError: _countryIsError),
+              if (_countryMessage != null)
+                FormMessage(text: _countryMessage!, isError: _countryIsError),
               const SizedBox(height: 16),
               Align(
                 alignment: Alignment.centerLeft,
                 child: FilledButton(
-                  onPressed: _savingCountry || _countrySelection == null || organization == null ? null : _saveCountry,
+                  onPressed:
+                      _savingCountry ||
+                          _countrySelection == null ||
+                          organization == null
+                      ? null
+                      : _saveCountry,
                   child: _savingCountry
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
                       : const Text('Save'),
                 ),
               ),
@@ -188,7 +213,10 @@ class _OrganizationSettingsScreenState extends ConsumerState<OrganizationSetting
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Data Retention', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const Text(
+                'Data Retention',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 8),
               const Text(
                 'By default, completed transports and their location history are deleted 48 hours after '
@@ -199,17 +227,28 @@ class _OrganizationSettingsScreenState extends ConsumerState<OrganizationSetting
                 children: [
                   Switch(
                     value: retainAllData,
-                    onChanged: _saving || organization == null ? null : _setRetention,
+                    onChanged: _saving || organization == null
+                        ? null
+                        : _setRetention,
                   ),
                   const SizedBox(width: 8),
-                  Text(retainAllData ? 'Retaining all data' : 'Auto-deleting after 48 hours'),
+                  Text(
+                    retainAllData
+                        ? 'Retaining all data'
+                        : 'Auto-deleting after 48 hours',
+                  ),
                   if (_saving) ...[
                     const SizedBox(width: 12),
-                    const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
                   ],
                 ],
               ),
-              if (_errorMessage != null) FormMessage(text: _errorMessage!, isError: true),
+              if (_errorMessage != null)
+                FormMessage(text: _errorMessage!, isError: true),
             ],
           ),
         ),
@@ -217,7 +256,10 @@ class _OrganizationSettingsScreenState extends ConsumerState<OrganizationSetting
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Patient Record Audit Logging', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const Text(
+                'Patient Record Audit Logging',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 8),
               const Text(
                 'Log who creates, edits, completes, or deletes a patient record, and who views a patient\'s '
@@ -230,55 +272,82 @@ class _OrganizationSettingsScreenState extends ConsumerState<OrganizationSetting
                 children: [
                   Switch(
                     value: auditLoggingEnabled,
-                    onChanged: _savingAuditLogging || organization == null ? null : _setAuditLoggingEnabled,
+                    onChanged: _savingAuditLogging || organization == null
+                        ? null
+                        : _setAuditLoggingEnabled,
                   ),
                   const SizedBox(width: 8),
-                  Text(auditLoggingEnabled ? 'Logging patient record actions' : 'Not logging patient record actions'),
+                  Text(
+                    auditLoggingEnabled
+                        ? 'Logging patient record actions'
+                        : 'Not logging patient record actions',
+                  ),
                   if (_savingAuditLogging) ...[
                     const SizedBox(width: 12),
-                    const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
                   ],
                 ],
               ),
-              if (_auditLoggingMessage != null) FormMessage(text: _auditLoggingMessage!, isError: _auditLoggingIsError),
+              if (_auditLoggingMessage != null)
+                FormMessage(
+                  text: _auditLoggingMessage!,
+                  isError: _auditLoggingIsError,
+                ),
             ],
           ),
         ),
-        if (isCanadian)
-          AdminCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Canadian Data Residency (Cloud KMS)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                const Text(
-                  "Encrypt this organization's patient name and healthcare number with a dedicated, "
-                  "Canada-based Cloud KMS key, as a CLOUD Act / data-residency safeguard. Existing records "
-                  "aren't retroactively encrypted — this applies to patients created or edited from when "
-                  "it's turned on.",
-                  style: TextStyle(fontSize: 13),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Switch(
-                      value: cmekRequested,
-                      onChanged: _savingCmek || organization == null ? null : _setCmekRequested,
+        AdminCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Patient Data Encryption (Cloud KMS)',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Encrypt this organization's patient name and healthcare number with a dedicated Cloud KMS "
+                "key, as an extra layer of protection on top of Firestore's own encryption at rest."
+                '${isCanadian ? " The key itself is Canada-based, which also satisfies a CLOUD Act / data-residency safeguard for Canadian organizations." : ''}'
+                " Existing records aren't retroactively encrypted — this applies to patients created or "
+                "edited from when it's turned on.",
+                style: const TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Switch(
+                    value: cmekRequested,
+                    onChanged: _savingCmek || organization == null
+                        ? null
+                        : _setCmekRequested,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(cmekRequested ? 'Requested' : 'Not requested'),
+                  if (_savingCmek) ...[
+                    const SizedBox(width: 12),
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
                     ),
-                    const SizedBox(width: 8),
-                    Text(cmekRequested ? 'Requested' : 'Not requested'),
-                    if (_savingCmek) ...[
-                      const SizedBox(width: 12),
-                      const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
-                    ],
                   ],
-                ),
-                if (_cmekMessage != null) FormMessage(text: _cmekMessage!, isError: _cmekIsError),
-              ],
-            ),
+                ],
+              ),
+              if (_cmekMessage != null)
+                FormMessage(text: _cmekMessage!, isError: _cmekIsError),
+            ],
           ),
+        ),
         const SizedBox(height: 8),
-        const Text('Hospitals', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        const Text(
+          'Hospitals',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 16),
         const HospitalManagementSection(),
       ],
