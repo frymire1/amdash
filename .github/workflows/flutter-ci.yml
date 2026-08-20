@@ -1,0 +1,313 @@
+name: Flutter CI
+
+# Free/cheap analyze+test+build safety net on every push, plus e2e
+# (Chrome + Firebase Test Lab Android) on master only. Deliberately not on
+# Codemagic: none of this needs macOS, and GitHub's Linux runners are free
+# on the plans this repo uses, unlike Codemagic's per-minute mac_mini_m2
+# pricing (see codemagic.yaml's own history — that's exactly why its
+# testing workflows were removed and this file exists instead). iOS e2e
+# stays off entirely — Xcode/signing is the genuinely expensive, complex
+# part regardless of which CI system runs it; flutter-deploy and the
+# ios-adhoc-distribute* workflows in codemagic.yaml remain the way to get
+# a real iOS build, manually, when needed.
+#
+# Adapted from two prior, independently-working sources rather than
+# written from scratch: the pre-Codemagic-migration version of this repo's
+# own ci.yml (commit 308e075^ — real, tuned fixes for locale/xvfb/caching
+# on GitHub's Linux runners already exist there) for the Linux-specific
+# environment setup, and codemagic.yaml's own web-e2e/android-e2e jobs
+# (the more recent iteration — Firebase Test Lab real devices instead of a
+# local Android emulator) for the actual test-script invocations.
+#
+# e2e no longer runs as a gate on a specific deploy the way it used to
+# (the old ci.yml's e2e jobs had `needs: deploy`) — flutter-deploy is now
+# manual-trigger-only on Codemagic, so there's no in-workflow deploy step
+# left to depend on. These jobs test whatever's currently live on
+# amdash-dev instead — a smoke test of current state, not a pre-deploy
+# gate. Deploy manually via Codemagic, then these next run on your next
+# push will exercise it.
+#
+# Required repo secrets (GitHub -> Settings -> Secrets and variables ->
+# Actions):
+#   - FIREBASE_SERVICE_ACCOUNT_KEY — already exists (used by ci.yml's
+#     deploy-marketing job already).
+#   - GCLOUD_TESTLAB_SERVICE_ACCOUNT_KEY — new; copy the same value
+#     already configured in Codemagic's firebase_testlab group (Codemagic
+#     -> Team settings -> Environment variables).
+
+on:
+  push:
+
+jobs:
+  flutter-analyze-test:
+    name: Flutter analyze + unit/widget tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Analyze amdash_core, physician, ems, admin
+        run: |
+          set -e
+          for dir in packages/amdash_core apps/physician apps/ems apps/admin; do
+            (cd "$dir" && flutter pub get && flutter analyze)
+          done
+        working-directory: flutter
+
+      - name: Run widget/unit tests
+        run: |
+          set -e
+          for dir in packages/amdash_core apps/physician apps/ems apps/admin; do
+            (cd "$dir" && flutter test)
+          done
+        working-directory: flutter
+
+  functions-build:
+    name: Functions build (tsc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: functions
+
+      - name: Build
+        run: npm run build
+        working-directory: functions
+
+  # Only runs on master — real Firebase resource usage (seeding/tearing
+  # down live test accounts against amdash-dev), not free just because the
+  # CI compute is. Test locally before pushing to any other branch (see
+  # scripts/run-*-patrol-test.mjs — built to work standalone, not just in
+  # CI).
+  flutter-web-e2e:
+    name: Web e2e (Chrome)
+    runs-on: ubuntu-latest
+    needs: flutter-analyze-test
+    if: github.ref == 'refs/heads/master'
+    # Flutter Web's engine crashes on startup ("Error: Invalid argument:
+    # Incorrect locale information provided", thrown from
+    # parseBrowserLanguages) when the headless Chromium Patrol/Playwright
+    # launches reports a locale list the engine can't parse — which is
+    # what happens on a bare ubuntu-latest runner, where LANG/LC_ALL
+    # default to C/POSIX rather than a real locale. Setting a real one
+    # job-wide fixes it; the runner has en_US.UTF-8 pre-generated already,
+    # just not active.
+    env:
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
+    steps:
+      - uses: actions/checkout@v4
+
+      # Belt-and-suspenders alongside the job-level LANG/LC_ALL above:
+      # locale-gen is a no-op if en_US.UTF-8 is already generated.
+      - name: Ensure en_US.UTF-8 locale is generated
+        run: sudo locale-gen en_US.UTF-8
+
+      # Patrol launches Chromium headed, which needs a (virtual) display —
+      # see scripts/lib/run-patrol.mjs's xvfb-run wrapping (skipped on
+      # macOS, which is why Codemagic's own mac_mini_m2-based version of
+      # this job never needed this step).
+      - name: Ensure xvfb is installed
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # `dart pub global activate` compiles patrol_cli from source — real
+      # time cost, repeated identically in both e2e jobs every run.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-cache-${{ runner.os }}-patrol-cli
+
+      - name: Install patrol_cli
+        run: |
+          dart pub global activate patrol_cli
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: Install scripts dependencies
+        run: npm ci
+        working-directory: scripts
+
+      # `patrol test` bootstraps its own Playwright setup on demand but
+      # that only downloads the browser binary, not the OS-level shared
+      # libraries (libnss3, libatk, etc.) a fresh ubuntu-latest runner
+      # doesn't have — without them Chromium fails to launch at all.
+      # Playwright caches the downloaded browser globally
+      # (~/.cache/ms-playwright), so installing it once here means
+      # patrol's own later install step just finds it already present.
+      - name: Install Playwright browser + OS dependencies
+        run: npx playwright install --with-deps chromium
+        working-directory: scripts
+
+      # Used by the run-*-patrol-test.mjs scripts' own Admin SDK calls
+      # (see scripts/lib/firebase-admin-cli.mjs) — the Admin SDK
+      # auto-detects this standard env var, no extra plumbing needed.
+      - name: Authenticate to Firebase
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+
+      # Each script creates its own throwaway Firebase account (+
+      # hospital/patient as needed), drives `patrol test` against a real
+      # Chrome instance, and tears its own state back down.
+      - name: Run admin Patrol e2e
+        run: node run-admin-patrol-test.mjs
+        working-directory: scripts
+
+      - name: Run physician Patrol e2e
+        run: node run-physician-patrol-test.mjs
+        working-directory: scripts
+
+      - name: Run EMS Patrol e2e
+        run: node run-ems-patrol-test.mjs
+        working-directory: scripts
+
+      - name: Upload Patrol reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patrol-reports
+          path: |
+            flutter/apps/admin/playwright-report
+            flutter/apps/physician/playwright-report
+            flutter/apps/ems/playwright-report
+          retention-days: 7
+
+  # Only runs on master — see flutter-web-e2e's identical note on real
+  # Firebase/Test Lab resource usage. Mirrors codemagic.yaml's own
+  # android-e2e job (real Test Lab devices, not a local emulator) rather
+  # than the older local-emulator approach this repo used before the
+  # Codemagic migration — keeping the real-device upgrade, just triggering
+  # it from a free runner instead of a paid one.
+  flutter-android-e2e:
+    name: Android e2e (Firebase Test Lab)
+    runs-on: ubuntu-latest
+    needs: flutter-analyze-test
+    if: github.ref == 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('flutter/apps/*/android/**/*.gradle*', 'flutter/apps/*/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-cache-${{ runner.os }}-patrol-cli
+
+      - name: Install patrol_cli
+        run: |
+          dart pub global activate patrol_cli
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: Install scripts dependencies
+        run: npm ci
+        working-directory: scripts
+
+      - name: Authenticate to Firebase Admin SDK
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+
+      # google-github-actions/auth sets up both gcloud CLI credentials and
+      # Application Default Credentials from the service account key in
+      # one step — the GHA-native replacement for manually writing a key
+      # file and calling `gcloud auth activate-service-account`.
+      - name: Authenticate gcloud to Test Lab
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCLOUD_TESTLAB_SERVICE_ACCOUNT_KEY }}
+
+      - name: Set gcloud project
+        run: gcloud config set project amdash-dev
+
+      # Seeding and teardown are split into their own steps (rather than
+      # one seed->test->teardown script per app, the way web-e2e works)
+      # because `patrol build` + `gcloud ... run` doesn't fit that shape —
+      # see run-physician-patrol-test.mjs / run-ems-patrol-test.mjs's
+      # --seed-only/--teardown modes.
+      - name: Seed physician + ems smoke accounts
+        run: |
+          node run-physician-patrol-test.mjs --seed-only --account-json="$RUNNER_TEMP/physician-account.json"
+          node run-ems-patrol-test.mjs --seed-only --account-json="$RUNNER_TEMP/ems-account.json"
+        working-directory: scripts
+
+      - name: Build + run physician Test Lab suite (Android)
+        run: |
+          set -e
+          ACCOUNT="$RUNNER_TEMP/physician-account.json"
+          cd flutter/apps/physician
+          patrol build android --target patrol_test/patient_flow_test.dart \
+            --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
+            --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")" \
+            --dart-define SMOKE_HOSPITAL="$(jq -r .hospitalName "$ACCOUNT")" \
+            --dart-define SMOKE_PATIENT_NAME="$(jq -r .patientName "$ACCOUNT")"
+          gcloud firebase test android run \
+            --type instrumentation \
+            --app build/app/outputs/apk/debug/app-debug.apk \
+            --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            --device model=tokay,version=35,locale=en,orientation=portrait \
+            --results-bucket=gs://amdash-dev-test-lab-results
+
+      - name: Build + run ems Test Lab suite (Android)
+        run: |
+          set -e
+          ACCOUNT="$RUNNER_TEMP/ems-account.json"
+          cd flutter/apps/ems
+          patrol build android --target patrol_test/ems_test.dart \
+            --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
+            --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")"
+          gcloud firebase test android run \
+            --type instrumentation \
+            --app build/app/outputs/apk/debug/app-debug.apk \
+            --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            --device model=tokay,version=35,locale=en,orientation=portrait \
+            --results-bucket=gs://amdash-dev-test-lab-results
+
+      # Runs regardless of whether the steps above succeeded or failed —
+      # the GHA equivalent of Codemagic's `publishing.scripts` guarantee.
+      # `|| true` on each so one app's teardown failing doesn't skip the
+      # other's.
+      - name: Teardown physician + ems smoke accounts
+        if: always()
+        run: |
+          node run-physician-patrol-test.mjs --teardown --account-json="$RUNNER_TEMP/physician-account.json" || true
+          node run-ems-patrol-test.mjs --teardown --account-json="$RUNNER_TEMP/ems-account.json" || true
+        working-directory: scripts
