@@ -51,11 +51,24 @@ Future<void> tapText(PatrolIntegrationTester $, String text) =>
 /// session on Chrome, but not on Android's real renderer. Raw
 /// $.tester.enterText() only requires the widget to exist, same fix
 /// tapFinder already applies to taps.
+///
+/// Also waits for the field to exist at all before touching it — not
+/// just a fixed short pump — confirmed for real right here: this second
+/// call (the password field, right after tapping 'Continue') threw a
+/// bare RangeError on the very next Android run once sign-in itself got
+/// past its first hurdle. Patrol's own high-level .enterText() waits up
+/// to 10s before acting; a raw enterText with no existence check doesn't,
+/// and the 'Sign In' text this call waits on can visibly appear a moment
+/// before its own TextField actually mounts.
 Future<void> enterTextAt(
   PatrolIntegrationTester $,
   int index,
   String text,
 ) async {
+  for (var i = 0; i < 20; i++) {
+    if (find.byType(TextField).evaluate().length > index) break;
+    await $.pump(const Duration(milliseconds: 200));
+  }
   final finder = find.byType(TextField).at(index);
   try {
     await $.tester.ensureVisible(finder);

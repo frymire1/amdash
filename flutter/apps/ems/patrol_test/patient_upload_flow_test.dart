@@ -41,12 +41,18 @@ Future<void> tapKey(PatrolIntegrationTester $, String key) =>
 /// See ems_test.dart's equivalent helper for the full rationale — Patrol's
 /// own $(TextField).at(index).enterText() has the same hit-testable-check
 /// unreliability as its .tap(), confirmed for real on ems_test.dart's
-/// identical form.
+/// identical form. Also waits for the field to exist at all before
+/// touching it, not just a fixed short pump — see ems_test.dart's own
+/// comment on this same helper for the real Android failure that found it.
 Future<void> enterTextAt(
   PatrolIntegrationTester $,
   int index,
   String text,
 ) async {
+  for (var i = 0; i < 20; i++) {
+    if (find.byType(TextField).evaluate().length > index) break;
+    await $.pump(const Duration(milliseconds: 200));
+  }
   final finder = find.byType(TextField).at(index);
   try {
     await $.tester.ensureVisible(finder);

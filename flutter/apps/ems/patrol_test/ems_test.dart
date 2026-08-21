@@ -55,11 +55,24 @@ Future<void> tapKey(PatrolIntegrationTester $, String key) =>
 /// Number field existing but not yet hit-testable, timing out Patrol's
 /// own internal 10s wait. Raw $.tester.enterText() only requires the
 /// widget to exist, same fix as tapFinder already applies to taps.
+///
+/// Also waits for the field to exist at all before touching it — not
+/// just a fixed short pump — confirmed for real on Android (physician's
+/// patient_flow_test.dart, this exact helper copied there): unlike
+/// Patrol's own high-level .enterText() (which waits up to 10s before
+/// acting), a raw enterText with no existence check threw a bare
+/// RangeError when called right after a route transition whose TextField
+/// hadn't mounted yet, even though the *screen* had already visibly
+/// changed (e.g. new title text present).
 Future<void> enterTextAt(
   PatrolIntegrationTester $,
   int index,
   String text,
 ) async {
+  for (var i = 0; i < 20; i++) {
+    if (find.byType(TextField).evaluate().length > index) break;
+    await $.pump(const Duration(milliseconds: 200));
+  }
   final finder = find.byType(TextField).at(index);
   try {
     await $.tester.ensureVisible(finder);
