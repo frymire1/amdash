@@ -369,7 +369,7 @@ jobs:
           echo "=== gs://$BUCKET_PATH (recursive listing) ==="
           gcloud storage ls -r "gs://$BUCKET_PATH" || true
           echo "=== catting anything text-like found above ==="
-          for f in $(gcloud storage ls -r "gs://$BUCKET_PATH" 2>/dev/null | grep -E '\.(txt|xml|log)$|logcat$'); do
+          for f in $(gcloud storage ls -r "gs://$BUCKET_PATH" 2>/dev/null | grep -E '\.(txt|xml|log)$|logcat$|instrumentation\.results$'); do
             echo "--- $f ---"
             gcloud storage cat "$f" 2>&1 | head -c 20000
             echo
@@ -402,7 +402,7 @@ jobs:
           echo "=== gs://$BUCKET_PATH (recursive listing) ==="
           gcloud storage ls -r "gs://$BUCKET_PATH" || true
           echo "=== catting anything text-like found above ==="
-          for f in $(gcloud storage ls -r "gs://$BUCKET_PATH" 2>/dev/null | grep -E '\.(txt|xml|log)$|logcat$'); do
+          for f in $(gcloud storage ls -r "gs://$BUCKET_PATH" 2>/dev/null | grep -E '\.(txt|xml|log)$|logcat$|instrumentation\.results$'); do
             echo "--- $f ---"
             gcloud storage cat "$f" 2>&1 | head -c 20000
             echo
