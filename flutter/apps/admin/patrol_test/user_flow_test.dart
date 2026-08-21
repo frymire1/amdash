@@ -50,6 +50,24 @@ Future<void> tapText(PatrolIntegrationTester $, String text) =>
 Future<void> tapIcon(PatrolIntegrationTester $, IconData icon) =>
     tapFinder($, find.byIcon(icon).first);
 
+/// Patrol's own `$(...).enterText()` has the same missing-scroll gap as its
+/// `.tap()` (see tapFinder's comment above) — fine for fields already near
+/// the top of a page (sign-in, add-user), but the Settings page stacks
+/// several cards above HospitalManagementSection, putting its Name/Address
+/// fields below the fold on the fixed test viewport. ensureVisible first,
+/// same fix as every button interaction in this file already gets.
+Future<void> enterTextAt(
+  PatrolIntegrationTester $,
+  int index,
+  String text,
+) async {
+  final finder = find.byType(TextField).at(index);
+  await $.tester.ensureVisible(finder);
+  await $.pump(const Duration(milliseconds: 200));
+  await $.tester.enterText(finder, text);
+  await $.pump(const Duration(milliseconds: 200));
+}
+
 /// Polls with fixed pumps rather than a one-shot wait — network round
 /// trips (Cloud Function calls + Firestore listener updates) don't always
 /// land inside a short fixed pump.
@@ -230,8 +248,8 @@ void main() {
       // Geocoding API server-side (plus a possible Cloud Function cold
       // start), so this gets a longer budget than the Firestore-only
       // writes above.
-      await $(TextField).at(0).enterText(hospitalName);
-      await $(TextField).at(1).enterText('123 Main St, Toronto, ON');
+      await enterTextAt($, 0, hospitalName);
+      await enterTextAt($, 1, '123 Main St, Toronto, ON');
       await tapKey($, 'add_hospital_submit');
       await pumpUntil(
         $,
