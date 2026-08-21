@@ -147,6 +147,19 @@ try {
       target: 'patrol_test/ems_test.dart',
       dartDefines: { SMOKE_EMAIL: account.email, SMOKE_PASSWORD: account.password },
       device: process.env.PATROL_DEVICE || 'chrome',
+      // ems_test.dart never grants geolocation (it deliberately leaves
+      // live tracking off) — but LocationTrackingSection.initState()
+      // still calls Geolocator.getCurrentPosition() unconditionally on
+      // every mount of the upload/edit form regardless. With no
+      // permission decision at all, the browser leaves the request in
+      // "prompt" limbo indefinitely (no UI to click through in headless
+      // CI), so it only ever resolves via that call's own internal 12s
+      // Dart-side timeout — a real race window against Patrol's own 10s
+      // hit-test timeout, confirmed via a real GHA "Found 0 widgets with
+      // type TextField" right around that ~12s mark. Explicitly denying
+      // (empty permissions array, not omitted) makes the browser reject
+      // the request immediately instead, removing the race entirely.
+      webPermissions: [],
     });
   }
 } finally {
