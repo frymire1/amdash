@@ -301,9 +301,19 @@ jobs:
       # signal right now. Cheap (no APK build/upload/device time) sanity
       # check on whether tokay+API 35 is still a valid, supported Test Lab
       # catalog entry, to rule that in/out before spending real device time
-      # chasing other theories. Remove once root-caused.
-      - name: DEBUG - verify tokay/API 35 device catalog entry
-        run: gcloud firebase test android models list --filter="modelId:tokay"
+      # chasing other theories. First attempt used the wrong filter field
+      # (modelId isn't real — "WARNING: filter keys were not present in any
+      # resource: modelId", 0 items — but it also printed "WARNING: Some
+      # devices are deprecated", a real hint), so dump the full catalog
+      # this time and grep client-side instead of trusting --filter syntax
+      # I can't verify locally. Remove once root-caused.
+      - name: DEBUG - dump Android Test Lab device catalog
+        run: |
+          gcloud firebase test android models list --format=json > /tmp/models.json
+          echo "=== tokay entry (if any), raw JSON so field names are verifiable ==="
+          jq '.[] | select(.id == "tokay")' /tmp/models.json
+          echo "=== full catalog, default table format ==="
+          gcloud firebase test android models list
 
       # Seeding and teardown are split into their own steps (rather than
       # one seed->test->teardown script per app, the way web-e2e works)
