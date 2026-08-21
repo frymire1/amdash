@@ -55,7 +55,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_launcher_icons: ^0.14.4
-  patrol: ^4.8.0
+  patrol: ^4.9.0
   # patrol_test only — computes real TOTP codes from the on-screen secret
   # to drive mandatory MFA enrollment in e2e (see ems_test.dart); never
   # used by the shipping app.
