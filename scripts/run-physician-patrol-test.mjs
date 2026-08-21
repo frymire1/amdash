@@ -91,10 +91,26 @@ async function createSmokePhysicianAccount(db) {
     healthcareNumber: 'Unknown',
     destination: HOSPITAL_NAME,
     vitals: { heartRate: 82, bloodPressure: '120/80', oxygen: 98, temperature: 37 },
-    location: { latitude: 43.6426, longitude: -79.3871, address: '' },
     organizationId,
     status: 'active',
     submittedAt: FieldValue.serverTimestamp(),
+  });
+
+  // patient.location doesn't exist anymore (removed this session — GPS now
+  // only ever lives in this subcollection, seeded atomically alongside the
+  // patient doc by uploadPatientDocument in production). This seed script
+  // predates that and was still writing the old field directly, which the
+  // app silently ignores — PatientViewer's map gates on the live tracked
+  // position (patients/{id}/location/current), not a static field, so the
+  // map correctly never rendered. Confirmed via a real GHA failure
+  // ("Found 0 widgets with type GoogleMap").
+  await patientRef.collection('location').doc('current').set({
+    patientId: patientRef.id,
+    organizationId,
+    active: true,
+    latitude: 43.6426,
+    longitude: -79.3871,
+    updatedAt: FieldValue.serverTimestamp(),
   });
 
   return {
