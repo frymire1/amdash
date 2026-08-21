@@ -133,12 +133,20 @@ void main() {
         await pumpUntil($, () => find.text(hospitalName).evaluate().isNotEmpty);
         // The autocomplete overlay renders the option in its own overlay
         // route — the last match is the option, not the field's own text.
-        await tapFinder(
-          $,
-          find
-              .text(hospitalName)
-              .at(find.text(hospitalName).evaluate().length - 1),
+        // Tapped directly here, not via tapFinder — that helper's own
+        // ensureVisible + 200ms pump between receiving this finder and
+        // actually tapping it left a real window for the overlay to
+        // collapse first (confirmed via a real GHA "Bad state: No
+        // element": `.at(index)` is a *lazy*, re-evaluating finder, and by
+        // tap time the match count had already dropped from 2 back to 1,
+        // making the precomputed index out of bounds). No `await` between
+        // computing the index and tapping it here, so there's no
+        // opportunity for a rebuild to shrink the match count in between.
+        final hospitalMatches = find.text(hospitalName);
+        await $.tester.tap(
+          hospitalMatches.at(hospitalMatches.evaluate().length - 1),
         );
+        await $.pump(const Duration(milliseconds: 400));
         // The Autocomplete's options overlay stays mounted (a full-screen
         // AbsorbPointer, confirmed via --show-flutter-logs's hit-test
         // warning) as long as the field keeps focus and its query still
