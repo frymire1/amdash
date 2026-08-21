@@ -1,0 +1,167 @@
+// Cross-app verification (see scripts/run-patient-flow-e2e.mjs, which
+// orchestrates this alongside physician's incoming_patient_test.dart):
+// uploads a patient with live tracking enabled and a real destination
+// hospital selected, confirming it appears on this app's own dashboard.
+// The actual point of this test is what it leaves behind in Firestore —
+// physician's half of the flow checks that a real EMS upload (not an
+// Admin SDK-seeded patient, like patient_flow_test.dart uses) is what
+// makes a patient visible there. GPS is mocked via Playwright's
+// geolocation override (--web-geolocation, passed by the orchestrator),
+// not a real device fix — see run-patrol.mjs's webGeolocation param.
+import 'package:ems/firebase_options.dart';
+import 'package:ems/main.dart';
+import 'package:ems/screens/home_screen.dart';
+import 'package:ems/screens/patient_upload_screen.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:otp/otp.dart';
+import 'package:patrol/patrol.dart';
+
+// See ems_test.dart's fuller comment on why this app's Patrol tests use
+// raw WidgetTester taps instead of Patrol's own $(...).tap().
+Future<void> tapFinder(PatrolIntegrationTester $, Finder finder) async {
+  try {
+    await $.tester.ensureVisible(finder);
+  } catch (_) {
+    // Best-effort — see ems_test.dart's comment on why.
+  }
+  await $.pump(const Duration(milliseconds: 200));
+  await $.tester.tap(finder);
+  await $.pump(const Duration(milliseconds: 400));
+}
+
+Future<void> tapText(PatrolIntegrationTester $, String text) =>
+    tapFinder($, find.text(text));
+
+Future<void> tapKey(PatrolIntegrationTester $, String key) =>
+    tapFinder($, find.byKey(Key(key)));
+
+/// Polls with fixed pumps rather than a one-shot wait — see ems_test.dart's
+/// equivalent helper, which this mirrors.
+Future<void> pumpUntil(
+  PatrolIntegrationTester $,
+  bool Function() condition, {
+  int maxIterations = 50,
+}) async {
+  for (var i = 0; i < maxIterations; i++) {
+    if (condition()) return;
+    await $.pump(const Duration(milliseconds: 400));
+  }
+}
+
+/// See ems_test.dart's equivalent for the full rationale (no server-side
+/// shortcut exists for TOTP; this drives the real enrollment UI).
+Future<void> completeMfaEnrollment(PatrolIntegrationTester $) async {
+  await pumpUntil(
+    $,
+    () => find.byKey(const Key('mfa_secret_key')).evaluate().isNotEmpty,
+    maxIterations: 40,
+  );
+  final secret = $.tester
+      .widget<SelectableText>(find.byKey(const Key('mfa_secret_key')))
+      .data!;
+  final code = OTP.generateTOTPCodeString(
+    secret,
+    DateTime.now().millisecondsSinceEpoch,
+    algorithm: Algorithm.SHA1,
+    isGoogle: true,
+  );
+  await $(TextField).enterText(code);
+  await tapText($, 'Confirm');
+  await pumpUntil(
+    $,
+    () => find.byKey(const Key('mfa_secret_key')).evaluate().isEmpty,
+    maxIterations: 30,
+  );
+}
+
+void main() {
+  patrolTest('EMS uploads a live-tracked patient bound for a real hospital', (
+    $,
+  ) async {
+    const email = String.fromEnvironment('SMOKE_EMAIL');
+    const password = String.fromEnvironment('SMOKE_PASSWORD');
+    const hospitalName = String.fromEnvironment('SMOKE_HOSPITAL');
+    const patientName = String.fromEnvironment('SMOKE_PATIENT_NAME');
+    expect(email, isNotEmpty, reason: 'pass --dart-define=SMOKE_EMAIL=...');
+    expect(
+      password,
+      isNotEmpty,
+      reason: 'pass --dart-define=SMOKE_PASSWORD=...',
+    );
+    expect(
+      hospitalName,
+      isNotEmpty,
+      reason: 'pass --dart-define=SMOKE_HOSPITAL=...',
+    );
+    expect(
+      patientName,
+      isNotEmpty,
+      reason: 'pass --dart-define=SMOKE_PATIENT_NAME=...',
+    );
+
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    await $.pumpWidgetAndSettle(const ProviderScope(child: EmsApp()));
+
+    // Sign in.
+    await $(TextField).at(0).enterText(email);
+    await tapText($, 'Continue');
+    await pumpUntil($, () => find.text('Sign In').evaluate().isNotEmpty);
+    await $(TextField).at(0).enterText(password);
+    await tapText($, 'Sign In');
+
+    await completeMfaEnrollment($);
+
+    await pumpUntil(
+      $,
+      () => find.byType(HomeScreen).evaluate().isNotEmpty,
+      maxIterations: 50,
+    );
+
+    // Add a patient. Fields, by index: 0=Name, 1=Age, 2=Healthcare Number,
+    // 3=Heart Rate (Gender/Destination Hospital are dropdowns, not
+    // TextFields) — see ems_test.dart.
+    await tapText($, 'Add Patient');
+    await pumpUntil(
+      $,
+      () => find.byType(PatientUploadScreen).evaluate().isNotEmpty,
+    );
+    await $(TextField).at(0).enterText(patientName);
+    await $(TextField).at(2).enterText('TEST-12345');
+    await $(TextField).at(3).enterText('88');
+
+    // Unlike ems_test.dart, this test needs a real destination selected
+    // (physician's own patient list filters by it) and live tracking left
+    // ON (default) — the whole point here is exercising the GPS path
+    // ems_test.dart deliberately turns off.
+    await tapKey($, 'patient_destination_dropdown');
+    await tapKey($, 'patient_destination_option_$hospitalName');
+
+    // Confirms the mocked geolocation actually resolved through
+    // Geolocator.getCurrentPosition() before submitting — if
+    // --web-geolocation/--web-permissions weren't wired through
+    // correctly, this never turns "Tracking Active" and the test fails
+    // here with a clear signal, not a confusing later assertion.
+    await pumpUntil(
+      $,
+      () => find.text('Tracking Active').evaluate().isNotEmpty,
+      maxIterations: 40,
+    );
+
+    await tapKey($, 'patient_upload_submit');
+    await pumpUntil(
+      $,
+      () => find.text(patientName).evaluate().isNotEmpty,
+      maxIterations: 40,
+    );
+    expect(
+      find.text(patientName),
+      findsOneWidget,
+      reason: 'patient should appear on the home screen after upload',
+    );
+  });
+}

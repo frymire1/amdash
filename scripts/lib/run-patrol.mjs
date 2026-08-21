@@ -84,7 +84,21 @@ function killOrphanedWebServer(appDir) {
   });
 }
 
-export async function runPatrolTest({ appDir, target, dartDefines, device = 'chrome' }) {
+export async function runPatrolTest({
+  appDir,
+  target,
+  dartDefines,
+  device = 'chrome',
+  // Web-only (Playwright browser context options patrol_cli passes
+  // straight through) — mocks Geolocator.getCurrentPosition() so a
+  // headless CI browser (no real GPS, no location permission prompt UI to
+  // click through) can still exercise a real live-tracking flow. Plain
+  // objects here, JSON-encoded below right where the CLI expects a JSON
+  // string, rather than making every call site remember the exact
+  // '{"latitude": ..., "longitude": ...}' / '["geolocation"]' shapes.
+  webGeolocation,
+  webPermissions,
+}) {
   const resolvedDevice = await resolveDeviceId(device);
 
   return new Promise((resolve) => {
@@ -100,6 +114,34 @@ export async function runPatrolTest({ appDir, target, dartDefines, device = 'chr
       const quote = (arg) => (/\s/.test(arg) ? `"${arg}"` : arg);
       for (const [key, value] of Object.entries(dartDefines)) {
         args.push('--dart-define', quote(`${key}=${value}`));
+      }
+      // Best-effort escaping for local Windows testing — a naive
+      // `"${json}"` wrap left patrol_cli receiving `{latitude:43.66,...}`
+      // (cmd.exe strips every unescaped '"' as a quote-toggle, regardless
+      // of surrounding context — no quote characters survived at all).
+      // Backslash-escaping first (below) gets the quote characters
+      // through cmd.exe's OWN parsing intact, confirmed via a direct
+      // `cmd.exe /c` + a throwaway batch file that just echoed %*, but
+      // patrol.bat is itself a batch file that forwards to the real
+      // dart.exe executable via its own %* expansion — a *second* round
+      // of Windows command-line parsing this value passes through, which
+      // still isn't unmangling it correctly even with this escaping
+      // (confirmed: same "must be a valid JSON" error via a direct
+      // PowerShell invocation too, bypassing this file's spawn call
+      // entirely — so it's not specific to how this script quotes it).
+      // Chasing the exact right escaping through two nested layers of
+      // cmd.exe/batch parsing is a real Windows-only rabbit hole that
+      // doesn't affect CI at all: the POSIX branch below spawns `patrol`
+      // directly via execve with no shell involved, so this whole problem
+      // class doesn't exist there — args arrive at Dart's argv exactly as
+      // JSON.stringify produced them. Left as the best available attempt
+      // for local Windows dev convenience rather than fully solved.
+      const quoteJson = (value) => `"${JSON.stringify(value).replaceAll('"', '\\"')}"`;
+      if (webGeolocation) {
+        args.push('--web-geolocation', quoteJson(webGeolocation));
+      }
+      if (webPermissions) {
+        args.push('--web-permissions', quoteJson(webPermissions));
       }
       const extraPath = [FLUTTER_BIN, PUB_CACHE_BIN, process.env.Path ?? process.env.PATH ?? ''].join(
         path.delimiter,
@@ -129,6 +171,14 @@ export async function runPatrolTest({ appDir, target, dartDefines, device = 'chr
       // of the literal value).
       for (const [key, value] of Object.entries(dartDefines)) {
         args.push('--dart-define', `${key}=${value}`);
+      }
+      // No shell here either — no quoting needed, same reasoning as the
+      // dart-defines above.
+      if (webGeolocation) {
+        args.push('--web-geolocation', JSON.stringify(webGeolocation));
+      }
+      if (webPermissions) {
+        args.push('--web-permissions', JSON.stringify(webPermissions));
       }
 
       if (resolvedDevice === 'chrome' && !IS_MACOS) {

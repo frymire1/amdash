@@ -389,6 +389,7 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
                         _destination,
                         hospitalNames,
                         (value) => setState(() => _destination = value),
+                        keyPrefix: 'patient_destination',
                       ),
                     ]),
                     _section('Vitals', [
@@ -616,19 +617,38 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     );
   }
 
+  // keyPrefix is optional and only given to the one dropdown an e2e test
+  // actually needs to drive reliably (Destination Hospital, whose options
+  // are dynamic hospital names, not a small fixed set a plain find.text()
+  // could target unambiguously) — mirrors admin's edit_user_dialog.dart
+  // (DropdownButtonFormField + KeyedSubtree-wrapped option children;
+  // find.text() proved unreliable against this app family's dropdown
+  // overlays on Flutter Web, see tapFinder's comment in the patrol_test
+  // files). Gender/IV Size/IV Placement stay unkeyed — nothing drives
+  // them by key today.
   Widget _dropdown(
     String label,
     String? value,
     List<String> options,
-    ValueChanged<String?> onChanged,
-  ) {
+    ValueChanged<String?> onChanged, {
+    String? keyPrefix,
+  }) {
     final safeValue = options.contains(value) ? value : null;
     return DropdownButtonFormField<String>(
+      key: keyPrefix != null ? Key('${keyPrefix}_dropdown') : null,
       initialValue: safeValue,
       decoration: InputDecoration(labelText: label),
       items: [
         for (final option in options)
-          DropdownMenuItem(value: option, child: Text(option)),
+          DropdownMenuItem(
+            value: option,
+            child: keyPrefix != null
+                ? KeyedSubtree(
+                    key: Key('${keyPrefix}_option_$option'),
+                    child: Text(option),
+                  )
+                : Text(option),
+          ),
       ],
       onChanged: onChanged,
     );

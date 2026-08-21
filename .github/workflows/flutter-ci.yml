@@ -209,6 +209,21 @@ jobs:
         run: node run-ems-patrol-test.mjs
         working-directory: scripts
 
+      # Unlike the three above (each app's own UI against Admin
+      # SDK-seeded state), this drives the real cross-app path: an EMS
+      # account uploads a live-tracked patient through the EMS app's own
+      # UI (GPS mocked via Playwright's geolocation override, since a
+      # headless CI browser has no real GPS), then a physician account
+      # signs in and confirms that exact patient — not a seeded stand-in
+      # — shows up with a live map centered on the mocked coordinates.
+      # Patrol can't drive two apps in one process, so this is two
+      # sequential `patrol test` runs coordinated by shared, deterministic
+      # naming rather than any live signal between them — see
+      # run-patient-flow-e2e.mjs's own header comment.
+      - name: Run cross-app patient flow e2e (EMS upload -> physician view)
+        run: node run-patient-flow-e2e.mjs
+        working-directory: scripts
+
       - name: Upload Patrol reports
         if: failure()
         uses: actions/upload-artifact@v4
