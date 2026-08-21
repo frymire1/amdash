@@ -77,6 +77,29 @@ async function cleanup(db, auth, smokeAccountUid) {
   await auth.deleteUser(smokeAccountUid).catch(() => {});
   await db.doc(`users/${smokeAccountUid}`).delete().catch(() => {});
 
+  // Broad prefix sweep, not just this run's own account — an interrupted
+  // run (killed process, a Test Lab run that crashed between --seed-only
+  // and --teardown) otherwise orphans its account forever, since no
+  // *future* run would ever know to clean up an account it didn't create
+  // itself. Confirmed for real this session: accounts from days earlier
+  // still sitting in Firebase Auth, because this only ever deleted the
+  // one uid passed in. Same pattern admin's cleanup() already uses, and
+  // the same reasoning the patient sweep below already applied to
+  // patients specifically.
+  let deletedUsers = 0;
+  let pageToken;
+  do {
+    const page = await auth.listUsers(1000, pageToken);
+    for (const user of page.users) {
+      if (user.email?.startsWith('smoke-ems-') && user.uid !== smokeAccountUid) {
+        await auth.deleteUser(user.uid).catch(() => {});
+        await db.doc(`users/${user.uid}`).delete().catch(() => {});
+        deletedUsers++;
+      }
+    }
+    pageToken = page.pageToken;
+  } while (pageToken);
+
   // Belt-and-suspenders: the test deletes its own patient as its last
   // step, but if it failed partway through (after create, before delete),
   // sweep for anything left behind so it doesn't linger in test-org.
@@ -87,7 +110,10 @@ async function cleanup(db, auth, smokeAccountUid) {
     .get();
   for (const doc of patientSnap.docs) await doc.ref.delete();
 
-  console.log(`Cleanup: removed throwaway EMS account, ${patientSnap.size} leftover patient(s).`);
+  console.log(
+    `Cleanup: removed throwaway EMS account, ${deletedUsers} other leftover EMS account(s), ` +
+      `${patientSnap.size} leftover patient(s).`,
+  );
 }
 
 const { seedOnly, teardown, accountJsonPath } = parseArgs(process.argv.slice(2));

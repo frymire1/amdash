@@ -125,12 +125,55 @@ async function createSmokePhysicianAccount(db) {
 }
 
 async function cleanup(db, auth, account) {
-  if (!account) return;
-  await auth.deleteUser(account.uid).catch(() => {});
-  await db.doc(`users/${account.uid}`).delete().catch(() => {});
-  await db.doc(`hospitals/${account.hospitalId}`).delete().catch(() => {});
-  await db.doc(`patients/${account.patientId}`).delete().catch(() => {});
-  console.log('Cleanup: removed throwaway physician account, hospital, and patient.');
+  // Specific-reference deletes first (works even if the broad sweep below
+  // somehow misses a naming edge case) — then a broad prefix sweep as the
+  // real safety net. Deliberately not just "delete what this run made":
+  // an interrupted run (killed process, a Test Lab run that crashed
+  // between --seed-only and --teardown) orphans its account/hospital/
+  // patient forever otherwise, since no *future* run would ever know to
+  // clean up state it didn't create itself — confirmed for real this
+  // session (accounts from days earlier still sitting in Firestore/Auth,
+  // because this function only ever deleted its own single run's specific
+  // IDs). Same broad-sweep pattern admin's cleanup() already uses.
+  if (account) {
+    await auth.deleteUser(account.uid).catch(() => {});
+    await db.doc(`users/${account.uid}`).delete().catch(() => {});
+    await db.doc(`hospitals/${account.hospitalId}`).delete().catch(() => {});
+    await db.doc(`patients/${account.patientId}`).delete().catch(() => {});
+  }
+
+  let deletedUsers = 0;
+  let pageToken;
+  do {
+    const page = await auth.listUsers(1000, pageToken);
+    for (const user of page.users) {
+      if (user.email?.startsWith('smoke-physician-')) {
+        await auth.deleteUser(user.uid).catch(() => {});
+        await db.doc(`users/${user.uid}`).delete().catch(() => {});
+        deletedUsers++;
+      }
+    }
+    pageToken = page.pageToken;
+  } while (pageToken);
+
+  const hospSnap = await db
+    .collection('hospitals')
+    .where('name', '>=', 'Patrol Physician Test Hospital')
+    .where('name', '<', 'Patrol Physician Test Hospitc')
+    .get();
+  for (const doc of hospSnap.docs) await doc.ref.delete();
+
+  const patientSnap = await db
+    .collection('patients')
+    .where('name', '>=', 'Patrol Physician Test Patient')
+    .where('name', '<', 'Patrol Physician Test Patiend')
+    .get();
+  for (const doc of patientSnap.docs) await db.recursiveDelete(doc.ref);
+
+  console.log(
+    `Cleanup: removed ${deletedUsers} throwaway physician account(s), ${hospSnap.size} hospital(s), ` +
+      `${patientSnap.size} patient(s).`,
+  );
 }
 
 const { seedOnly, teardown, accountJsonPath } = parseArgs(process.argv.slice(2));
