@@ -85,6 +85,31 @@ Future<void> pumpUntil(
   }
 }
 
+/// `LocationTrackingSection`'s own async geolocation fetch (denied fast via
+/// `webPermissions: []` in run-ems-patrol-test.mjs) transitions from
+/// "Locating…" to this longer error text shortly after the form mounts —
+/// long enough to wrap onto a second line, shifting every widget below it
+/// (including the Save/submit button) down. Confirmed via a real GHA
+/// failure's Playwright accessibility snapshot: the edit form was still
+/// fully on-screen after a "submit" tap that silently landed on stale,
+/// pre-shift coordinates — the Add flow above happens to have enough
+/// intervening field entries for this to settle on its own, but Edit
+/// only touches one field first, leaving no such cushion. Waiting for
+/// this text up front, before touching any field, lets the shift happen
+/// before any tap's offset gets computed.
+Future<void> waitForLocationSettled(PatrolIntegrationTester $) async {
+  await pumpUntil(
+    $,
+    () => find
+        .text(
+          'Could not get your current location. Please allow location access and try again.',
+        )
+        .evaluate()
+        .isNotEmpty,
+    maxIterations: 30,
+  );
+}
+
 /// Every account requires TOTP MFA (`AppRouteGuard`'s `requireMfa` tier,
 /// checked right after auth) — a freshly created throwaway account has
 /// never enrolled, so sign-in always lands on /mfa-setup first. See
@@ -168,6 +193,7 @@ void main() {
       $,
       () => find.byType(PatientUploadScreen).evaluate().isNotEmpty,
     );
+    await waitForLocationSettled($);
     await enterTextAt($, 0, patientName);
     await enterTextAt($, 2, 'TEST-12345');
     await enterTextAt($, 3, '80');
@@ -221,6 +247,7 @@ void main() {
       () => find.text(patientName).evaluate().isNotEmpty,
       maxIterations: 40,
     );
+    await waitForLocationSettled($);
     await enterTextAt($, 3, '95');
     await tapKey($, 'patient_upload_submit');
     await pumpUntil(

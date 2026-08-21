@@ -222,6 +222,18 @@ void main() {
       () => find.text(patientName).evaluate().isNotEmpty,
       maxIterations: 40,
     );
+    // The location section re-fetches from scratch on every mount, even in
+    // edit mode — wait for it to resolve back to "Tracking Active" before
+    // touching Save. Same class of race ems_test.dart's own edit flow hit
+    // for real on GHA (there, the transition is to a much longer error
+    // message that wraps a line and visibly shifts the Save button; here
+    // it's "Locating…" -> "Tracking Active", a smaller shift, but cheap
+    // insurance against the same stale-offset-tap failure mode).
+    await pumpUntil(
+      $,
+      () => find.text('Tracking Active').evaluate().isNotEmpty,
+      maxIterations: 40,
+    );
     await enterTextAt($, 3, updatedHeartRate);
     await tapKey($, 'patient_upload_submit');
     await pumpUntil(
