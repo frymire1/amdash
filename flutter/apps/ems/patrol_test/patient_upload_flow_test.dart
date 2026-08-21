@@ -101,6 +101,13 @@ void main() {
       isNotEmpty,
       reason: 'pass --dart-define=SMOKE_PATIENT_NAME=...',
     );
+    // Fixed literals, not dart-defines — unlike email/password/hospital/
+    // patient name, these don't need to be unique per run (no collision
+    // risk), so there's nothing an orchestrator needs to generate or
+    // thread through. incoming_patient_test.dart hardcodes the same two
+    // values for its own assertions.
+    const initialHeartRate = '88';
+    const updatedHeartRate = '92';
 
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
@@ -132,7 +139,7 @@ void main() {
     );
     await $(TextField).at(0).enterText(patientName);
     await $(TextField).at(2).enterText('TEST-12345');
-    await $(TextField).at(3).enterText('88');
+    await $(TextField).at(3).enterText(initialHeartRate);
 
     // Unlike ems_test.dart, this test needs a real destination selected
     // (physician's own patient list filters by it) and live tracking left
@@ -162,6 +169,50 @@ void main() {
       find.text(patientName),
       findsOneWidget,
       reason: 'patient should appear on the home screen after upload',
+    );
+
+    // Now edit it — physician's half of this flow (incoming_patient_test.dart)
+    // checks that this real edit, not just the initial upload, is what it
+    // sees. Scoped to this specific patient's own card, same reasoning as
+    // ems_test.dart's equivalent helper: not by button text alone, since
+    // test-org can have other patients whose cards render the exact same
+    // "Edit" text.
+    Finder cardButtonFor(String name, String buttonLabel) => find.descendant(
+      of: find.ancestor(of: find.text(name), matching: find.byType(Card)),
+      matching: find.widgetWithText(OutlinedButton, buttonLabel),
+    );
+    final editButton = cardButtonFor(patientName, 'Edit');
+    await pumpUntil(
+      $,
+      () => editButton.evaluate().isNotEmpty,
+      maxIterations: 30,
+    );
+    await tapFinder($, editButton);
+
+    await pumpUntil(
+      $,
+      () => find.byType(PatientUploadScreen).evaluate().isNotEmpty,
+    );
+    // Wait for the async prefill (reads the uploaded-patients list) to
+    // land before touching a field, or a fast enterText can race it and
+    // get silently overwritten a moment later — see ems_test.dart's
+    // equivalent comment.
+    await pumpUntil(
+      $,
+      () => find.text(patientName).evaluate().isNotEmpty,
+      maxIterations: 40,
+    );
+    await $(TextField).at(3).enterText(updatedHeartRate);
+    await tapKey($, 'patient_upload_submit');
+    await pumpUntil(
+      $,
+      () => find.text('$updatedHeartRate bpm').evaluate().isNotEmpty,
+      maxIterations: 40,
+    );
+    expect(
+      find.text('$updatedHeartRate bpm'),
+      findsOneWidget,
+      reason: 'edited heart rate should show on the home screen',
     );
   });
 }
