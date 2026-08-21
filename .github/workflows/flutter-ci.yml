@@ -328,7 +328,6 @@ jobs:
 
       - name: Build + run physician Test Lab suite (Android)
         run: |
-          set -e
           ACCOUNT="$RUNNER_TEMP/physician-account.json"
           cd flutter/apps/physician
           patrol build android --target patrol_test/patient_flow_test.dart \
@@ -336,16 +335,48 @@ jobs:
             --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")" \
             --dart-define SMOKE_HOSPITAL="$(jq -r .hospitalName "$ACCOUNT")" \
             --dart-define SMOKE_PATIENT_NAME="$(jq -r .patientName "$ACCOUNT")"
+          # tee'd to a file (not just relying on the job log) so the next
+          # DEBUG step can grep the GCS bucket path back out of it — see
+          # that step's own comment for why. That next step runs via
+          # `if: always()`, so this step is deliberately left free to fail
+          # normally (no `|| true`) rather than swallowing whatever real
+          # pass/fail signal gcloud does give.
           gcloud firebase test android run \
             --type instrumentation \
             --app build/app/outputs/apk/debug/app-debug.apk \
             --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
             --device model=tokay,version=35,locale=en,orientation=portrait \
-            --results-bucket=gs://amdash-dev-test-lab-results
+            --results-bucket=gs://amdash-dev-test-lab-results \
+            2>&1 | tee /tmp/physician-testlab.log
+
+      # TEMPORARY diagnostic — see flutter-android-e2e's device-catalog
+      # diagnostic step above for the full background. tokay/API 35 turned
+      # out to be a perfectly valid, current, non-deprecated device, which
+      # rules that theory out — so the actual crash/error detail has to
+      # come from Test Lab's own raw results (logcat + instrumentation
+      # output), which the gcloud CLI's own summary never shows. Pull the
+      # GCS bucket path out of the run's own "Raw results will be stored
+      # in your GCS bucket at [...]" line, list everything in it, and cat
+      # anything that looks like text. Remove once root-caused.
+      - name: DEBUG - dump physician Test Lab raw results
+        if: always()
+        run: |
+          BUCKET_PATH=$(grep -oE 'storage/browser/[^]]+' /tmp/physician-testlab.log | head -1 | sed 's#storage/browser/##')
+          if [ -z "$BUCKET_PATH" ]; then
+            echo "Could not find a GCS bucket path in the run's output."
+            exit 0
+          fi
+          echo "=== gs://$BUCKET_PATH (recursive listing) ==="
+          gcloud storage ls -r "gs://$BUCKET_PATH" || true
+          echo "=== catting anything text-like found above ==="
+          for f in $(gcloud storage ls -r "gs://$BUCKET_PATH" 2>/dev/null | grep -E '\.(txt|xml|log)$|logcat$'); do
+            echo "--- $f ---"
+            gcloud storage cat "$f" 2>&1 | head -c 20000
+            echo
+          done
 
       - name: Build + run ems Test Lab suite (Android)
         run: |
-          set -e
           ACCOUNT="$RUNNER_TEMP/ems-account.json"
           cd flutter/apps/ems
           patrol build android --target patrol_test/ems_test.dart \
@@ -356,7 +387,26 @@ jobs:
             --app build/app/outputs/apk/debug/app-debug.apk \
             --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
             --device model=tokay,version=35,locale=en,orientation=portrait \
-            --results-bucket=gs://amdash-dev-test-lab-results
+            --results-bucket=gs://amdash-dev-test-lab-results \
+            2>&1 | tee /tmp/ems-testlab.log
+
+      # TEMPORARY diagnostic — see the physician one above, same rationale.
+      - name: DEBUG - dump ems Test Lab raw results
+        if: always()
+        run: |
+          BUCKET_PATH=$(grep -oE 'storage/browser/[^]]+' /tmp/ems-testlab.log | head -1 | sed 's#storage/browser/##')
+          if [ -z "$BUCKET_PATH" ]; then
+            echo "Could not find a GCS bucket path in the run's output."
+            exit 0
+          fi
+          echo "=== gs://$BUCKET_PATH (recursive listing) ==="
+          gcloud storage ls -r "gs://$BUCKET_PATH" || true
+          echo "=== catting anything text-like found above ==="
+          for f in $(gcloud storage ls -r "gs://$BUCKET_PATH" 2>/dev/null | grep -E '\.(txt|xml|log)$|logcat$'); do
+            echo "--- $f ---"
+            gcloud storage cat "$f" 2>&1 | head -c 20000
+            echo
+          done
 
       # Runs regardless of whether the steps above succeeded or failed —
       # the GHA equivalent of Codemagic's `publishing.scripts` guarantee.
