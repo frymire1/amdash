@@ -19,7 +19,7 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="Manage users, hospitals, and organizations.">
-  <meta name="theme-color" content="#2563EB">
+  <meta name="theme-color" content="#071618">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
@@ -35,13 +35,115 @@
 </head>
 <body>
   <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
-
-    For more details:
-    * https://docs.flutter.dev/platform-integration/web/initialization
+    Shown while flutter_bootstrap.js downloads and initializes the engine
+    (notably not instant — CanvasKit/Skwasm + the app's own JS payload are
+    real download+parse time on a cold cache). Pure CSS/HTML, no JS
+    framework — has to render and animate before any of that is available.
+    Removed via the 'flutter-first-frame' event Flutter's web engine
+    dispatches on window once it actually paints (documented pattern, see
+    https://docs.flutter.dev/platform-integration/web/initialization),
+    with a timeout fallback so a version/engine quirk that never fires the
+    event can't leave this stuck on screen forever.
   -->
+  <style>
+    #app-loading {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #071618;
+      z-index: 9999;
+      transition: opacity 320ms ease;
+    }
+    #app-loading.hide {
+      opacity: 0;
+      pointer-events: none;
+    }
+    #app-loading .mark {
+      width: min(45vw, 200px);
+      height: auto;
+      overflow: visible;
+    }
+
+    /* Resting mark: always visible, low-opacity brand line + arrow. */
+    #app-loading .wave-dim,
+    #app-loading .arrowhead {
+      fill: none;
+      stroke: #12A7B5;
+      stroke-width: 14;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      opacity: 0.22;
+    }
+    #app-loading .arrowhead {
+      fill: #12A7B5;
+      stroke: none;
+      transform-origin: 230px 70px;
+      animation: app-loading-fire 2.2s cubic-bezier(.34,0,.2,1) infinite;
+    }
+
+    /* Progressive "ignite" draw-on, traces the same path in full brightness. */
+    #app-loading .wave-lit {
+      fill: none;
+      stroke: #12A7B5;
+      stroke-width: 14;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+      filter: drop-shadow(0 0 6px rgba(18, 167, 181, 0.85));
+      animation: app-loading-ignite 2.2s cubic-bezier(.34,0,.2,1) infinite;
+    }
+
+    @keyframes app-loading-ignite {
+      0%   { stroke-dashoffset: 1; }
+      4%   { stroke-dashoffset: 1; }
+      70%  { stroke-dashoffset: 0; }
+      96%  { stroke-dashoffset: 0; }
+      99%  { stroke-dashoffset: 1; }
+      100% { stroke-dashoffset: 1; }
+    }
+
+    @keyframes app-loading-fire {
+      0%    { opacity: 0.22; transform: scale(1); }
+      88%   { opacity: 0.22; transform: scale(1); }
+      92%   { opacity: 1; transform: scale(1.1); }
+      96%   { opacity: 1; transform: scale(1.1); }
+      99.5% { opacity: 0.22; transform: scale(1); }
+      100%  { opacity: 0.22; transform: scale(1); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #app-loading .wave-lit { animation: none; stroke-dashoffset: 0; }
+      #app-loading .arrowhead { animation: none; opacity: 1; }
+    }
+  </style>
+  <div id="app-loading" role="status" aria-label="Loading AmDash">
+    <svg class="mark" viewBox="0 0 320 140" aria-hidden="true">
+      <path class="wave-dim" d="M14,70 L82,70 L92,80 L118,18 L150,124 L176,70 L230,70" />
+      <polygon class="arrowhead" points="230,40 230,100 300,70" />
+      <path class="wave-lit" pathLength="1" d="M14,70 L82,70 L92,80 L118,18 L150,124 L176,70 L230,70" />
+    </svg>
+  </div>
+  <script>
+    (function () {
+      var removed = false;
+      function removeLoader() {
+        if (removed) return;
+        removed = true;
+        var el = document.getElementById('app-loading');
+        if (!el) return;
+        el.classList.add('hide');
+        setTimeout(function () { el.remove(); }, 400);
+      }
+      window.addEventListener('flutter-first-frame', removeLoader);
+      // Safety net: if the event never fires for some reason, don't leave
+      // the user staring at a loader forever — worse than no loader at all.
+      setTimeout(removeLoader, 20000);
+    })();
+  </script>
+
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
