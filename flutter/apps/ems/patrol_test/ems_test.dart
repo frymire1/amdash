@@ -85,19 +85,24 @@ Future<void> pumpUntil(
   }
 }
 
-/// `LocationTrackingSection`'s own async geolocation fetch (denied fast via
-/// `webPermissions: []` in run-ems-patrol-test.mjs) transitions from
-/// "Locating…" to this longer error text shortly after the form mounts —
-/// long enough to wrap onto a second line, shifting every widget below it
-/// (including the Save/submit button) down. Confirmed via a real GHA
-/// failure's Playwright accessibility snapshot: the edit form was still
-/// fully on-screen after a "submit" tap that silently landed on stale,
-/// pre-shift coordinates — the Add flow above happens to have enough
-/// intervening field entries for this to settle on its own, but Edit
-/// only touches one field first, leaving no such cushion. Waiting for
-/// this text up front, before touching any field, lets the shift happen
-/// before any tap's offset gets computed.
-Future<void> waitForLocationSettled(PatrolIntegrationTester $) async {
+/// `PatientUploadScreen` pops an `AlertDialog` ("Location permission is
+/// off") the first time `LocationTrackingSection` reports its geolocation
+/// fetch failed — always, here, since `webPermissions: []`
+/// (run-ems-patrol-test.mjs) denies it outright. `showDialog`'s default
+/// `barrierDismissible: true` means its modal barrier swallows the very
+/// next tap dispatched anywhere else on screen, dismissing the dialog as a
+/// side effect instead of reaching whatever the test actually meant to
+/// tap. Confirmed via a real GHA failure's Playwright accessibility
+/// snapshot: the edit form was still fully on-screen after a "submit" tap
+/// that produced a "would not hit test" warning — the button was never
+/// actually pressed, because that tap landed on the barrier and closed the
+/// dialog instead. The Add flow above happens to have an earlier tap (the
+/// SwitchListTile toggle) that "wastes" itself dismissing the barrier
+/// before Save is ever reached, so it doesn't visibly break there — Edit
+/// has no such tap in between, so it does. Dismissing the dialog
+/// explicitly and deterministically, right after it appears, removes the
+/// dependence on an unrelated tap happening to eat it first.
+Future<void> dismissLocationPermissionDialog(PatrolIntegrationTester $) async {
   await pumpUntil(
     $,
     () => find
@@ -108,6 +113,9 @@ Future<void> waitForLocationSettled(PatrolIntegrationTester $) async {
         .isNotEmpty,
     maxIterations: 30,
   );
+  final okButton = find.widgetWithText(TextButton, 'OK');
+  await pumpUntil($, () => okButton.evaluate().isNotEmpty, maxIterations: 10);
+  await tapFinder($, okButton);
 }
 
 /// Every account requires TOTP MFA (`AppRouteGuard`'s `requireMfa` tier,
@@ -193,7 +201,7 @@ void main() {
       $,
       () => find.byType(PatientUploadScreen).evaluate().isNotEmpty,
     );
-    await waitForLocationSettled($);
+    await dismissLocationPermissionDialog($);
     await enterTextAt($, 0, patientName);
     await enterTextAt($, 2, 'TEST-12345');
     await enterTextAt($, 3, '80');
@@ -247,7 +255,7 @@ void main() {
       () => find.text(patientName).evaluate().isNotEmpty,
       maxIterations: 40,
     );
-    await waitForLocationSettled($);
+    await dismissLocationPermissionDialog($);
     await enterTextAt($, 3, '95');
     await tapKey($, 'patient_upload_submit');
     await pumpUntil(
