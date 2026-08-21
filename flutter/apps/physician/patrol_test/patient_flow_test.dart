@@ -157,9 +157,15 @@ void main() {
 
       // Self-heals a cache-flicker bounce back to /work-location, thanks
       // to the reactive guard fix — just needs enough time to settle.
+      // 20s wasn't enough once MFA enrollment (real network round trips:
+      // generate a TOTP secret, confirm a code) started running before
+      // this point too — confirmed via a real GHA timeout ("Found 1
+      // widget... did not find any visible (hit-testable) widgets") —
+      // whatever margin 20s had is smaller now that this check starts
+      // later in wall-clock time.
       await $(
         MainViewScreen,
-      ).waitUntilVisible(timeout: const Duration(seconds: 20));
+      ).waitUntilVisible(timeout: const Duration(seconds: 40));
 
       // The seeded patient should appear in the list.
       await $(
