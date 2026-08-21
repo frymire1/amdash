@@ -26,7 +26,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findOrganizationId, initFirebaseAdmin } from './lib/firebase-admin-cli.mjs';
+import { findOrganizationId, initFirebaseAdmin, isOldEnoughToSweep } from './lib/firebase-admin-cli.mjs';
 import { runPatrolTest } from './lib/run-patrol.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -52,6 +52,10 @@ async function createSmokeAdminAccount(db) {
 }
 
 async function cleanup(db, auth, smokeAccountUid) {
+  // Age-guarded for every account/hospital other than this run's own
+  // (always safe, always deleted regardless of age) — see
+  // isOldEnoughToSweep's own comment: without this, a broad sweep here
+  // can delete a concurrently-running sibling job's still-in-use state.
   let deletedUsers = 0;
   let pageToken;
   do {
@@ -59,7 +63,9 @@ async function cleanup(db, auth, smokeAccountUid) {
     for (const user of page.users) {
       if (
         user.uid === smokeAccountUid ||
-        (user.email && (user.email.startsWith('smoke-admin-') || user.email.startsWith('patrol-created-')))
+        (user.email &&
+          (user.email.startsWith('smoke-admin-') || user.email.startsWith('patrol-created-')) &&
+          isOldEnoughToSweep(user.email))
       ) {
         await auth.deleteUser(user.uid);
         await db.doc(`users/${user.uid}`).delete().catch(() => {});
@@ -74,9 +80,15 @@ async function cleanup(db, auth, smokeAccountUid) {
     .where('name', '>=', 'Patrol Test Hospital')
     .where('name', '<', 'Patrol Test Hospitc')
     .get();
-  for (const doc of hospSnap.docs) await doc.ref.delete();
+  let deletedHospitals = 0;
+  for (const doc of hospSnap.docs) {
+    if (isOldEnoughToSweep(doc.data().name)) {
+      await doc.ref.delete();
+      deletedHospitals++;
+    }
+  }
 
-  console.log(`Cleanup: removed ${deletedUsers} throwaway user(s), ${hospSnap.size} leftover hospital(s).`);
+  console.log(`Cleanup: removed ${deletedUsers} throwaway user(s), ${deletedHospitals} leftover hospital(s).`);
 }
 
 const credentialPath = initFirebaseAdmin('adminpatrol');

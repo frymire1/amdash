@@ -47,3 +47,42 @@ export async function findOrganizationId(db, name) {
   if (!organizationId) throw new Error(`${name} not found — seed it before running this script.`);
   return organizationId;
 }
+
+// Every run-*-patrol-test.mjs / run-patient-flow-e2e.mjs's own cleanup()
+// does a broad prefix sweep for accounts/hospitals/patients matching its
+// own naming convention — deliberately not scoped to "this run's own
+// state", so an interrupted run (killed process, a crash between
+// --seed-only and --teardown) doesn't orphan its state forever (see each
+// cleanup()'s own comment). But sibling e2e jobs run *concurrently* in the
+// same GHA workflow (flutter-web-e2e and flutter-android-e2e have no
+// `needs` between them), so an unscoped sweep can delete a DIFFERENT,
+// still-in-use run's state out from under it mid-test. Confirmed for
+// real: the web job's own physician cleanup deleted the Android job's
+// still-in-progress physician account ~2 minutes before that job ever got
+// to check it, surfacing as a baffling "Account not activated" screen
+// with no other explanation — the account genuinely no longer existed by
+// the time it was needed.
+//
+// Every name/email this codebase generates already embeds its own
+// creation timestamp (RUN_ID = Date.now(), a 13-digit epoch ms value) as
+// a trailing token — reusing that (rather than adding a separate
+// createdAt field to every seed write, and a Firestore query need for
+// each) lets a sweep skip anything young enough to plausibly still be a
+// sibling job's in-flight state, while still catching genuinely orphaned
+// debris from crashed/interrupted past runs once they're safely old.
+const MIN_SWEEP_AGE_MS = 20 * 60 * 1000; // 20 minutes — comfortably longer than any single e2e job takes.
+
+export function isOldEnoughToSweep(text, referenceMs = Date.now()) {
+  // Not a string at all (e.g. an encrypted `{ciphertext: ...}` field, like
+  // an EMS-app-uploaded patient's `name` — see patient_upload_service.dart)
+  // as much as a genuinely missing one: nothing to extract an age from
+  // either way, so don't let it block a sweep decision that some OTHER,
+  // analyzable field on the same document already made.
+  if (typeof text !== 'string') return true;
+  const match = text.match(/(\d{13})/);
+  // No embedded timestamp at all shouldn't happen for anything this
+  // codebase's own scripts create — sweep it rather than let a naming
+  // mismatch quietly leave debris behind forever.
+  if (!match) return true;
+  return referenceMs - Number(match[1]) > MIN_SWEEP_AGE_MS;
+}

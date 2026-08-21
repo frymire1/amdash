@@ -40,7 +40,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findOrganizationId, initFirebaseAdmin } from './lib/firebase-admin-cli.mjs';
+import { findOrganizationId, initFirebaseAdmin, isOldEnoughToSweep } from './lib/firebase-admin-cli.mjs';
 import { runPatrolTest } from './lib/run-patrol.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -142,12 +142,17 @@ async function cleanup(db, auth, account) {
     await db.doc(`patients/${account.patientId}`).delete().catch(() => {});
   }
 
+  // Age-guarded — see isOldEnoughToSweep's own comment: without this, this
+  // broad sweep can delete a concurrently-running sibling job's still-in-use
+  // account/hospital/patient (confirmed for real: the Android e2e job's
+  // physician account, mid-test, deleted by this exact sweep running in
+  // the parallel web e2e job).
   let deletedUsers = 0;
   let pageToken;
   do {
     const page = await auth.listUsers(1000, pageToken);
     for (const user of page.users) {
-      if (user.email?.startsWith('smoke-physician-')) {
+      if (user.email?.startsWith('smoke-physician-') && isOldEnoughToSweep(user.email)) {
         await auth.deleteUser(user.uid).catch(() => {});
         await db.doc(`users/${user.uid}`).delete().catch(() => {});
         deletedUsers++;
@@ -161,18 +166,30 @@ async function cleanup(db, auth, account) {
     .where('name', '>=', 'Patrol Physician Test Hospital')
     .where('name', '<', 'Patrol Physician Test Hospitc')
     .get();
-  for (const doc of hospSnap.docs) await doc.ref.delete();
+  let deletedHospitals = 0;
+  for (const doc of hospSnap.docs) {
+    if (isOldEnoughToSweep(doc.data().name)) {
+      await doc.ref.delete();
+      deletedHospitals++;
+    }
+  }
 
   const patientSnap = await db
     .collection('patients')
     .where('name', '>=', 'Patrol Physician Test Patient')
     .where('name', '<', 'Patrol Physician Test Patiend')
     .get();
-  for (const doc of patientSnap.docs) await db.recursiveDelete(doc.ref);
+  let deletedPatients = 0;
+  for (const doc of patientSnap.docs) {
+    if (isOldEnoughToSweep(doc.data().name)) {
+      await db.recursiveDelete(doc.ref);
+      deletedPatients++;
+    }
+  }
 
   console.log(
-    `Cleanup: removed ${deletedUsers} throwaway physician account(s), ${hospSnap.size} hospital(s), ` +
-      `${patientSnap.size} patient(s).`,
+    `Cleanup: removed ${deletedUsers} throwaway physician account(s), ${deletedHospitals} hospital(s), ` +
+      `${deletedPatients} patient(s).`,
   );
 }
 

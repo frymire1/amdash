@@ -41,7 +41,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findOrganizationId, initFirebaseAdmin } from './lib/firebase-admin-cli.mjs';
+import { findOrganizationId, initFirebaseAdmin, isOldEnoughToSweep } from './lib/firebase-admin-cli.mjs';
 import { runPatrolTest } from './lib/run-patrol.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -85,13 +85,16 @@ async function cleanup(db, auth, smokeAccountUid) {
   // still sitting in Firebase Auth, because this only ever deleted the
   // one uid passed in. Same pattern admin's cleanup() already uses, and
   // the same reasoning the patient sweep below already applied to
-  // patients specifically.
+  // patients specifically. Age-guarded (isOldEnoughToSweep) on top of
+  // that — a broad sweep with no age check can delete a
+  // concurrently-running sibling job's still-in-use account (confirmed
+  // for real: see that function's own comment).
   let deletedUsers = 0;
   let pageToken;
   do {
     const page = await auth.listUsers(1000, pageToken);
     for (const user of page.users) {
-      if (user.email?.startsWith('smoke-ems-') && user.uid !== smokeAccountUid) {
+      if (user.email?.startsWith('smoke-ems-') && user.uid !== smokeAccountUid && isOldEnoughToSweep(user.email)) {
         await auth.deleteUser(user.uid).catch(() => {});
         await db.doc(`users/${user.uid}`).delete().catch(() => {});
         deletedUsers++;

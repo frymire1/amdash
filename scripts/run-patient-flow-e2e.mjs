@@ -29,7 +29,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findOrganizationId, initFirebaseAdmin } from './lib/firebase-admin-cli.mjs';
+import { findOrganizationId, initFirebaseAdmin, isOldEnoughToSweep } from './lib/firebase-admin-cli.mjs';
 import { runPatrolTest } from './lib/run-patrol.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -104,12 +104,21 @@ async function seed(db) {
 }
 
 async function cleanup(db, auth) {
+  // Age-guarded (isOldEnoughToSweep) — a broad sweep with no age check can
+  // delete a concurrently-running sibling run's still-in-use account/
+  // hospital/patient (e.g. two overlapping pushes both triggering this
+  // same script) — see that function's own comment for the real GHA
+  // failure this was confirmed against.
   let deletedUsers = 0;
   let pageToken;
   do {
     const page = await auth.listUsers(1000, pageToken);
     for (const user of page.users) {
-      if (user.email && (user.email.startsWith('smoke-ems-flow-') || user.email.startsWith('smoke-physician-flow-'))) {
+      if (
+        user.email &&
+        (user.email.startsWith('smoke-ems-flow-') || user.email.startsWith('smoke-physician-flow-')) &&
+        isOldEnoughToSweep(user.email)
+      ) {
         await auth.deleteUser(user.uid);
         await db.doc(`users/${user.uid}`).delete().catch(() => {});
         deletedUsers++;
@@ -123,7 +132,13 @@ async function cleanup(db, auth) {
     .where('name', '>=', 'Patrol Flow Test Hospital')
     .where('name', '<', 'Patrol Flow Test Hospitc')
     .get();
-  for (const doc of hospSnap.docs) await doc.ref.delete();
+  let deletedHospitals = 0;
+  for (const doc of hospSnap.docs) {
+    if (isOldEnoughToSweep(doc.data().name)) {
+      await doc.ref.delete();
+      deletedHospitals++;
+    }
+  }
 
   // The patient itself (created by the EMS app, not this script) — matched
   // by `destination`, NOT `name`. `name` is encrypted client-side by the
@@ -143,11 +158,17 @@ async function cleanup(db, auth) {
     .where('destination', '>=', 'Patrol Flow Test Hospital')
     .where('destination', '<', 'Patrol Flow Test Hospitc')
     .get();
-  for (const doc of patientSnap.docs) await db.recursiveDelete(doc.ref);
+  let deletedPatients = 0;
+  for (const doc of patientSnap.docs) {
+    if (isOldEnoughToSweep(doc.data().destination)) {
+      await db.recursiveDelete(doc.ref);
+      deletedPatients++;
+    }
+  }
 
   console.log(
-    `Cleanup: removed ${deletedUsers} throwaway user(s), ${hospSnap.size} leftover hospital(s), ` +
-      `${patientSnap.size} leftover patient(s).`,
+    `Cleanup: removed ${deletedUsers} throwaway user(s), ${deletedHospitals} leftover hospital(s), ` +
+      `${deletedPatients} leftover patient(s).`,
   );
 }
 
