@@ -285,31 +285,34 @@ void main() {
       );
       expect(find.text(hospitalName), findsNothing);
 
-      // Still on Settings — toggle retention.
+      // Still on Settings — toggle retention. Scoped to .first: the
+      // Settings page has grown a Switch per card since this was written
+      // (Data Retention, Patient Record Audit Logging, Patient Data
+      // Encryption) — a bare find.byType(Switch) now matches all three,
+      // and Data Retention is the first card, so .first is it specifically.
+      final retentionSwitch = find.byType(Switch).first;
 
       // The Switch's value reflects a live Firestore listener, not local
       // optimistic state (see the screen's own doc comment), so it only
       // flips once the Cloud Function write round trips back through the
       // listener — a flat pump isn't a reliable wait for that, poll for it.
-      final initialValue = $.tester.widget<Switch>(find.byType(Switch)).value;
-      await tapFinder($, find.byType(Switch));
+      final initialValue = $.tester.widget<Switch>(retentionSwitch).value;
+      await tapFinder($, retentionSwitch);
       await pumpUntil(
         $,
-        () =>
-            $.tester.widget<Switch>(find.byType(Switch)).value != initialValue,
+        () => $.tester.widget<Switch>(retentionSwitch).value != initialValue,
         maxIterations: 40,
       );
-      expect($.tester.widget<Switch>(find.byType(Switch)).value, !initialValue);
+      expect($.tester.widget<Switch>(retentionSwitch).value, !initialValue);
 
       // Toggle it back so the org's setting isn't left changed.
-      await tapFinder($, find.byType(Switch));
+      await tapFinder($, retentionSwitch);
       await pumpUntil(
         $,
-        () =>
-            $.tester.widget<Switch>(find.byType(Switch)).value == initialValue,
+        () => $.tester.widget<Switch>(retentionSwitch).value == initialValue,
         maxIterations: 40,
       );
-      expect($.tester.widget<Switch>(find.byType(Switch)).value, initialValue);
+      expect($.tester.widget<Switch>(retentionSwitch).value, initialValue);
     },
   );
 }
