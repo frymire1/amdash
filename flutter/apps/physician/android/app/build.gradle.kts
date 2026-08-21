@@ -26,6 +26,18 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // Patrol's own native Android automation — see
+        // android/app/src/androidTest/.../MainActivityTest.java for why this
+        // (and the testOptions/dependencies below) matters: without it, the
+        // Test Lab APK Gradle produces has no configured way to run that
+        // host class at all.
+        testInstrumentationRunner = "pl.leancode.patrol.PatrolJUnitRunner"
+        testInstrumentationRunnerArguments["clearPackageData"] = "true"
+    }
+
+    testOptions {
+        execution = "ANDROIDX_TEST_ORCHESTRATOR"
     }
 
     buildTypes {
@@ -34,7 +46,19 @@ android {
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
+        // `patrol build android` builds the debug variant — ProGuard/R8
+        // minification (off by default for debug, restated explicitly per
+        // Patrol's own setup doc) can strip Patrol's classes and surface as
+        // a ClassNotFoundException at instrumentation time.
+        debug {
+            isMinifyEnabled = false
+            isShrinkResources = false
+        }
     }
+}
+
+dependencies {
+    androidTestUtil("androidx.test:orchestrator:1.5.1")
 }
 
 kotlin {

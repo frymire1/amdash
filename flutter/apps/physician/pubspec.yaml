@@ -76,6 +76,18 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_native_splash: ^2.4.8
 
+# Read by patrol_cli — package_name feeds the PATROL_APP_PACKAGE_NAME
+# dart-define and `patrol test`'s own instrumentation-component
+# resolution. This section was missing entirely (found while root-causing
+# why Android Test Lab's "e2e" runs had been silently testing nothing —
+# see android/app/src/androidTest/.../MainActivityTest.java, the actual
+# fix for that) — restoring it per Patrol's official setup doc even
+# though it wasn't itself the cause of the empty-APK bug.
+patrol:
+  app_name: AmDash Physician
+  android:
+    package_name: com.amdash.physician
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
