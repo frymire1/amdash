@@ -38,6 +38,26 @@ Future<void> tapText(PatrolIntegrationTester $, String text) =>
 Future<void> tapKey(PatrolIntegrationTester $, String key) =>
     tapFinder($, find.byKey(Key(key)));
 
+/// See ems_test.dart's equivalent helper for the full rationale — Patrol's
+/// own $(TextField).at(index).enterText() has the same hit-testable-check
+/// unreliability as its .tap(), confirmed for real on ems_test.dart's
+/// identical form.
+Future<void> enterTextAt(
+  PatrolIntegrationTester $,
+  int index,
+  String text,
+) async {
+  final finder = find.byType(TextField).at(index);
+  try {
+    await $.tester.ensureVisible(finder);
+  } catch (_) {
+    // Best-effort — see tapFinder's comment above.
+  }
+  await $.pump(const Duration(milliseconds: 200));
+  await $.tester.enterText(finder, text);
+  await $.pump(const Duration(milliseconds: 400));
+}
+
 /// Polls with fixed pumps rather than a one-shot wait — see ems_test.dart's
 /// equivalent helper, which this mirrors.
 Future<void> pumpUntil(
@@ -137,9 +157,9 @@ void main() {
       $,
       () => find.byType(PatientUploadScreen).evaluate().isNotEmpty,
     );
-    await $(TextField).at(0).enterText(patientName);
-    await $(TextField).at(2).enterText('TEST-12345');
-    await $(TextField).at(3).enterText(initialHeartRate);
+    await enterTextAt($, 0, patientName);
+    await enterTextAt($, 2, 'TEST-12345');
+    await enterTextAt($, 3, initialHeartRate);
 
     // Unlike ems_test.dart, this test needs a real destination selected
     // (physician's own patient list filters by it) and live tracking left
@@ -202,7 +222,7 @@ void main() {
       () => find.text(patientName).evaluate().isNotEmpty,
       maxIterations: 40,
     );
-    await $(TextField).at(3).enterText(updatedHeartRate);
+    await enterTextAt($, 3, updatedHeartRate);
     await tapKey($, 'patient_upload_submit');
     await pumpUntil(
       $,

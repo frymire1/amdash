@@ -49,6 +49,28 @@ Future<void> tapText(PatrolIntegrationTester $, String text) =>
 Future<void> tapKey(PatrolIntegrationTester $, String key) =>
     tapFinder($, find.byKey(Key(key)));
 
+/// Patrol's own $(TextField).at(index).enterText() has the same
+/// hit-testable-check unreliability as its .tap() (see tapFinder's
+/// comment above) — confirmed for real: a GHA run found the Healthcare
+/// Number field existing but not yet hit-testable, timing out Patrol's
+/// own internal 10s wait. Raw $.tester.enterText() only requires the
+/// widget to exist, same fix as tapFinder already applies to taps.
+Future<void> enterTextAt(
+  PatrolIntegrationTester $,
+  int index,
+  String text,
+) async {
+  final finder = find.byType(TextField).at(index);
+  try {
+    await $.tester.ensureVisible(finder);
+  } catch (_) {
+    // Best-effort — see tapFinder's comment above.
+  }
+  await $.pump(const Duration(milliseconds: 200));
+  await $.tester.enterText(finder, text);
+  await $.pump(const Duration(milliseconds: 400));
+}
+
 /// Polls with fixed pumps rather than a one-shot wait — network round trips
 /// (Firestore writes + listener updates) don't always land inside a short
 /// fixed pump.
@@ -146,9 +168,9 @@ void main() {
       $,
       () => find.byType(PatientUploadScreen).evaluate().isNotEmpty,
     );
-    await $(TextField).at(0).enterText(patientName);
-    await $(TextField).at(2).enterText('TEST-12345');
-    await $(TextField).at(3).enterText('80');
+    await enterTextAt($, 0, patientName);
+    await enterTextAt($, 2, 'TEST-12345');
+    await enterTextAt($, 3, '80');
     // Live tracking calls Geolocator.getCurrentPosition, which needs a
     // real, granted browser geolocation permission this CI environment
     // doesn't have — turn it off so submit doesn't depend on that.
@@ -199,7 +221,7 @@ void main() {
       () => find.text(patientName).evaluate().isNotEmpty,
       maxIterations: 40,
     );
-    await $(TextField).at(3).enterText('95');
+    await enterTextAt($, 3, '95');
     await tapKey($, 'patient_upload_submit');
     await pumpUntil(
       $,
