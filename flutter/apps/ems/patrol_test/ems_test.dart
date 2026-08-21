@@ -141,7 +141,7 @@ Future<void> completeMfaEnrollment(PatrolIntegrationTester $) async {
     algorithm: Algorithm.SHA1,
     isGoogle: true,
   );
-  await $(TextField).enterText(code);
+  await enterTextAt($, 0, code);
   await tapText($, 'Confirm');
   await pumpUntil(
     $,
@@ -169,11 +169,18 @@ void main() {
     );
     await $.pumpWidgetAndSettle(const ProviderScope(child: EmsApp()));
 
-    // Sign in.
-    await $(TextField).at(0).enterText(email);
+    // Sign in. Was Patrol's own $(TextField).at(0).enterText() — reliable
+    // all session on Chrome, but this is the first time this exact line
+    // ever ran for real on Android (Firebase Test Lab's Android e2e job
+    // had been silently running zero tests until the native Patrol setup
+    // was fixed — see android/app/src/androidTest/.../MainActivityTest.java).
+    // First real run hit the identical hit-test unreliability
+    // enterTextAt's own doc comment already covers, just on a different
+    // platform/renderer than where it was originally found.
+    await enterTextAt($, 0, email);
     await tapText($, 'Continue');
     await pumpUntil($, () => find.text('Sign In').evaluate().isNotEmpty);
-    await $(TextField).at(0).enterText(password);
+    await enterTextAt($, 0, password);
     await tapText($, 'Sign In');
 
     await completeMfaEnrollment($);

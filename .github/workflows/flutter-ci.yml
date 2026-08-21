@@ -345,6 +345,14 @@ jobs:
 
       - name: Build + run physician Test Lab suite (Android)
         run: |
+          # Without pipefail, `gcloud ... | tee file` takes tee's exit code
+          # (always 0), not gcloud's — silently turning a real test FAILURE
+          # into a green step. Confirmed for real: once the actual Patrol
+          # native setup was fixed (see MainActivityTest.java), Test Lab
+          # started reporting genuine "1 test cases failed" outcomes, yet
+          # this step still showed a checkmark. bash -e (GHA's default
+          # shell) does not imply pipefail on its own.
+          set -o pipefail
           ACCOUNT="$RUNNER_TEMP/physician-account.json"
           cd flutter/apps/physician
           patrol build android --target patrol_test/patient_flow_test.dart \
@@ -357,7 +365,8 @@ jobs:
           # that step's own comment for why. That next step runs via
           # `if: always()`, so this step is deliberately left free to fail
           # normally (no `|| true`) rather than swallowing whatever real
-          # pass/fail signal gcloud does give.
+          # pass/fail signal gcloud does give — pipefail above is what
+          # actually makes that true now.
           gcloud firebase test android run \
             --type instrumentation \
             --app build/app/outputs/apk/debug/app-debug.apk \
@@ -394,6 +403,8 @@ jobs:
 
       - name: Build + run ems Test Lab suite (Android)
         run: |
+          # See physician's identical step above for why this matters.
+          set -o pipefail
           ACCOUNT="$RUNNER_TEMP/ems-account.json"
           cd flutter/apps/ems
           patrol build android --target patrol_test/ems_test.dart \

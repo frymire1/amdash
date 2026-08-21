@@ -41,6 +41,32 @@ Future<void> tapFinder(PatrolIntegrationTester $, Finder finder) async {
 Future<void> tapText(PatrolIntegrationTester $, String text) =>
     tapFinder($, find.text(text));
 
+/// Patrol's own $(TextField).at(index).enterText() has the same
+/// hit-testable-check unreliability as its .tap() (see tapFinder's
+/// comment above) — confirmed for real on Firebase Test Lab's Android
+/// e2e job, the very first time this line ever actually ran on a device
+/// (that job had been silently running zero tests until the native
+/// Patrol setup was fixed — see
+/// android/app/src/androidTest/.../MainActivityTest.java). Reliable all
+/// session on Chrome, but not on Android's real renderer. Raw
+/// $.tester.enterText() only requires the widget to exist, same fix
+/// tapFinder already applies to taps.
+Future<void> enterTextAt(
+  PatrolIntegrationTester $,
+  int index,
+  String text,
+) async {
+  final finder = find.byType(TextField).at(index);
+  try {
+    await $.tester.ensureVisible(finder);
+  } catch (_) {
+    // Best-effort — see tapFinder's comment above.
+  }
+  await $.pump(const Duration(milliseconds: 200));
+  await $.tester.enterText(finder, text);
+  await $.pump(const Duration(milliseconds: 400));
+}
+
 /// Polls with fixed pumps rather than a one-shot wait — see admin's
 /// user_flow_test.dart, whose equivalent helper this mirrors.
 Future<void> pumpUntil(
@@ -78,7 +104,7 @@ Future<void> completeMfaEnrollment(PatrolIntegrationTester $) async {
     algorithm: Algorithm.SHA1,
     isGoogle: true,
   );
-  await $(TextField).enterText(code);
+  await enterTextAt($, 0, code);
   await tapText($, 'Confirm');
   await pumpUntil(
     $,
@@ -116,11 +142,11 @@ void main() {
       await $.pumpWidgetAndSettle(const ProviderScope(child: PhysicianApp()));
 
       // Sign in.
-      await $(TextField).at(0).enterText(email);
+      await enterTextAt($, 0, email);
       await tapText($, 'Continue');
 
       await pumpUntil($, () => find.text('Sign In').evaluate().isNotEmpty);
-      await $(TextField).at(0).enterText(password);
+      await enterTextAt($, 0, password);
       await tapText($, 'Sign In');
 
       await completeMfaEnrollment($);
@@ -129,7 +155,7 @@ void main() {
       // one from a previous run.
       await $.pump(const Duration(seconds: 2));
       if ($('Select Your Hospital').exists) {
-        await $(TextField).at(0).enterText(hospitalName);
+        await enterTextAt($, 0, hospitalName);
         await pumpUntil($, () => find.text(hospitalName).evaluate().isNotEmpty);
         // The autocomplete overlay renders the option in its own overlay
         // route — the last match is the option, not the field's own text.
