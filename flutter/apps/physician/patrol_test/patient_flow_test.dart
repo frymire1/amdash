@@ -119,7 +119,7 @@ void main() {
       await $(TextField).at(0).enterText(email);
       await tapText($, 'Continue');
 
-      await $('Sign In').waitUntilVisible();
+      await pumpUntil($, () => find.text('Sign In').evaluate().isNotEmpty);
       await $(TextField).at(0).enterText(password);
       await tapText($, 'Sign In');
 
@@ -130,7 +130,7 @@ void main() {
       await $.pump(const Duration(seconds: 2));
       if ($('Select Your Hospital').exists) {
         await $(TextField).at(0).enterText(hospitalName);
-        await $(hospitalName).waitUntilVisible();
+        await pumpUntil($, () => find.text(hospitalName).evaluate().isNotEmpty);
         // The autocomplete overlay renders the option in its own overlay
         // route — the last match is the option, not the field's own text.
         await tapFinder(
@@ -157,25 +157,37 @@ void main() {
 
       // Self-heals a cache-flicker bounce back to /work-location, thanks
       // to the reactive guard fix — just needs enough time to settle.
-      // 20s wasn't enough once MFA enrollment (real network round trips:
-      // generate a TOTP secret, confirm a code) started running before
-      // this point too — confirmed via a real GHA timeout ("Found 1
-      // widget... did not find any visible (hit-testable) widgets") —
-      // whatever margin 20s had is smaller now that this check starts
-      // later in wall-clock time.
-      await $(
-        MainViewScreen,
-      ).waitUntilVisible(timeout: const Duration(seconds: 40));
+      // Was $(MainViewScreen).waitUntilVisible(...), bumped from 20s to
+      // 40s once already, but still timed out — confirmed via a real GHA
+      // run's own Playwright accessibility snapshot that the screen was
+      // actually fully rendered and interactive (patient list, patient
+      // card, everything) at the moment it "failed". That's Patrol's own
+      // hit-test check being unreliable here, the same class of flakiness
+      // tapFinder's comment above already documents for taps — pumpUntil
+      // + find.byType().evaluate() (existence, not hit-testability) is
+      // the proven fix throughout this codebase (see admin's
+      // user_flow_test.dart, which relies on it exclusively and passes
+      // reliably).
+      await pumpUntil(
+        $,
+        () => find.byType(MainViewScreen).evaluate().isNotEmpty,
+        maxIterations: 100,
+      );
 
       // The seeded patient should appear in the list.
-      await $(
-        patientName,
-      ).waitUntilVisible(timeout: const Duration(seconds: 15));
+      await pumpUntil(
+        $,
+        () => find.text(patientName).evaluate().isNotEmpty,
+        maxIterations: 40,
+      );
       await tapFinder($, find.text(patientName).first);
 
       // Patient viewer should now show this patient's info/vitals, and a
       // real Google Map for its uploaded pickup location.
-      await $('Destination Hospital').waitUntilVisible();
+      await pumpUntil(
+        $,
+        () => find.text('Destination Hospital').evaluate().isNotEmpty,
+      );
       expect($('Vital Signs'), findsOneWidget);
       expect(
         $(GoogleMap),

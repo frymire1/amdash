@@ -117,19 +117,35 @@ void main() {
     // Sign in.
     await $(TextField).at(0).enterText(email);
     await tapText($, 'Continue');
-    await $('Sign In').waitUntilVisible();
+    await pumpUntil($, () => find.text('Sign In').evaluate().isNotEmpty);
     await $(TextField).at(0).enterText(password);
     await tapText($, 'Sign In');
 
     await completeMfaEnrollment($);
 
-    await $(HomeScreen).waitUntilVisible(timeout: const Duration(seconds: 20));
+    // Was $(HomeScreen).waitUntilVisible(...) — Patrol's own hit-test
+    // check proved unreliable on Flutter Web here (confirmed for the
+    // physician app's equivalent MainViewScreen check via a real GHA
+    // run's Playwright accessibility snapshot showing the screen was
+    // actually fully rendered at the moment it "failed" to be
+    // hit-testable — see patient_flow_test.dart's fuller comment on this
+    // same fix). pumpUntil + find.byType().evaluate() checks existence,
+    // not hit-testability, and is the proven pattern throughout this
+    // codebase (admin's user_flow_test.dart relies on it exclusively).
+    await pumpUntil(
+      $,
+      () => find.byType(HomeScreen).evaluate().isNotEmpty,
+      maxIterations: 50,
+    );
 
     // Add a patient. Fields, by index, on this form: 0=Name, 1=Age,
     // 2=Healthcare Number, 3=Heart Rate (Gender/Destination Hospital are
     // dropdowns, not TextFields, and aren't required to submit).
     await tapText($, 'Add Patient');
-    await $(PatientUploadScreen).waitUntilVisible();
+    await pumpUntil(
+      $,
+      () => find.byType(PatientUploadScreen).evaluate().isNotEmpty,
+    );
     await $(TextField).at(0).enterText(patientName);
     await $(TextField).at(2).enterText('TEST-12345');
     await $(TextField).at(3).enterText('80');
@@ -171,7 +187,10 @@ void main() {
     }
 
     await tapCardButton('Edit');
-    await $(PatientUploadScreen).waitUntilVisible();
+    await pumpUntil(
+      $,
+      () => find.byType(PatientUploadScreen).evaluate().isNotEmpty,
+    );
     // Wait for the async prefill (reads the uploaded-patients list) to
     // land before touching a field, or a fast enterText can race it and
     // get silently overwritten a moment later.
@@ -195,7 +214,10 @@ void main() {
 
     // Delete it.
     await tapCardButton('Delete');
-    await $('Delete patient?').waitUntilVisible();
+    await pumpUntil(
+      $,
+      () => find.text('Delete patient?').evaluate().isNotEmpty,
+    );
     // The dialog's own confirm button is a FilledButton — distinct from
     // the card's OutlinedButton of the same label, so no extra scoping
     // needed to avoid hitting the card's button again by mistake.
