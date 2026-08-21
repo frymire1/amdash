@@ -148,28 +148,42 @@ void main() {
         $,
         () => find.text('Destination Hospital').evaluate().isNotEmpty,
       );
+      await pumpUntil($, () => find.byType(GoogleMap).evaluate().isNotEmpty);
       expect(
         $(GoogleMap),
         findsOneWidget,
         reason: 'patient has a live GPS fix, so the map should render',
       );
 
-      // The strong check: not just that a map exists, but that it's
-      // centered on the exact coordinates ems's test mocked via
-      // --web-geolocation (see patient_viewer.dart's _mapCard, which
-      // formats this same string from the live vehiclePosition).
-      final expectedText =
-          'Live position: ${latitude.toStringAsFixed(4)}, ${longitude.toStringAsFixed(4)}';
-      await pumpUntil(
-        $,
-        () => find.text(expectedText).evaluate().isNotEmpty,
-        maxIterations: 40,
+      // The strong check: not just that a map exists, but that its
+      // vehicle marker is positioned at the exact coordinates ems's test
+      // mocked via --web-geolocation. Reads the Marker's own position
+      // property directly rather than matching the "Live position: ..."
+      // caption text (patient_viewer.dart only shows that caption once
+      // EmsTrackingStatus reaches active — a brand new fix can still read
+      // as stale for a moment, well before the caption's own 35s
+      // staleness budget is at risk, and the marker itself renders
+      // regardless of that distinction either way).
+      final markers = $.tester
+          .widget<GoogleMap>(find.byType(GoogleMap))
+          .markers;
+      final vehicleMarker = markers.firstWhere(
+        (marker) => marker.markerId == const MarkerId('vehicle'),
+        orElse: () => throw StateError(
+          'No "vehicle" marker on the map — expected one from a live GPS fix.',
+        ),
       );
       expect(
-        find.text(expectedText),
-        findsOneWidget,
+        vehicleMarker.position.latitude,
+        closeTo(latitude, 0.0001),
         reason:
-            "the map should reflect ems's mocked GPS fix exactly, not a stale or default position",
+            "the map's vehicle marker should reflect ems's mocked GPS fix exactly, not a stale or default position",
+      );
+      expect(
+        vehicleMarker.position.longitude,
+        closeTo(longitude, 0.0001),
+        reason:
+            "the map's vehicle marker should reflect ems's mocked GPS fix exactly, not a stale or default position",
       );
     },
   );
