@@ -125,13 +125,23 @@ async function cleanup(db, auth) {
     .get();
   for (const doc of hospSnap.docs) await doc.ref.delete();
 
-  // The patient itself (created by the EMS app, not this script) —
+  // The patient itself (created by the EMS app, not this script) — matched
+  // by `destination`, NOT `name`. `name` is encrypted client-side by the
+  // real upload flow this patient goes through (see
+  // patient_upload_service.dart/encryptPatientFields) — a plaintext range
+  // query against it can never match anything, which is exactly what let
+  // every single run's patient silently pile up in test-org instead of
+  // ever being deleted (confirmed for real: found many leftover "Patrol
+  // Flow Test Patient" documents going back hours once this was noticed).
+  // `destination` holds the plaintext hospital name (not PII, needed for
+  // physician's own destination filter) and this test always sets it to
+  // HOSPITAL_NAME, so it's a safe, reliably-queryable stand-in.
   // recursiveDelete so its location subcollection goes with it, matching
   // onPatientDeleted's own cleanup in production (see functions/src/ems.ts).
   const patientSnap = await db
     .collection('patients')
-    .where('name', '>=', 'Patrol Flow Test Patient')
-    .where('name', '<', 'Patrol Flow Test Patiend')
+    .where('destination', '>=', 'Patrol Flow Test Hospital')
+    .where('destination', '<', 'Patrol Flow Test Hospitc')
     .get();
   for (const doc of patientSnap.docs) await db.recursiveDelete(doc.ref);
 

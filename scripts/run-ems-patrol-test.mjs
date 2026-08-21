@@ -103,6 +103,21 @@ async function cleanup(db, auth, smokeAccountUid) {
   // Belt-and-suspenders: the test deletes its own patient as its last
   // step, but if it failed partway through (after create, before delete),
   // sweep for anything left behind so it doesn't linger in test-org.
+  //
+  // NOTE this query is currently a no-op: `name` is encrypted client-side
+  // by the real upload flow this test's patient goes through (see
+  // patient_upload_service.dart/encryptPatientFields), so a plaintext
+  // range query against it can never match. Confirmed for real — several
+  // genuinely leftover "Patrol EMS Test Patient..." documents accumulated
+  // in test-org from failed runs today despite this sweep reporting 0
+  // every time. Unlike run-patient-flow-e2e.mjs's equivalent patient (see
+  // its own cleanup(), fixed the same day this was found), this test's
+  // patient sets no `destination` either, so there's no other reliably
+  // plaintext field to match on — left as a known gap rather than a fake
+  // fix. The real safety net is the dialog-dismiss fix in ems_test.dart
+  // itself (see dismissLocationPermissionDialog), which was the actual
+  // cause of every leftover found so far; a passing run always reaches
+  // its own explicit delete step.
   const patientSnap = await db
     .collection('patients')
     .where('name', '>=', 'Patrol EMS Test Patient')

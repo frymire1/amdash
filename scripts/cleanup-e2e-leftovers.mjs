@@ -37,13 +37,22 @@ for (const doc of hospSnap.docs) {
   await doc.ref.delete();
 }
 
-const patientSnap = await db.collection('patients').where('name', '>=', 'Patrol').where('name', '<', 'Patrom').get();
-for (const doc of patientSnap.docs) {
-  console.log(`Deleted patient: ${doc.data().name}`);
+// See audit-e2e-leftovers.mjs's matching comment: `name` is encrypted for
+// any patient that went through a real app upload flow, so a plaintext
+// range query against it only ever catches Admin-SDK-seeded patients
+// (physician's). `destination` stays plaintext and catches the rest,
+// except ems_test.dart's own patient (sets no destination at all).
+const [byName, byDestination] = await Promise.all([
+  db.collection('patients').where('name', '>=', 'Patrol').where('name', '<', 'Patrom').get(),
+  db.collection('patients').where('destination', '>=', 'Patrol').where('destination', '<', 'Patrom').get(),
+]);
+const patientDocs = new Map([...byName.docs, ...byDestination.docs].map((doc) => [doc.id, doc]));
+for (const doc of patientDocs.values()) {
+  console.log(`Deleted patient: destination=${doc.data().destination}`);
   await db.recursiveDelete(doc.ref);
 }
 
-console.log(`\nDone. Removed ${deletedUsers} user(s), ${hospSnap.size} hospital(s), ${patientSnap.size} patient(s).`);
+console.log(`\nDone. Removed ${deletedUsers} user(s), ${hospSnap.size} hospital(s), ${patientDocs.size} patient(s).`);
 
 if (credentialPath) {
   const fs = await import('node:fs');

@@ -39,12 +39,31 @@ for (const doc of hospSnap.docs) {
 }
 console.log(`Total: ${hospSnap.size}\n`);
 
-console.log('=== Patients with a "Patrol"-prefixed name ===');
-const patientSnap = await db.collection('patients').where('name', '>=', 'Patrol').where('name', '<', 'Patrom').get();
-for (const doc of patientSnap.docs) {
-  console.log(`${doc.id}  ${doc.data().name}  status=${doc.data().status}`);
+// `name` is encrypted client-side for any patient created through a real
+// app upload flow (see patient_upload_service.dart/encryptPatientFields) —
+// a plaintext range query against it can only ever match a patient a
+// script wrote directly via the Admin SDK (bypassing the app entirely, as
+// run-physician-patrol-test.mjs's seed does). It silently matches nothing
+// for EMS-app-uploaded patients (patient_upload_flow_test.dart,
+// ems_test.dart) — confirmed for real: this query alone reported zero
+// results while the Playwright accessibility snapshot from a failing CI
+// run showed several genuinely leftover "Patrol Flow Test Patient..."
+// documents. `destination` isn't PII (needed for physician's own
+// destination filter) and stays plaintext, so it's used as a second,
+// reliable signal for patients that went through the real upload flow
+// with a distinctively-named test hospital — this still can't see
+// ems_test.dart's own patient, which sets no destination at all; that one
+// relies on its own explicit delete step at the end of the test.
+console.log('=== Patients with a "Patrol"-prefixed name or destination ===');
+const [byName, byDestination] = await Promise.all([
+  db.collection('patients').where('name', '>=', 'Patrol').where('name', '<', 'Patrom').get(),
+  db.collection('patients').where('destination', '>=', 'Patrol').where('destination', '<', 'Patrom').get(),
+]);
+const patientDocs = new Map([...byName.docs, ...byDestination.docs].map((doc) => [doc.id, doc]));
+for (const doc of patientDocs.values()) {
+  console.log(`${doc.id}  destination=${doc.data().destination}  status=${doc.data().status}`);
 }
-console.log(`Total: ${patientSnap.size}\n`);
+console.log(`Total: ${patientDocs.size}\n`);
 
 if (credentialPath) {
   const fs = await import('node:fs');
