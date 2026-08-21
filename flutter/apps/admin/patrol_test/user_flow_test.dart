@@ -7,6 +7,7 @@
 import 'package:admin/main.dart';
 import 'package:admin/screens/organization_settings_screen.dart';
 import 'package:admin/screens/user_management_screen.dart';
+import 'package:admin/widgets/edit_user_dialog.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -181,13 +182,23 @@ void main() {
       await tapKey($, 'edit_role_dropdown');
       await tapKey($, 'edit_role_option_physician');
       await tapKey($, 'edit_role_add_button');
+      // Scoped to the dialog itself, not a bare find.text('physician') — the
+      // dialog is a modal overlay, not a replacement route, so the user
+      // table underneath stays mounted, and test-org's accumulated
+      // leftover users (from other runs, or earlier runs that failed
+      // mid-test before their own cleanup ran) can easily have their own
+      // "physician" role chips elsewhere on that table.
+      final physicianChipInDialog = find.descendant(
+        of: find.byType(EditUserDialog),
+        matching: find.text('physician'),
+      );
       await pumpUntil(
         $,
-        () => find.text('physician').evaluate().isNotEmpty,
+        () => physicianChipInDialog.evaluate().isNotEmpty,
         maxIterations: 60,
       );
       expect(
-        find.text('physician'),
+        physicianChipInDialog,
         findsOneWidget,
         reason: 'role assignment should have succeeded within the wait budget',
       );
