@@ -251,13 +251,23 @@ void main() {
       await enterTextAt($, 0, hospitalName);
       await enterTextAt($, 1, '123 Main St, Toronto, ON');
       await tapKey($, 'add_hospital_submit');
+      // Scoped to the hospitals Table, not a bare find.text(hospitalName)
+      // — the Add Hospital form's own Name field doesn't clear until
+      // _createHospital() actually succeeds, so for a moment both the
+      // still-filled TextField (an EditableText, which find.text() also
+      // matches) and the new table row show the same text. Confirmed via
+      // a real GHA failure ("Found 2 widgets").
+      final hospitalRow = find.descendant(
+        of: find.byType(Table),
+        matching: find.text(hospitalName),
+      );
       await pumpUntil(
         $,
-        () => find.text(hospitalName).evaluate().isNotEmpty,
+        () => hospitalRow.evaluate().isNotEmpty,
         maxIterations: 60,
       );
       expect(
-        find.text(hospitalName),
+        hospitalRow,
         findsOneWidget,
         reason: 'hospital should have been created within the wait budget',
       );
