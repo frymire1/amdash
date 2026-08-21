@@ -188,7 +188,14 @@ void main() {
         () => find.text(patientName).evaluate().isNotEmpty,
         maxIterations: 40,
       );
-      await tapFinder($, find.text(patientName).first);
+      // Tapped directly, not via tapFinder — see the hospital-autocomplete
+      // tap above for the full rationale (a real GHA "Bad state: No
+      // element" hit here too, same root cause: .first is a lazy,
+      // re-evaluating finder, and tapFinder's ensureVisible + 200ms pump
+      // gave the live patient-list snapshot listener a real window to
+      // rebuild before the actual tap re-evaluated it).
+      await $.tester.tap(find.text(patientName).first);
+      await $.pump(const Duration(milliseconds: 400));
 
       // Patient viewer should now show this patient's info/vitals, and a
       // real Google Map for its uploaded pickup location.

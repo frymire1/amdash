@@ -142,7 +142,14 @@ void main() {
         () => find.text(patientName).evaluate().isNotEmpty,
         maxIterations: 60,
       );
-      await tapFinder($, find.text(patientName).first);
+      // Tapped directly, not via tapFinder — a real GHA "Bad state: No
+      // element" hit this exact pattern in patient_flow_test.dart's own
+      // equivalent tap: .first is a lazy, re-evaluating finder, and
+      // tapFinder's ensureVisible + 200ms pump gave the live patient-list
+      // snapshot listener a real window to rebuild before the actual tap
+      // re-evaluated it.
+      await $.tester.tap(find.text(patientName).first);
+      await $.pump(const Duration(milliseconds: 400));
 
       await pumpUntil(
         $,
