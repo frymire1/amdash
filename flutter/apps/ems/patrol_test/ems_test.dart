@@ -127,9 +127,26 @@ Future<void> dismissLocationPermissionDialog(PatrolIntegrationTester $) async {
         .isNotEmpty,
     maxIterations: 30,
   );
-  final okButton = find.widgetWithText(TextButton, 'OK');
-  await pumpUntil($, () => okButton.evaluate().isNotEmpty, maxIterations: 10);
-  await tapFinder($, okButton);
+  // Retried, not a single tap — confirmed for real on Android: the OK
+  // button can exist at check time and still be gone by the time
+  // tapFinder's own ensureVisible + pump reaches the actual tap ("Found 0
+  // widgets... OK"), the same class of transient-widget flakiness this
+  // file's other dismiss helpers already guard against. A few short
+  // retries is enough to land on a moment the button survives the whole
+  // tap, rather than a single attempt that can lose that race outright.
+  for (var i = 0; i < 5; i++) {
+    final okButton = find.widgetWithText(TextButton, 'OK');
+    if (okButton.evaluate().isEmpty) {
+      await $.pump(const Duration(milliseconds: 300));
+      continue;
+    }
+    try {
+      await tapFinder($, okButton);
+      return;
+    } catch (_) {
+      await $.pump(const Duration(milliseconds: 300));
+    }
+  }
 }
 
 /// `LocationTrackingSection` requests location on every `PatientUploadScreen`
