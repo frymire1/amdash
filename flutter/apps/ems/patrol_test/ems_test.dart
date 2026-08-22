@@ -190,18 +190,41 @@ Future<void> settleLocationPrompts(PatrolIntegrationTester $) async {
         )
         .evaluate()
         .isNotEmpty) {
-      final okButton = find.widgetWithText(TextButton, 'OK');
-      if (okButton.evaluate().isNotEmpty) {
-        handledSomething = true;
-        try {
-          await tapFinder($, okButton);
-        } catch (_) {
-          // Retried on the next loop iteration regardless — see this
-          // function's own doc comment on why a single attempt isn't
-          // reliable here.
+      handledSomething = true;
+      if (kIsWeb) {
+        // Tapping the OK button directly is the only option on web — no
+        // native automation there. Already established reliable on this
+        // path from many earlier runs.
+        final okButton = find.widgetWithText(TextButton, 'OK');
+        if (okButton.evaluate().isNotEmpty) {
+          try {
+            await tapFinder($, okButton);
+          } catch (_) {
+            // Retried on the next loop iteration regardless.
+          }
         }
-        await $.pump(const Duration(milliseconds: 300));
+      } else {
+        // On Android, tapping the OK button directly turned out
+        // completely unreliable under this function's own sustained
+        // native-automation load — confirmed for real via a downloaded
+        // recording where dozens of "successful" taps across two full
+        // settleLocationPrompts calls (40+ seconds combined) never once
+        // actually closed the dialog. AlertDialog is dismissible via the
+        // Android back button by default (no PopScope/WillPopScope
+        // blocking it here), and the back button goes through real
+        // Android input dispatch rather than a synthetic Flutter-level
+        // tap that has to land pixel-precisely on this exact button — a
+        // completely different, more robust dismissal path. Only reached
+        // once the dialog's error text is confirmed on screen, so this
+        // can't accidentally navigate the app itself backward.
+        try {
+          // ignore: deprecated_member_use
+          await $.native.pressBack();
+        } catch (_) {
+          // Best-effort — retried on the next loop iteration regardless.
+        }
       }
+      await $.pump(const Duration(milliseconds: 300));
     }
 
     if (handledSomething) {
