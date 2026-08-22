@@ -171,17 +171,34 @@ Future<void> denyNativeLocationPermissionDialog(
   PatrolIntegrationTester $,
 ) async {
   if (kIsWeb) return;
-  try {
-    await $.platform.tap(
-      Selector(text: "Don't allow"),
-      timeout: const Duration(seconds: 3),
-    );
-    await $.pump(const Duration(milliseconds: 300));
-  } catch (_) {
-    // Not present this time — Android only asks once per app-install, so
-    // a later mount of this same screen (e.g. reopening to edit) won't
-    // see it again.
+  // Retried, not a single attempt — a first try at this exact same spot
+  // (single 3s-timeout attempt, no retry) still showed the dialog
+  // untouched for an entire real Test Lab recording: the native
+  // permission-request round trip (platform channel hop, then Android
+  // actually rendering the system dialog) doesn't always land inside one
+  // timeout window. `textContains` rather than `text` for the same
+  // reason patrol_test files elsewhere in this repo avoid relying on
+  // exact string equality for anything not under this app's own
+  // control — Android's system string could plausibly use a typographic
+  // apostrophe (’) rather than the ASCII one ('); matching on "on't
+  // allow" (no apostrophe at all) sidesteps that regardless of which one
+  // it actually is.
+  for (var i = 0; i < 5; i++) {
+    try {
+      await $.platform.tap(
+        Selector(textContains: "on't allow"),
+        timeout: const Duration(seconds: 2),
+      );
+      await $.pump(const Duration(milliseconds: 300));
+      return;
+    } catch (_) {
+      await $.pump(const Duration(milliseconds: 500));
+    }
   }
+  // Not present after all those attempts — Android only asks once per
+  // app-install, so a later mount of this same screen (e.g. reopening to
+  // edit) genuinely won't see it again; this is a legitimate no-op then,
+  // not a failure being swallowed.
 }
 
 /// `LocationTrackingSection` requests location on every `PatientUploadScreen`
