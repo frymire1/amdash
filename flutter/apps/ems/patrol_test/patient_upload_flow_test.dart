@@ -13,6 +13,7 @@ import 'package:ems/main.dart';
 import 'package:ems/screens/home_screen.dart';
 import 'package:ems/screens/patient_upload_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -62,6 +63,29 @@ Future<void> enterTextAt(
   await $.pump(const Duration(milliseconds: 200));
   await $.tester.enterText(finder, text);
   await $.pump(const Duration(milliseconds: 400));
+}
+
+/// See ems_test.dart's identical helper for the full rationale (a real
+/// Firebase Test Lab video recording caught two of these stacked native
+/// dialogs hiding the entire app on Android) — not currently exercised
+/// here since this file only runs on Chrome via the cross-app flow, but
+/// this form goes through the exact same LocationTrackingSection mount,
+/// so the same fix applies if this ever runs on Android too.
+Future<void> dismissNativeLocationAccuracyDialog(
+  PatrolIntegrationTester $,
+) async {
+  if (kIsWeb) return;
+  for (var i = 0; i < 2; i++) {
+    try {
+      await $.platform.tap(
+        Selector(text: 'No thanks'),
+        timeout: const Duration(seconds: 2),
+      );
+      await $.pump(const Duration(milliseconds: 300));
+    } catch (_) {
+      break;
+    }
+  }
 }
 
 /// Polls with fixed pumps rather than a one-shot wait — see ems_test.dart's
@@ -163,6 +187,7 @@ void main() {
       $,
       () => find.byType(PatientUploadScreen).evaluate().isNotEmpty,
     );
+    await dismissNativeLocationAccuracyDialog($);
     await enterTextAt($, 0, patientName);
     await enterTextAt($, 2, 'TEST-12345');
     await enterTextAt($, 3, initialHeartRate);
@@ -228,6 +253,7 @@ void main() {
       () => find.text(patientName).evaluate().isNotEmpty,
       maxIterations: 40,
     );
+    await dismissNativeLocationAccuracyDialog($);
     // The location section re-fetches from scratch on every mount, even in
     // edit mode — wait for it to resolve back to "Tracking Active" before
     // touching Save. Same class of race ems_test.dart's own edit flow hit

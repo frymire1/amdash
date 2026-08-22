@@ -9,6 +9,7 @@ import 'package:ems/main.dart';
 import 'package:ems/screens/home_screen.dart';
 import 'package:ems/screens/patient_upload_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -131,6 +132,39 @@ Future<void> dismissLocationPermissionDialog(PatrolIntegrationTester $) async {
   await tapFinder($, okButton);
 }
 
+/// `LocationTrackingSection` requests location on every `PatientUploadScreen`
+/// mount (see that file's own doc comment). On a real Android device —
+/// never on Chrome, where geolocation is denied entirely at the browser
+/// level via `webPermissions: []`, no native prompt involved — this can
+/// trigger a native Google Play Services "For a better experience, your
+/// device will need to use Location Accuracy" dialog. Confirmed for real
+/// via a downloaded Firebase Test Lab video recording: two of these sat
+/// stacked on top of the entire app, and every subsequent Flutter finder
+/// call silently found nothing, because this dialog isn't part of the
+/// Flutter widget tree at all — it's native Android UI Patrol's own
+/// finders have no way to see. Dismissed via Patrol's native (UiAutomator-
+/// backed) automation instead, not a Flutter finder. Best-effort and
+/// bounded: it may not appear at all (a first-time-per-device nag, not
+/// guaranteed every run), and `$.native` isn't meaningfully backed by
+/// anything on web, where this file also runs — skip there entirely.
+Future<void> dismissNativeLocationAccuracyDialog(
+  PatrolIntegrationTester $,
+) async {
+  if (kIsWeb) return;
+  for (var i = 0; i < 2; i++) {
+    try {
+      await $.platform.tap(
+        Selector(text: 'No thanks'),
+        timeout: const Duration(seconds: 2),
+      );
+      await $.pump(const Duration(milliseconds: 300));
+    } catch (_) {
+      // Not present (this time, or anymore) — nothing more to dismiss.
+      break;
+    }
+  }
+}
+
 /// Every account requires TOTP MFA (`AppRouteGuard`'s `requireMfa` tier,
 /// checked right after auth) — a freshly created throwaway account has
 /// never enrolled, so sign-in always lands on /mfa-setup first. See
@@ -221,6 +255,7 @@ void main() {
       $,
       () => find.byType(PatientUploadScreen).evaluate().isNotEmpty,
     );
+    await dismissNativeLocationAccuracyDialog($);
     await dismissLocationPermissionDialog($);
     await enterTextAt($, 0, patientName);
     await enterTextAt($, 2, 'TEST-12345');
@@ -275,6 +310,7 @@ void main() {
       () => find.text(patientName).evaluate().isNotEmpty,
       maxIterations: 40,
     );
+    await dismissNativeLocationAccuracyDialog($);
     await dismissLocationPermissionDialog($);
     await enterTextAt($, 3, '95');
     await tapKey($, 'patient_upload_submit');
