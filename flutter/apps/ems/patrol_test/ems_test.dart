@@ -319,6 +319,15 @@ void main() {
     // whole row is the real tap target (Material spec), and the inner
     // Switch alone didn't resolve to a match in an earlier attempt.
     await tapFinder($, find.byType(SwitchListTile));
+    // Re-checked immediately before the tap, not just once right after
+    // mount — LocationTrackingSection's 15s re-poll timer can pop a fresh
+    // dialog at any point the form stays open, and its modal barrier
+    // would otherwise swallow this exact tap instead of ever reaching
+    // the real submit button (confirmed for real via a downloaded
+    // recording: the edit flow's own equivalent submit silently landed
+    // on a barrier from a dialog that reappeared after the earlier
+    // settleLocationPrompts call had already returned).
+    await settleLocationPrompts($);
     await tapKey($, 'patient_upload_submit');
     await pumpUntil(
       $,
@@ -364,6 +373,10 @@ void main() {
     );
     await settleLocationPrompts($);
     await enterTextAt($, 3, '95');
+    // Re-checked again immediately before the tap — see the Add flow's
+    // identical call above for why (this is the exact spot a real GHA
+    // failure confirmed it happening).
+    await settleLocationPrompts($);
     await tapKey($, 'patient_upload_submit');
     await pumpUntil(
       $,
