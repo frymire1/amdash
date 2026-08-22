@@ -149,6 +149,41 @@ Future<void> dismissLocationPermissionDialog(PatrolIntegrationTester $) async {
   }
 }
 
+/// `--grant-permissions=none` (run in flutter-ci.yml's EMS Android step)
+/// denies location outright *before* Test Lab launches the app — but
+/// unlike Chrome's `webPermissions: []` (a silent, no-UI denial at the
+/// browser level), Android's own permission model has no "pre-decided
+/// denied" state: the very first `Geolocator.requestPermission()` call
+/// still throws up the real system "Allow AmDash to access this device's
+/// location?" dialog, exactly as it would for a real user. Confirmed for
+/// real via a downloaded Firebase Test Lab video recording: the dialog
+/// appeared and then sat there, untouched, for the rest of the entire
+/// test — the test still passed, because Patrol's Flutter-level taps
+/// inject directly into the Flutter engine rather than going through
+/// Android's real touch system, so the form underneath kept working
+/// regardless. That's a misleading recording, not a real pass: a human
+/// driving this by hand would be stuck looking at an unanswered system
+/// prompt. Tapping "Don't allow" explicitly — via Patrol's native
+/// automation, since this dialog isn't part of the Flutter widget tree
+/// at all — is also the semantically correct choice here: this test
+/// explicitly runs with live tracking off.
+Future<void> denyNativeLocationPermissionDialog(
+  PatrolIntegrationTester $,
+) async {
+  if (kIsWeb) return;
+  try {
+    await $.platform.tap(
+      Selector(text: "Don't allow"),
+      timeout: const Duration(seconds: 3),
+    );
+    await $.pump(const Duration(milliseconds: 300));
+  } catch (_) {
+    // Not present this time — Android only asks once per app-install, so
+    // a later mount of this same screen (e.g. reopening to edit) won't
+    // see it again.
+  }
+}
+
 /// `LocationTrackingSection` requests location on every `PatientUploadScreen`
 /// mount (see that file's own doc comment). On a real Android device —
 /// never on Chrome, where geolocation is denied entirely at the browser
@@ -161,9 +196,13 @@ Future<void> dismissLocationPermissionDialog(PatrolIntegrationTester $) async {
 /// Flutter widget tree at all — it's native Android UI Patrol's own
 /// finders have no way to see. Dismissed via Patrol's native (UiAutomator-
 /// backed) automation instead, not a Flutter finder. Best-effort and
-/// bounded: it may not appear at all (a first-time-per-device nag, not
-/// guaranteed every run), and `$.native` isn't meaningfully backed by
-/// anything on web, where this file also runs — skip there entirely.
+/// bounded: it may not appear at all — with the OS permission itself now
+/// explicitly denied above, this dialog (which only fires once
+/// permission *is* granted but device accuracy settings aren't) should
+/// never actually trigger for this test anymore; left in place as cheap,
+/// harmless defense-in-depth rather than removed. `$.native` isn't
+/// meaningfully backed by anything on web, where this file also runs —
+/// skip there entirely.
 Future<void> dismissNativeLocationAccuracyDialog(
   PatrolIntegrationTester $,
 ) async {
@@ -272,6 +311,7 @@ void main() {
       $,
       () => find.byType(PatientUploadScreen).evaluate().isNotEmpty,
     );
+    await denyNativeLocationPermissionDialog($);
     await dismissNativeLocationAccuracyDialog($);
     await dismissLocationPermissionDialog($);
     await enterTextAt($, 0, patientName);
@@ -327,6 +367,7 @@ void main() {
       () => find.text(patientName).evaluate().isNotEmpty,
       maxIterations: 40,
     );
+    await denyNativeLocationPermissionDialog($);
     await dismissNativeLocationAccuracyDialog($);
     await dismissLocationPermissionDialog($);
     await enterTextAt($, 3, '95');
