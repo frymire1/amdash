@@ -103,12 +103,39 @@ async function seed(db) {
   };
 }
 
-async function cleanup(db, auth) {
+async function cleanup(db, auth, seeded) {
+  // Specific-reference deletes first, unconditional regardless of age —
+  // this run's own account/hospital/patient just finished being used, so
+  // there's never a reason to wait on them (unlike the broad sweep below,
+  // scoped to catching debris from OTHER, possibly-still-running jobs).
+  // Missing until this fix: cleanup() used to rely *entirely* on the
+  // broad sweep below to find its own patient (no seed script writes it
+  // directly — it's created through the EMS app's own UI, so there was
+  // never an id to delete by), which meant adding the age guard to that
+  // sweep broke this specific run's own timely cleanup — confirmed for
+  // real: two "Patrol Flow Test Patient" leftovers with the same edited
+  // heart rate collided in a very next run's own "found 2 widgets"
+  // failure. `destination` is known up front (HOSPITAL_NAME) and unique
+  // to this run by construction, so an *exact* match (not the broad
+  // sweep's prefix range) finds it precisely, without needing to guess
+  // at its Firestore doc id.
+  if (seeded) {
+    await auth.deleteUser(seeded.ems.uid).catch(() => {});
+    await db.doc(`users/${seeded.ems.uid}`).delete().catch(() => {});
+    await auth.deleteUser(seeded.physician.uid).catch(() => {});
+    await db.doc(`users/${seeded.physician.uid}`).delete().catch(() => {});
+    await db.doc(`hospitals/${seeded.hospitalId}`).delete().catch(() => {});
+    const ownPatientSnap = await db.collection('patients').where('destination', '==', HOSPITAL_NAME).get();
+    for (const doc of ownPatientSnap.docs) await db.recursiveDelete(doc.ref);
+  }
+
   // Age-guarded (isOldEnoughToSweep) — a broad sweep with no age check can
   // delete a concurrently-running sibling run's still-in-use account/
   // hospital/patient (e.g. two overlapping pushes both triggering this
   // same script) — see that function's own comment for the real GHA
-  // failure this was confirmed against.
+  // failure this was confirmed against. This run's own state is already
+  // gone via the specific deletes above; this is purely a safety net for
+  // orphaned debris from other, past runs.
   let deletedUsers = 0;
   let pageToken;
   do {
@@ -214,7 +241,7 @@ try {
     });
   }
 } finally {
-  await cleanup(db, auth);
+  await cleanup(db, auth, seeded);
   if (credentialPath) fs.unlinkSync(credentialPath);
 }
 
