@@ -365,7 +365,7 @@ jobs:
             --type instrumentation \
             --app build/app/outputs/apk/debug/app-debug.apk \
             --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
-            --device model=tokay,version=35,locale=en,orientation=portrait \
+            --device model=MediumPhone.arm,version=35,locale=en,orientation=portrait \
             --results-bucket=gs://amdash-dev-test-lab-results \
             2>&1 | tee /tmp/physician-testlab.log
 
@@ -430,7 +430,7 @@ jobs:
             --type instrumentation \
             --app build/app/outputs/apk/debug/app-debug.apk \
             --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
-            --device model=tokay,version=35,locale=en,orientation=portrait \
+            --device model=MediumPhone.arm,version=35,locale=en,orientation=portrait \
             --grant-permissions=none \
             --results-bucket=gs://amdash-dev-test-lab-results \
             2>&1 | tee /tmp/ems-testlab.log
