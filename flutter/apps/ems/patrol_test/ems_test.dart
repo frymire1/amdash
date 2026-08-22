@@ -100,8 +100,7 @@ Future<void> pumpUntil(
 }
 
 /// Watches for and clears every location-related prompt
-/// `PatientUploadScreen`/`LocationTrackingSection` can show on mount, in
-/// ONE interleaved loop rather than as separate sequential phases:
+/// `PatientUploadScreen`/`LocationTrackingSection` can show on mount:
 ///
 ///  1. The native OS "Allow AmDash to access this device's location?"
 ///     permission dialog — denied via Patrol's purpose-built permission
@@ -123,63 +122,43 @@ Future<void> pumpUntil(
 ///     the barrier and closed the dialog instead of ever reaching the
 ///     button underneath.
 ///
-/// None of these wait for this test's own sequencing —
-/// `_useCurrentLocation()`'s async chain is a separate, concurrently-
-/// running future in the same isolate, not paused by this function's own
-/// `await`s — so a dialog can appear (or a new one replace an old one)
-/// at any point regardless of which phase this function *thinks* it's
-/// in. Confirmed for real via a downloaded Test Lab recording: handling
-/// (1) to its own full completion before ever checking for (3) left that
-/// second dialog sitting untouched for the better part of a minute on
-/// the edit screen, purely because nothing was watching for it yet.
-/// Checking all three together, every iteration, removes that dead zone
-/// entirely. `LocationTrackingSection` also re-polls location every 15s
-/// for as long as the form stays mounted (its own `Timer.periodic`), so
-/// any of these can recur — one successful dismissal doesn't mean it
-/// stays dismissed, hence looping rather than a single pass.
+/// (3) does NOT recur every 15s despite `LocationTrackingSection` re-
+/// polling location on that interval — `patient_upload_screen.dart` only
+/// ever opens it once per mount (`_locationErrorDialogShown` guards the
+/// post-frame callback that shows it). An earlier version of this doc
+/// comment claimed it recurred; that was wrong, caught by scrubbing a
+/// downloaded recording frame-by-frame and finding zero gaps in the
+/// dialog's on-screen presence between when it first appeared and when
+/// this function finally cleared it — a single continuous instance the
+/// whole time, not several. So there is exactly one dialog to clear per
+/// screen, and this function's only real job is to not give up on it
+/// early.
 ///
-/// Exits once two consecutive iterations find nothing left to do, rather
-/// than always blocking for a fixed window — on web, or once Android has
-/// nothing further to show, this returns almost immediately instead of
-/// wasting the full bound every single call. That early-exit is only
-/// armed after either handling at least one prompt, or an initial grace
-/// period passes — the async permission request doesn't fire the very
-/// instant this function starts polling, so exiting on "found nothing"
-/// before it's even had a chance to appear would defeat the point
-/// entirely.
+/// That same recording is what caught the actual bug: the dialog stayed
+/// up for ~70s despite this function being called right at mount, because
+/// its old fixed 20s-per-call bound would abandon an *actively-being-
+/// dismissed* dialog partway through, and nothing watched for it again
+/// until the second call right before submit — by which point the field-
+/// filling in between had eaten most of that gap. Fixed by treating the
+/// outer time bound as a safety net for a genuinely stuck dialog, not a
+/// normal operating budget: the loop only returns via the idle path below
+/// (nothing left to handle for two consecutive iterations), never by
+/// running out of clock while still actively finding something to
+/// dismiss every pass.
+///
+/// Checks the in-app dialog before the two native checks and `continue`s
+/// immediately when it's found, skipping them for that iteration — each
+/// native check blocks for up to 500ms even when it has nothing to find,
+/// which is most iterations once (1)/(2) are already resolved, and that
+/// tax was most of why dismissal attempts landed so infrequently.
 Future<void> settleLocationPrompts(PatrolIntegrationTester $) async {
-  final deadline = DateTime.now().add(const Duration(seconds: 20));
+  // Safety net against a genuinely stuck dialog, not a normal budget —
+  // see this function's own doc comment.
+  final ceiling = DateTime.now().add(const Duration(seconds: 45));
   final grace = DateTime.now().add(const Duration(seconds: 8));
   var everHandledSomething = false;
   var consecutiveMisses = 0;
-  while (DateTime.now().isBefore(deadline)) {
-    var handledSomething = false;
-
-    if (!kIsWeb) {
-      if (await $.platform.mobile.isPermissionDialogVisible(
-        timeout: const Duration(milliseconds: 500),
-      )) {
-        handledSomething = true;
-        try {
-          await $.platform.mobile.denyPermission();
-        } catch (_) {
-          // Best-effort — see this function's own doc comment.
-        }
-        await $.pump(const Duration(milliseconds: 300));
-      }
-
-      try {
-        await $.platform.tap(
-          Selector(text: 'No thanks'),
-          timeout: const Duration(milliseconds: 500),
-        );
-        handledSomething = true;
-        await $.pump(const Duration(milliseconds: 300));
-      } catch (_) {
-        // Not present this pass — see this function's own doc comment.
-      }
-    }
-
+  while (DateTime.now().isBefore(ceiling)) {
     // Scoped to the dialog's own title, NOT LocationTrackingSection's
     // inline "Could not get your current location..." banner text (an
     // earlier version of this check used that instead — a real bug,
@@ -192,7 +171,6 @@ Future<void> settleLocationPrompts(PatrolIntegrationTester $) async {
     // PatientUploadScreen entirely). This dialog's own title only exists
     // while it's actually mounted.
     if (find.text('Location permission is off').evaluate().isNotEmpty) {
-      handledSomething = true;
       if (kIsWeb) {
         // Tapping the OK button directly is the only option on web — no
         // native automation there. Already established reliable on this
@@ -227,6 +205,36 @@ Future<void> settleLocationPrompts(PatrolIntegrationTester $) async {
         }
       }
       await $.pump(const Duration(milliseconds: 300));
+      everHandledSomething = true;
+      consecutiveMisses = 0;
+      continue;
+    }
+
+    var handledSomething = false;
+
+    if (!kIsWeb) {
+      if (await $.platform.mobile.isPermissionDialogVisible(
+        timeout: const Duration(milliseconds: 500),
+      )) {
+        handledSomething = true;
+        try {
+          await $.platform.mobile.denyPermission();
+        } catch (_) {
+          // Best-effort — see this function's own doc comment.
+        }
+        await $.pump(const Duration(milliseconds: 300));
+      }
+
+      try {
+        await $.platform.tap(
+          Selector(text: 'No thanks'),
+          timeout: const Duration(milliseconds: 500),
+        );
+        handledSomething = true;
+        await $.pump(const Duration(milliseconds: 300));
+      } catch (_) {
+        // Not present this pass — see this function's own doc comment.
+      }
     }
 
     if (handledSomething) {
