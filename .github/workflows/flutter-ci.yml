@@ -311,6 +311,15 @@ jobs:
       - name: Set gcloud project
         run: gcloud config set project amdash-dev
 
+      # ems's own run step below needs `gcloud beta` (--grant-permissions
+      # is beta-only — see that step's own comment) — not guaranteed
+      # present on a hosted runner's preinstalled gcloud, and installing it
+      # lazily on first use would either prompt interactively (hangs with
+      # no TTY) or fail outright. --quiet makes this non-interactive and a
+      # no-op if already installed.
+      - name: Install gcloud beta component
+        run: gcloud components install beta --quiet
+
       # TEMPORARY diagnostic — both physician and ems runs have hit "A
       # non-retryable error occurred" after 1-2s of real device time (before
       # the app could plausibly even finish launching), yet gcloud's own
@@ -410,11 +419,32 @@ jobs:
           patrol build android --target patrol_test/ems_test.dart \
             --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
             --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")"
-          gcloud firebase test android run \
+          # --grant-permissions=none (gcloud *beta* only — the stable
+          # `gcloud firebase test android run` has no equivalent flag at
+          # all): without it, Test Lab pre-grants ACCESS_FINE_LOCATION/
+          # ACCESS_COARSE_LOCATION before the test starts, so
+          # LocationTrackingSection's unconditional
+          # Geolocator.getCurrentPosition() call (on every
+          # PatientUploadScreen mount) reaches real Google Play Services,
+          # which — confirmed for real via a downloaded Test Lab video
+          # recording — throws up a native "For a better experience, your
+          # device will need to use Location Accuracy" dialog outside the
+          # Flutter view entirely, and keeps re-showing it roughly every
+          # 15s via that section's own re-poll timer for as long as the
+          # form stays mounted. Denying every permission outright instead
+          # (mirrors run-ems-patrol-test.mjs's webPermissions: [] on
+          # Chrome) makes Geolocator fail fast with a permission error
+          # before ever reaching Play Services' settings-resolution step,
+          # which this app already handles correctly (the same
+          # "Could not get your current location..." dialog the Chrome
+          # path exercises) — no native dialog, no dismiss-and-hope. This
+          # test doesn't need any OTHER runtime permission granted either.
+          gcloud beta firebase test android run \
             --type instrumentation \
             --app build/app/outputs/apk/debug/app-debug.apk \
             --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
             --device model=tokay,version=35,locale=en,orientation=portrait \
+            --grant-permissions=none \
             --results-bucket=gs://amdash-dev-test-lab-results \
             2>&1 | tee /tmp/ems-testlab.log
 
