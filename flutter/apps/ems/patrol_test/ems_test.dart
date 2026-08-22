@@ -180,16 +180,18 @@ Future<void> settleLocationPrompts(PatrolIntegrationTester $) async {
       }
     }
 
-    // Scoped to the exact error text, not just any TextButton labeled
-    // "OK" — this app has no other dialog that looks like this, but
-    // matching narrowly costs nothing and avoids ever depending on that
-    // staying true.
-    if (find
-        .text(
-          'Could not get your current location. Please allow location access and try again.',
-        )
-        .evaluate()
-        .isNotEmpty) {
+    // Scoped to the dialog's own title, NOT LocationTrackingSection's
+    // inline "Could not get your current location..." banner text (an
+    // earlier version of this check used that instead — a real bug,
+    // confirmed via a real GHA failure: that banner is permanently
+    // present in the form for the rest of its lifetime once the location
+    // error occurs, so that check stayed "true" long after the dialog
+    // itself had already been dismissed, and this function kept calling
+    // pressBack() anyway on every later iteration — with no dialog left
+    // to dismiss, that just navigated the app itself back out of
+    // PatientUploadScreen entirely). This dialog's own title only exists
+    // while it's actually mounted.
+    if (find.text('Location permission is off').evaluate().isNotEmpty) {
       handledSomething = true;
       if (kIsWeb) {
         // Tapping the OK button directly is the only option on web — no
