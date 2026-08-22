@@ -99,141 +99,121 @@ Future<void> pumpUntil(
   }
 }
 
-/// `PatientUploadScreen` pops an `AlertDialog` ("Location permission is
-/// off") the first time `LocationTrackingSection` reports its geolocation
-/// fetch failed — always, here, since `webPermissions: []`
-/// (run-ems-patrol-test.mjs) denies it outright. `showDialog`'s default
-/// `barrierDismissible: true` means its modal barrier swallows the very
-/// next tap dispatched anywhere else on screen, dismissing the dialog as a
-/// side effect instead of reaching whatever the test actually meant to
-/// tap. Confirmed via a real GHA failure's Playwright accessibility
-/// snapshot: the edit form was still fully on-screen after a "submit" tap
-/// that produced a "would not hit test" warning — the button was never
-/// actually pressed, because that tap landed on the barrier and closed the
-/// dialog instead. The Add flow above happens to have an earlier tap (the
-/// SwitchListTile toggle) that "wastes" itself dismissing the barrier
-/// before Save is ever reached, so it doesn't visibly break there — Edit
-/// has no such tap in between, so it does. Dismissing the dialog
-/// explicitly and deterministically, right after it appears, removes the
-/// dependence on an unrelated tap happening to eat it first.
-Future<void> dismissLocationPermissionDialog(PatrolIntegrationTester $) async {
-  await pumpUntil(
-    $,
-    () => find
+/// Watches for and clears every location-related prompt
+/// `PatientUploadScreen`/`LocationTrackingSection` can show on mount, in
+/// ONE interleaved loop rather than as separate sequential phases:
+///
+///  1. The native OS "Allow AmDash to access this device's location?"
+///     permission dialog — denied via Patrol's purpose-built permission
+///     API (`isPermissionDialogVisible`/`denyPermission`), not by
+///     matching button text (tried and retried in two earlier attempts;
+///     more robust this way regardless).
+///  2. The native Google Play Services "For a better experience, your
+///     device will need to use Location Accuracy" dialog — only
+///     possible if permission *is* granted but device accuracy settings
+///     aren't, so denying (1) should mean this never actually fires
+///     anymore; checked anyway as cheap, harmless defense-in-depth.
+///  3. `PatientUploadScreen`'s own in-app "Location permission is off"
+///     `AlertDialog`, once `LocationTrackingSection` reports its
+///     geolocation fetch failed (always, here, since (1) denies it).
+///     `showDialog`'s default `barrierDismissible: true` means its
+///     modal barrier swallows the very next tap dispatched anywhere else
+///     on screen — confirmed via a real GHA failure's Playwright
+///     accessibility snapshot that an unrelated "submit" tap landed on
+///     the barrier and closed the dialog instead of ever reaching the
+///     button underneath.
+///
+/// None of these wait for this test's own sequencing —
+/// `_useCurrentLocation()`'s async chain is a separate, concurrently-
+/// running future in the same isolate, not paused by this function's own
+/// `await`s — so a dialog can appear (or a new one replace an old one)
+/// at any point regardless of which phase this function *thinks* it's
+/// in. Confirmed for real via a downloaded Test Lab recording: handling
+/// (1) to its own full completion before ever checking for (3) left that
+/// second dialog sitting untouched for the better part of a minute on
+/// the edit screen, purely because nothing was watching for it yet.
+/// Checking all three together, every iteration, removes that dead zone
+/// entirely. `LocationTrackingSection` also re-polls location every 15s
+/// for as long as the form stays mounted (its own `Timer.periodic`), so
+/// any of these can recur — one successful dismissal doesn't mean it
+/// stays dismissed, hence looping rather than a single pass.
+///
+/// Exits once two consecutive iterations find nothing left to do, rather
+/// than always blocking for a fixed window — on web, or once Android has
+/// nothing further to show, this returns almost immediately instead of
+/// wasting the full bound every single call. That early-exit is only
+/// armed after either handling at least one prompt, or an initial grace
+/// period passes — the async permission request doesn't fire the very
+/// instant this function starts polling, so exiting on "found nothing"
+/// before it's even had a chance to appear would defeat the point
+/// entirely.
+Future<void> settleLocationPrompts(PatrolIntegrationTester $) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 20));
+  final grace = DateTime.now().add(const Duration(seconds: 8));
+  var everHandledSomething = false;
+  var consecutiveMisses = 0;
+  while (DateTime.now().isBefore(deadline)) {
+    var handledSomething = false;
+
+    if (!kIsWeb) {
+      if (await $.platform.mobile.isPermissionDialogVisible(
+        timeout: const Duration(milliseconds: 500),
+      )) {
+        handledSomething = true;
+        try {
+          await $.platform.mobile.denyPermission();
+        } catch (_) {
+          // Best-effort — see this function's own doc comment.
+        }
+        await $.pump(const Duration(milliseconds: 300));
+      }
+
+      try {
+        await $.platform.tap(
+          Selector(text: 'No thanks'),
+          timeout: const Duration(milliseconds: 500),
+        );
+        handledSomething = true;
+        await $.pump(const Duration(milliseconds: 300));
+      } catch (_) {
+        // Not present this pass — see this function's own doc comment.
+      }
+    }
+
+    // Scoped to the exact error text, not just any TextButton labeled
+    // "OK" — this app has no other dialog that looks like this, but
+    // matching narrowly costs nothing and avoids ever depending on that
+    // staying true.
+    if (find
         .text(
           'Could not get your current location. Please allow location access and try again.',
         )
         .evaluate()
-        .isNotEmpty,
-    maxIterations: 30,
-  );
-  // Retried, not a single tap — confirmed for real on Android: the OK
-  // button can exist at check time and still be gone by the time
-  // tapFinder's own ensureVisible + pump reaches the actual tap ("Found 0
-  // widgets... OK"), the same class of transient-widget flakiness this
-  // file's other dismiss helpers already guard against. A few short
-  // retries is enough to land on a moment the button survives the whole
-  // tap, rather than a single attempt that can lose that race outright.
-  for (var i = 0; i < 5; i++) {
-    final okButton = find.widgetWithText(TextButton, 'OK');
-    if (okButton.evaluate().isEmpty) {
-      await $.pump(const Duration(milliseconds: 300));
-      continue;
-    }
-    try {
-      await tapFinder($, okButton);
-      return;
-    } catch (_) {
-      await $.pump(const Duration(milliseconds: 300));
-    }
-  }
-}
-
-/// `--grant-permissions=none` (run in flutter-ci.yml's EMS Android step)
-/// denies location outright *before* Test Lab launches the app — but
-/// unlike Chrome's `webPermissions: []` (a silent, no-UI denial at the
-/// browser level), Android's own permission model has no "pre-decided
-/// denied" state: the very first `Geolocator.requestPermission()` call
-/// still throws up the real system "Allow AmDash to access this device's
-/// location?" dialog, exactly as it would for a real user. Confirmed for
-/// real via a downloaded Firebase Test Lab video recording: the dialog
-/// appeared and then sat there, untouched, for the rest of the entire
-/// test — the test still passed, because Patrol's Flutter-level taps
-/// inject directly into the Flutter engine rather than going through
-/// Android's real touch system, so the form underneath kept working
-/// regardless. That's a misleading recording, not a real pass: a human
-/// driving this by hand would be stuck looking at an unanswered system
-/// prompt.
-///
-/// Two earlier attempts at this (tapping "Don't allow" by exact text,
-/// then by textContains, both retried) actually landed one real,
-/// logged-successful tap — and the dialog was *still* sitting there at
-/// the end of the recording regardless. Root cause: `LocationTrackingSection`
-/// re-polls location every 15s for as long as this form stays mounted
-/// (see that file's own `Timer.periodic`), and each poll can re-trigger
-/// this exact same dialog — one successful dismissal doesn't mean it
-/// stays dismissed. Looping for a real stretch of time here, rather than
-/// returning after the first success, absorbs at least one more
-/// recurrence. Also switched to Patrol's purpose-built permission API
-/// (`isPermissionDialogVisible`/`denyPermission`) instead of matching
-/// button text at all — more robust, and immune to whatever text-match
-/// subtlety made the previous attempts land a real tap that still
-/// somehow didn't stick.
-Future<void> denyNativeLocationPermissionDialog(
-  PatrolIntegrationTester $,
-) async {
-  if (kIsWeb) return;
-  final deadline = DateTime.now().add(const Duration(seconds: 20));
-  while (DateTime.now().isBefore(deadline)) {
-    final visible = await $.platform.mobile.isPermissionDialogVisible(
-      timeout: const Duration(seconds: 2),
-    );
-    if (visible) {
-      try {
-        await $.platform.mobile.denyPermission();
-      } catch (_) {
-        // Best-effort — see this function's own doc comment.
+        .isNotEmpty) {
+      final okButton = find.widgetWithText(TextButton, 'OK');
+      if (okButton.evaluate().isNotEmpty) {
+        handledSomething = true;
+        try {
+          await tapFinder($, okButton);
+        } catch (_) {
+          // Retried on the next loop iteration regardless — see this
+          // function's own doc comment on why a single attempt isn't
+          // reliable here.
+        }
+        await $.pump(const Duration(milliseconds: 300));
       }
-      await $.pump(const Duration(milliseconds: 300));
-    } else {
-      await $.pump(const Duration(milliseconds: 500));
     }
-  }
-}
 
-/// `LocationTrackingSection` requests location on every `PatientUploadScreen`
-/// mount (see that file's own doc comment). On a real Android device —
-/// never on Chrome, where geolocation is denied entirely at the browser
-/// level via `webPermissions: []`, no native prompt involved — this can
-/// trigger a native Google Play Services "For a better experience, your
-/// device will need to use Location Accuracy" dialog. Confirmed for real
-/// via a downloaded Firebase Test Lab video recording: two of these sat
-/// stacked on top of the entire app, and every subsequent Flutter finder
-/// call silently found nothing, because this dialog isn't part of the
-/// Flutter widget tree at all — it's native Android UI Patrol's own
-/// finders have no way to see. Dismissed via Patrol's native (UiAutomator-
-/// backed) automation instead, not a Flutter finder. Best-effort and
-/// bounded: it may not appear at all — with the OS permission itself now
-/// explicitly denied above, this dialog (which only fires once
-/// permission *is* granted but device accuracy settings aren't) should
-/// never actually trigger for this test anymore; left in place as cheap,
-/// harmless defense-in-depth rather than removed. `$.native` isn't
-/// meaningfully backed by anything on web, where this file also runs —
-/// skip there entirely.
-Future<void> dismissNativeLocationAccuracyDialog(
-  PatrolIntegrationTester $,
-) async {
-  if (kIsWeb) return;
-  for (var i = 0; i < 2; i++) {
-    try {
-      await $.platform.tap(
-        Selector(text: 'No thanks'),
-        timeout: const Duration(seconds: 2),
-      );
-      await $.pump(const Duration(milliseconds: 300));
-    } catch (_) {
-      // Not present (this time, or anymore) — nothing more to dismiss.
-      break;
+    if (handledSomething) {
+      everHandledSomething = true;
+      consecutiveMisses = 0;
+    } else {
+      consecutiveMisses++;
+      final gracePassed = DateTime.now().isAfter(grace);
+      if (consecutiveMisses >= 2 && (everHandledSomething || gracePassed)) {
+        return;
+      }
+      await $.pump(const Duration(milliseconds: 500));
     }
   }
 }
@@ -328,9 +308,7 @@ void main() {
       $,
       () => find.byType(PatientUploadScreen).evaluate().isNotEmpty,
     );
-    await denyNativeLocationPermissionDialog($);
-    await dismissNativeLocationAccuracyDialog($);
-    await dismissLocationPermissionDialog($);
+    await settleLocationPrompts($);
     await enterTextAt($, 0, patientName);
     await enterTextAt($, 2, 'TEST-12345');
     await enterTextAt($, 3, '80');
@@ -384,9 +362,7 @@ void main() {
       () => find.text(patientName).evaluate().isNotEmpty,
       maxIterations: 40,
     );
-    await denyNativeLocationPermissionDialog($);
-    await dismissNativeLocationAccuracyDialog($);
-    await dismissLocationPermissionDialog($);
+    await settleLocationPrompts($);
     await enterTextAt($, 3, '95');
     await tapKey($, 'patient_upload_submit');
     await pumpUntil(
