@@ -163,51 +163,42 @@ Future<void> dismissLocationPermissionDialog(PatrolIntegrationTester $) async {
 /// Android's real touch system, so the form underneath kept working
 /// regardless. That's a misleading recording, not a real pass: a human
 /// driving this by hand would be stuck looking at an unanswered system
-/// prompt. Tapping "Don't allow" explicitly — via Patrol's native
-/// automation, since this dialog isn't part of the Flutter widget tree
-/// at all — is also the semantically correct choice here: this test
-/// explicitly runs with live tracking off.
+/// prompt.
+///
+/// Two earlier attempts at this (tapping "Don't allow" by exact text,
+/// then by textContains, both retried) actually landed one real,
+/// logged-successful tap — and the dialog was *still* sitting there at
+/// the end of the recording regardless. Root cause: `LocationTrackingSection`
+/// re-polls location every 15s for as long as this form stays mounted
+/// (see that file's own `Timer.periodic`), and each poll can re-trigger
+/// this exact same dialog — one successful dismissal doesn't mean it
+/// stays dismissed. Looping for a real stretch of time here, rather than
+/// returning after the first success, absorbs at least one more
+/// recurrence. Also switched to Patrol's purpose-built permission API
+/// (`isPermissionDialogVisible`/`denyPermission`) instead of matching
+/// button text at all — more robust, and immune to whatever text-match
+/// subtlety made the previous attempts land a real tap that still
+/// somehow didn't stick.
 Future<void> denyNativeLocationPermissionDialog(
   PatrolIntegrationTester $,
 ) async {
   if (kIsWeb) return;
-  // Retried, not a single attempt — a first try at this exact same spot
-  // (single 3s-timeout attempt, no retry) still showed the dialog
-  // untouched for an entire real Test Lab recording: the native
-  // permission-request round trip (platform channel hop, then Android
-  // actually rendering the system dialog) doesn't always land inside one
-  // timeout window. A SECOND attempt (textContains, 5 retries) *also*
-  // left the dialog completely untouched for the whole test — worth
-  // knowing which of "not found" vs some other native-automator error is
-  // actually happening before guessing a third time, so this print is
-  // deliberately left in (TEMPORARY — remove once this is confirmed
-  // working from a real recording, not just a passing test). Tries both
-  // a straight and a typographic apostrophe under `text:` (exact match,
-  // patrol's best-documented/most-used selector field) rather than
-  // `textContains`, whose Android-side support is only explicitly
-  // documented for iOS in patrol's own source.
-  for (var i = 0; i < 5; i++) {
-    for (final label in ["Don't allow", 'Don’t allow']) {
+  final deadline = DateTime.now().add(const Duration(seconds: 20));
+  while (DateTime.now().isBefore(deadline)) {
+    final visible = await $.platform.mobile.isPermissionDialogVisible(
+      timeout: const Duration(seconds: 2),
+    );
+    if (visible) {
       try {
-        await $.platform.tap(
-          Selector(text: label),
-          timeout: const Duration(seconds: 2),
-        );
-        await $.pump(const Duration(milliseconds: 300));
-        // ignore: avoid_print
-        print('denyNativeLocationPermissionDialog: tapped "$label"');
-        return;
-      } catch (error) {
-        // ignore: avoid_print
-        print('denyNativeLocationPermissionDialog: "$label" failed: $error');
+        await $.platform.mobile.denyPermission();
+      } catch (_) {
+        // Best-effort — see this function's own doc comment.
       }
+      await $.pump(const Duration(milliseconds: 300));
+    } else {
+      await $.pump(const Duration(milliseconds: 500));
     }
-    await $.pump(const Duration(milliseconds: 500));
   }
-  // Not present after all those attempts — Android only asks once per
-  // app-install, so a later mount of this same screen (e.g. reopening to
-  // edit) genuinely won't see it again; this is a legitimate no-op then,
-  // not a failure being swallowed.
 }
 
 /// `LocationTrackingSection` requests location on every `PatientUploadScreen`
