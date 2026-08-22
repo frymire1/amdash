@@ -298,6 +298,21 @@ jobs:
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
 
+      # ems's own run step below needs `gcloud beta` (--grant-permissions
+      # is beta-only — see that step's own comment). ubuntu-latest's
+      # preinstalled gcloud is an apt/system package with its component
+      # manager disabled entirely (confirmed for real: `gcloud components
+      # install beta` fails outright with "the Google Cloud CLI component
+      # manager is disabled for this installation") — swap it for a real,
+      # component-manageable Cloud SDK install instead of trying to
+      # extend the locked one. Installed *before* auth below (standard
+      # ordering for these two actions together) so the fresh install
+      # doesn't risk clobbering the auth step's own gcloud-level config.
+      - name: Install gcloud (component-manageable, with beta)
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: beta
+
       # google-github-actions/auth sets up both gcloud CLI credentials and
       # Application Default Credentials from the service account key in
       # one step — the GHA-native replacement for manually writing a key
@@ -310,15 +325,6 @@ jobs:
 
       - name: Set gcloud project
         run: gcloud config set project amdash-dev
-
-      # ems's own run step below needs `gcloud beta` (--grant-permissions
-      # is beta-only — see that step's own comment) — not guaranteed
-      # present on a hosted runner's preinstalled gcloud, and installing it
-      # lazily on first use would either prompt interactively (hangs with
-      # no TTY) or fail outright. --quiet makes this non-interactive and a
-      # no-op if already installed.
-      - name: Install gcloud beta component
-        run: gcloud components install beta --quiet
 
       # TEMPORARY diagnostic — both physician and ems runs have hit "A
       # non-retryable error occurred" after 1-2s of real device time (before
