@@ -634,9 +634,21 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     String? keyPrefix,
   }) {
     final safeValue = options.contains(value) ? value : null;
+    // isExpanded + Text's own overflow: ellipsis — without both, a long
+    // option (a real hospital name easily runs past what a phone's actual
+    // screen width allows, unlike a desktop Chrome viewport) overflows the
+    // field on the right instead of truncating. Confirmed for real on a
+    // narrow Android device: a RenderFlex overflow here didn't just show
+    // the usual harmless debug-mode striped indicator — it crashed with a
+    // secondary "Looking up a deactivated widget's ancestor is unsafe"
+    // assertion while Flutter's own error-reporting tried to describe it
+    // mid-rebuild, taking the whole test down.
+    Widget optionText(String option) =>
+        Text(option, overflow: TextOverflow.ellipsis);
     return DropdownButtonFormField<String>(
       key: keyPrefix != null ? Key('${keyPrefix}_dropdown') : null,
       initialValue: safeValue,
+      isExpanded: true,
       decoration: InputDecoration(labelText: label),
       items: [
         for (final option in options)
@@ -645,9 +657,9 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
             child: keyPrefix != null
                 ? KeyedSubtree(
                     key: Key('${keyPrefix}_option_$option'),
-                    child: Text(option),
+                    child: optionText(option),
                   )
-                : Text(option),
+                : optionText(option),
           ),
       ],
       onChanged: onChanged,
