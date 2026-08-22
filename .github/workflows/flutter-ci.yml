@@ -326,27 +326,6 @@ jobs:
       - name: Set gcloud project
         run: gcloud config set project amdash-dev
 
-      # TEMPORARY diagnostic — both physician and ems runs have hit "A
-      # non-retryable error occurred" after 1-2s of real device time (before
-      # the app could plausibly even finish launching), yet gcloud's own
-      # summary + exit code report success, so this job isn't a trustworthy
-      # signal right now. Cheap (no APK build/upload/device time) sanity
-      # check on whether tokay+API 35 is still a valid, supported Test Lab
-      # catalog entry, to rule that in/out before spending real device time
-      # chasing other theories. First attempt used the wrong filter field
-      # (modelId isn't real — "WARNING: filter keys were not present in any
-      # resource: modelId", 0 items — but it also printed "WARNING: Some
-      # devices are deprecated", a real hint), so dump the full catalog
-      # this time and grep client-side instead of trusting --filter syntax
-      # I can't verify locally. Remove once root-caused.
-      - name: DEBUG - dump Android Test Lab device catalog
-        run: |
-          gcloud firebase test android models list --format=json > /tmp/models.json
-          echo "=== tokay entry (if any), raw JSON so field names are verifiable ==="
-          jq '.[] | select(.id == "tokay")' /tmp/models.json
-          echo "=== full catalog, default table format ==="
-          gcloud firebase test android models list
-
       # Seeding and teardown are split into their own steps (rather than
       # one seed->test->teardown script per app, the way web-e2e works)
       # because `patrol build` + `gcloud ... run` doesn't fit that shape —
@@ -390,16 +369,18 @@ jobs:
             --results-bucket=gs://amdash-dev-test-lab-results \
             2>&1 | tee /tmp/physician-testlab.log
 
-      # TEMPORARY diagnostic — see flutter-android-e2e's device-catalog
-      # diagnostic step above for the full background. tokay/API 35 turned
-      # out to be a perfectly valid, current, non-deprecated device, which
-      # rules that theory out — so the actual crash/error detail has to
-      # come from Test Lab's own raw results (logcat + instrumentation
-      # output), which the gcloud CLI's own summary never shows. Pull the
-      # GCS bucket path out of the run's own "Raw results will be stored
-      # in your GCS bucket at [...]" line, list everything in it, and cat
-      # anything that looks like text. Remove once root-caused.
-      - name: DEBUG - dump physician Test Lab raw results
+      # Permanent diagnostic, not tied to any specific investigation — the
+      # gcloud CLI's own summary never shows the actual crash/error detail
+      # (a real device failure just reads "1 test cases failed" with no
+      # further context), so pull the GCS bucket path out of the run's own
+      # "Raw results will be stored in your GCS bucket at [...]" line, list
+      # everything in it, and cat anything that looks like text
+      # (logcat/instrumentation.results especially). This is what made
+      # every real Android e2e bug this session traceable at all —
+      # including the empty-test-APK root cause, a location-permission
+      # dialog invisible to Flutter's own finders, and a RenderFlex
+      # overflow — worth keeping for whatever's next.
+      - name: Dump physician Test Lab raw results
         if: always()
         run: |
           BUCKET_PATH=$(grep -oE 'storage/browser/[^]]+' /tmp/physician-testlab.log | head -1 | sed 's#storage/browser/##')
@@ -454,8 +435,8 @@ jobs:
             --results-bucket=gs://amdash-dev-test-lab-results \
             2>&1 | tee /tmp/ems-testlab.log
 
-      # TEMPORARY diagnostic — see the physician one above, same rationale.
-      - name: DEBUG - dump ems Test Lab raw results
+      # Permanent diagnostic — see the physician one above, same rationale.
+      - name: Dump ems Test Lab raw results
         if: always()
         run: |
           BUCKET_PATH=$(grep -oE 'storage/browser/[^]]+' /tmp/ems-testlab.log | head -1 | sed 's#storage/browser/##')
