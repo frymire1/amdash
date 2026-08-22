@@ -387,8 +387,30 @@ void main() {
 
     Future<void> tapCardButton(String buttonLabel) async {
       final finder = cardButtonFor(patientName, buttonLabel);
-      await pumpUntil($, () => finder.evaluate().isNotEmpty, maxIterations: 30);
-      await tapFinder($, finder);
+      // Retries the whole find-then-tap cycle, not just the initial wait —
+      // confirmed via a real GHA failure on Firebase Test Lab's ARM virtual
+      // device: pumpUntil found the button, but tapFinder's own tap() threw
+      // "Found 0 widgets ... could not find any matching widgets" on the
+      // very same finder moments later. The home screen rebuilds on every
+      // Firestore snapshot from its own live uploadedPatientsProvider watch
+      // (see cardButtonFor's own comment above), and that gap between
+      // pumpUntil's check and tap()'s own re-evaluation is apparently wide
+      // enough for one of those rebuilds to land in between. Re-running the
+      // full wait-then-tap cycle rides out a single bad rebuild.
+      for (var attempt = 0; attempt < 3; attempt++) {
+        await pumpUntil(
+          $,
+          () => finder.evaluate().isNotEmpty,
+          maxIterations: 30,
+        );
+        try {
+          await tapFinder($, finder);
+          return;
+        } catch (_) {
+          if (attempt == 2) rethrow;
+          await $.pump(const Duration(milliseconds: 300));
+        }
+      }
     }
 
     await tapCardButton('Edit');
