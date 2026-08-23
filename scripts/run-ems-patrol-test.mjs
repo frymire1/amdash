@@ -107,30 +107,48 @@ async function cleanup(db, auth, smokeAccountUid) {
   // step, but if it failed partway through (after create, before delete),
   // sweep for anything left behind so it doesn't linger in test-org.
   //
-  // NOTE this query is currently a no-op: `name` is encrypted client-side
-  // by the real upload flow this test's patient goes through (see
+  // A name/destination-based query (what an earlier version of this
+  // function used) is a dead end: `name` is encrypted client-side by the
+  // real upload flow this test's patient goes through (see
   // patient_upload_service.dart/encryptPatientFields), so a plaintext
-  // range query against it can never match. Confirmed for real — several
-  // genuinely leftover "Patrol EMS Test Patient..." documents accumulated
-  // in test-org from failed runs today despite this sweep reporting 0
-  // every time. Unlike run-patient-flow-e2e.mjs's equivalent patient (see
-  // its own cleanup(), fixed the same day this was found), this test's
-  // patient sets no `destination` either, so there's no other reliably
-  // plaintext field to match on — left as a known gap rather than a fake
-  // fix. The real safety net is the dialog-dismiss fix in ems_test.dart
-  // itself (see dismissLocationPermissionDialog), which was the actual
-  // cause of every leftover found so far; a passing run always reaches
-  // its own explicit delete step.
-  const patientSnap = await db
-    .collection('patients')
-    .where('name', '>=', 'Patrol EMS Test Patient')
-    .where('name', '<', 'Patrol EMS Test Patiend')
-    .get();
-  for (const doc of patientSnap.docs) await doc.ref.delete();
+  // range query against it can never match, and this test's patient sets
+  // no `destination` either — confirmed for real, several genuinely
+  // leftover "Patrol EMS Test Patient..." documents accumulated in
+  // test-org from failed runs while that query reported 0 every time.
+  //
+  // `createdBy` is the reliable signal instead: every patient write stamps
+  // it with the creating user's uid (patient_upload_service.dart's own
+  // doc comment), in plaintext, unconditionally. A patient whose
+  // `createdBy` uid no longer resolves to a real Auth user can only be one
+  // this script's own account-sweep already deleted above — a genuine
+  // person's account is never deleted out from under their own patients
+  // in normal use, so "owner doesn't exist" is an unambiguous signal this
+  // is orphaned test debris, not a guess. Also safe against sibling jobs:
+  // a concurrently-running job's account still exists until *that* job's
+  // own cleanup deletes it, so this can never catch a patient still
+  // legitimately in use elsewhere — no separate age guard needed the way
+  // the prefix-based account sweep above requires one.
+  const organizationId = await findOrganizationId(db, 'test-org');
+  const testOrgPatientsSnap = await db.collection('patients').where('organizationId', '==', organizationId).get();
+  const ownerUids = [...new Set(testOrgPatientsSnap.docs.map((doc) => doc.data().createdBy).filter(Boolean))];
+  const existingUids = new Set();
+  for (let i = 0; i < ownerUids.length; i += 100) {
+    const batch = ownerUids.slice(i, i + 100).map((uid) => ({ uid }));
+    const { users } = await auth.getUsers(batch);
+    for (const user of users) existingUids.add(user.uid);
+  }
+  let deletedPatients = 0;
+  for (const doc of testOrgPatientsSnap.docs) {
+    const owner = doc.data().createdBy;
+    if (owner && !existingUids.has(owner)) {
+      await doc.ref.delete();
+      deletedPatients++;
+    }
+  }
 
   console.log(
     `Cleanup: removed throwaway EMS account, ${deletedUsers} other leftover EMS account(s), ` +
-      `${patientSnap.size} leftover patient(s).`,
+      `${deletedPatients} leftover patient(s) with a deleted owner.`,
   );
 }
 
