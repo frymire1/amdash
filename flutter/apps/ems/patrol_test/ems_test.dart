@@ -434,56 +434,85 @@ void main() {
       }
     }
 
-    await tapCardButton('Edit');
-    await pumpUntil(
-      $,
-      () => find.byType(PatientUploadScreen).evaluate().isNotEmpty,
-    );
-    // Wait for the async prefill (reads the uploaded-patients list) to
-    // land before touching a field, or a fast enterText can race it and
-    // get silently overwritten a moment later.
-    await pumpUntil(
-      $,
-      () => find.text(patientName).evaluate().isNotEmpty,
-      maxIterations: 40,
-    );
-    await settleLocationPrompts($);
-    await enterTextAt($, 3, '95');
-    // Re-checked again immediately before the tap — see the Add flow's
-    // identical call above for why (this is the exact spot a real GHA
-    // failure confirmed it happening).
-    await settleLocationPrompts($);
-    await tapKey($, 'patient_upload_submit');
-    await pumpUntil(
-      $,
-      () => find.text('95 bpm').evaluate().isNotEmpty,
-      maxIterations: 40,
-    );
-    expect(
-      find.text('95 bpm'),
-      findsOneWidget,
-      reason: 'edited heart rate should show on the home screen',
-    );
+    // Raw delete action, no assertions — reused below both for the test's
+    // own real, asserted delete and as a best-effort cleanup attempt if
+    // something else fails first (see the try/finally around the rest of
+    // this test).
+    Future<void> deletePatient() async {
+      await tapCardButton('Delete');
+      await pumpUntil(
+        $,
+        () => find.text('Delete patient?').evaluate().isNotEmpty,
+      );
+      // The dialog's own confirm button is a FilledButton — distinct from
+      // the card's OutlinedButton of the same label, so no extra scoping
+      // needed to avoid hitting the card's button again by mistake.
+      await tapFinder($, find.widgetWithText(FilledButton, 'Delete'));
+      await pumpUntil(
+        $,
+        () => find.text(patientName).evaluate().isEmpty,
+        maxIterations: 40,
+      );
+    }
 
-    // Delete it.
-    await tapCardButton('Delete');
-    await pumpUntil(
-      $,
-      () => find.text('Delete patient?').evaluate().isNotEmpty,
-    );
-    // The dialog's own confirm button is a FilledButton — distinct from
-    // the card's OutlinedButton of the same label, so no extra scoping
-    // needed to avoid hitting the card's button again by mistake.
-    await tapFinder($, find.widgetWithText(FilledButton, 'Delete'));
-    await pumpUntil(
-      $,
-      () => find.text(patientName).evaluate().isEmpty,
-      maxIterations: 40,
-    );
-    expect(
-      find.text(patientName),
-      findsNothing,
-      reason: 'patient should be gone after delete',
-    );
+    // From here on, the patient definitely exists in Firestore — wrap the
+    // rest of the test (editing it, then deleting it for real) so a
+    // failure partway through the edit still attempts to delete it,
+    // instead of just leaving it orphaned for run-ems-patrol-test.mjs's
+    // own createdBy-based sweep to eventually catch on some future run.
+    // That sweep is still the real, guaranteed-to-work safety net for
+    // whatever this can't manage (e.g. the app itself too broken to find/
+    // tap Delete after some failures) — this just means the common case
+    // doesn't have to wait for it.
+    try {
+      await tapCardButton('Edit');
+      await pumpUntil(
+        $,
+        () => find.byType(PatientUploadScreen).evaluate().isNotEmpty,
+      );
+      // Wait for the async prefill (reads the uploaded-patients list) to
+      // land before touching a field, or a fast enterText can race it and
+      // get silently overwritten a moment later.
+      await pumpUntil(
+        $,
+        () => find.text(patientName).evaluate().isNotEmpty,
+        maxIterations: 40,
+      );
+      await settleLocationPrompts($);
+      await enterTextAt($, 3, '95');
+      // Re-checked again immediately before the tap — see the Add flow's
+      // identical call above for why (this is the exact spot a real GHA
+      // failure confirmed it happening).
+      await settleLocationPrompts($);
+      await tapKey($, 'patient_upload_submit');
+      await pumpUntil(
+        $,
+        () => find.text('95 bpm').evaluate().isNotEmpty,
+        maxIterations: 40,
+      );
+      expect(
+        find.text('95 bpm'),
+        findsOneWidget,
+        reason: 'edited heart rate should show on the home screen',
+      );
+
+      await deletePatient();
+      expect(
+        find.text(patientName),
+        findsNothing,
+        reason: 'patient should be gone after delete',
+      );
+    } finally {
+      // Only reached if the try block above never got to (or never
+      // finished) its own deletePatient() call — a normal pass already
+      // leaves nothing for this to find.
+      if (find.text(patientName).evaluate().isNotEmpty) {
+        try {
+          await deletePatient();
+        } catch (_) {
+          // Best-effort — see this block's own comment above.
+        }
+      }
+    }
   });
 }
