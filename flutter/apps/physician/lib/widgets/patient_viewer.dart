@@ -8,10 +8,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
 
 import '../classes/active_location.dart';
-import '../classes/vitals_history_entry.dart';
 import '../services/directions_service.dart';
 import '../services/ems_location_service.dart';
-import '../services/vitals_history_service.dart';
 import '../utils/geo.dart';
 
 const _directionsRefreshMs = 15000;
@@ -23,6 +21,24 @@ const _directionsRefreshDistanceM = 75.0;
 // "use the default" option, so the values have to be picked explicitly.
 const _routeColor = Color(0xFF1A73E8);
 const _routeWidth = 6;
+
+/// `PatientVitals`' numeric-ish fields (heartRate/oxygen/temperature) are
+/// typed `Object?` because they can also be the 'Unknown' string sentinel
+/// (see `_sharedFields` in patient_upload_service.dart) — used by
+/// `_vitalsCard`'s trend-chart series selectors to filter those out rather
+/// than plot them as zero.
+num? _numOrNull(Object? value) => value is num ? value : null;
+
+/// Splits a "120/80"-shaped blood pressure reading into its systolic
+/// (index 0) or diastolic (index 1) half, or null if it isn't in that
+/// shape at all (missing, or the 'Unknown' sentinel — splitting either by
+/// '/' yields a single-element list, so this returns null for both parts
+/// without needing to special-case the sentinel directly).
+num? _bloodPressurePart(String bloodPressure, int index) {
+  final parts = bloodPressure.split('/');
+  if (parts.length != 2) return null;
+  return num.tryParse(parts[index].trim());
+}
 
 /// Mirrors `patient-viewer.component.ts`/`.html` — the core screen: patient
 /// info/vitals cards, a live map with the animated EMS vehicle marker
@@ -79,12 +95,6 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
   // widget disposes mid-fetch, a freshly recreated instance deciding to
   // re-fetch is fine, since it checks the surviving cache's own timestamp.
   final Set<String> _pendingDirectionsFetches = {};
-
-  // Index into vitalsHistoryProvider's newest-first list — 0 is always
-  // "most recent" (see _vitalsCard). No dispose/reset logic needed:
-  // PatientViewer is keyed by patientId (see MainViewScreen), so switching
-  // patients recreates this whole State fresh.
-  int _vitalsHistoryIndex = 0;
 
   @override
   void dispose() {
@@ -349,29 +359,19 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
   }
 
   // Same shape as _infoCard, but the header carries a "Recorded {time}"
-  // stamp plus back/forward arrows for stepping through
-  // vitalsHistoryProvider's newest-first list instead of a plain title —
-  // index 0 there is always the most recently recorded set, which is what
-  // shows by default. Falls back to patient.vitals with no timestamp and
-  // no arrows while history is still loading, or for a patient that
-  // predates this feature (no history entries exist for it at all) —
-  // there's nothing to browse in either case.
+  // stamp from the latest vitalsHistoryProvider entry. Used to let you
+  // step back through older readings inline (arrow buttons swapping which
+  // snapshot the whole card showed) — replaced by a per-vital trend icon
+  // in _infoRow instead (see showVitalsTrendDialog), so this card always
+  // shows the patient's current vitals and history browsing only happens
+  // through that dialog. Falls back to patient.vitals with no timestamp
+  // while history is still loading, or for a patient that predates this
+  // feature (no history entries exist for it at all).
   Widget _vitalsCard(Patient patient) {
     final patientId = patient.id;
     final history = patientId == null ? const <VitalsHistoryEntry>[] : ref.watch(vitalsHistoryProvider(patientId)).valueOrNull ?? const [];
-
-    if (_vitalsHistoryIndex > 0 && _vitalsHistoryIndex >= history.length) {
-      // The list can only ever grow shorter than a still-valid index if a
-      // patient somehow lost history entries mid-view (shouldn't happen —
-      // nothing deletes individual entries) — clamp defensively rather
-      // than risk a range error.
-      _vitalsHistoryIndex = history.isEmpty ? 0 : history.length - 1;
-    }
-
-    final selected = history.isEmpty ? null : history[_vitalsHistoryIndex];
-    final vitals = selected?.vitals ?? patient.vitals;
-    final canStepBack = _vitalsHistoryIndex + 1 < history.length;
-    final canStepForward = _vitalsHistoryIndex > 0;
+    final vitals = patient.vitals;
+    final latestRecordedAt = history.isEmpty ? null : history.first.recordedAt;
 
     return Card(
       child: Padding(
@@ -379,33 +379,13 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Text('Vital Signs', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                ),
-                if (canStepForward)
-                  IconButton(
-                    icon: const Icon(Icons.arrow_forward, size: 18),
-                    tooltip: 'More recent vitals',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () => setState(() => _vitalsHistoryIndex--),
-                  ),
-                if (canStepBack)
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back, size: 18),
-                    tooltip: 'Previous vitals',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () => setState(() => _vitalsHistoryIndex++),
-                  ),
-              ],
-            ),
+            const Text('Vital Signs', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             Padding(
-              padding: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.only(top: 4, bottom: 12),
               child: Text(
-                selected?.recordedAt == null
+                latestRecordedAt == null
                     ? 'No upload history recorded for this patient'
-                    : 'Recorded ${DateFormat('MMM d, h:mm a').format(selected!.recordedAt!)}',
+                    : 'Recorded ${DateFormat('MMM d, h:mm a').format(latestRecordedAt)}',
                 style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             ),
@@ -413,12 +393,49 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
               spacing: 16,
               runSpacing: 12,
               children: [
-                _infoRow('Heart Rate', vitals.heartRate, suffix: 'bpm'),
-                _infoRow('Blood Pressure', vitals.bloodPressure),
-                _infoRow('Oxygen', vitals.oxygen, suffix: '%'),
-                _infoRow('Temperature', vitals.temperature, suffix: '°C'),
-                _infoRow('Respiratory Rate', vitals.respiratoryRate, suffix: 'breaths/min'),
-                _infoRow('GCS', vitals.gcs),
+                _infoRow(
+                  'Heart Rate',
+                  vitals.heartRate,
+                  suffix: 'bpm',
+                  history: history,
+                  trendSeries: [VitalSeries(label: 'Heart Rate', selector: (v) => _numOrNull(v.heartRate))],
+                ),
+                _infoRow(
+                  'Blood Pressure',
+                  vitals.bloodPressure,
+                  history: history,
+                  trendSeries: [
+                    VitalSeries(label: 'Systolic', selector: (v) => _bloodPressurePart(v.bloodPressure, 0), color: AppColors.trackingAccent),
+                    VitalSeries(label: 'Diastolic', selector: (v) => _bloodPressurePart(v.bloodPressure, 1), color: AppColors.brand),
+                  ],
+                ),
+                _infoRow(
+                  'Oxygen',
+                  vitals.oxygen,
+                  suffix: '%',
+                  history: history,
+                  trendSeries: [VitalSeries(label: 'Oxygen', selector: (v) => _numOrNull(v.oxygen))],
+                ),
+                _infoRow(
+                  'Temperature',
+                  vitals.temperature,
+                  suffix: '°C',
+                  history: history,
+                  trendSeries: [VitalSeries(label: 'Temperature', selector: (v) => _numOrNull(v.temperature))],
+                ),
+                _infoRow(
+                  'Respiratory Rate',
+                  vitals.respiratoryRate,
+                  suffix: 'breaths/min',
+                  history: history,
+                  trendSeries: [VitalSeries(label: 'Respiratory Rate', selector: (v) => v.respiratoryRate)],
+                ),
+                _infoRow(
+                  'GCS',
+                  vitals.gcs,
+                  history: history,
+                  trendSeries: [VitalSeries(label: 'GCS', selector: (v) => v.gcs)],
+                ),
               ],
             ),
           ],
@@ -427,11 +444,23 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
     );
   }
 
-  Widget _infoRow(String label, Object? value, {String? suffix}) {
+  // [trendSeries]/[history] are only passed by _vitalsCard — every other
+  // call site (IV size/placement, etc.) leaves them at their defaults and
+  // gets no trend icon, since there's no history for those fields at all.
+  Widget _infoRow(
+    String label,
+    Object? value, {
+    String? suffix,
+    List<VitalSeries>? trendSeries,
+    List<VitalsHistoryEntry> history = const [],
+  }) {
     final provided = isProvidedValue(value);
     final text = provided ? (suffix == null ? '$value' : '$value $suffix') : 'Not added by EMS yet';
     final palette = context.palette;
     final colorScheme = Theme.of(context).colorScheme;
+    // A single reading isn't a trend — the icon only appears once there's
+    // actually something to chart.
+    final showTrend = trendSeries != null && history.length > 1;
     return SizedBox(
       width: 200,
       child: Container(
@@ -445,7 +474,28 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(label, style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant)),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(label, style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant)),
+                ),
+                if (showTrend)
+                  InkWell(
+                    onTap: () => showVitalsTrendDialog(
+                      context,
+                      title: label,
+                      history: history,
+                      series: trendSeries,
+                      unit: suffix == null ? null : ' $suffix',
+                    ),
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Icon(Icons.show_chart, size: 14, color: AppColors.trackingAccent),
+                    ),
+                  ),
+              ],
+            ),
             Text(
               text,
               style: TextStyle(

@@ -1,4 +1,5 @@
 import 'package:amdash_core/amdash_core.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,6 +28,24 @@ const _ivPlacements = [
 ];
 
 const _genders = ['Male', 'Female', 'Other'];
+
+/// `PatientVitals`' numeric-ish fields (heartRate/oxygen/temperature) are
+/// typed `Object?` because they can also be the 'Unknown' string sentinel
+/// (see `_sharedFields` in patient_upload_service.dart) — used by the
+/// trend-chart series selectors below to filter those out rather than
+/// plot them as zero.
+num? _numOrNull(Object? value) => value is num ? value : null;
+
+/// Splits a "120/80"-shaped blood pressure reading into its systolic
+/// (index 0) or diastolic (index 1) half, or null if it isn't in that
+/// shape at all (missing, or the 'Unknown' sentinel — splitting either by
+/// '/' yields a single-element list, so this returns null for both parts
+/// without needing to special-case the sentinel directly).
+num? _bloodPressurePart(String bloodPressure, int index) {
+  final parts = bloodPressure.split('/');
+  if (parts.length != 2) return null;
+  return num.tryParse(parts[index].trim());
+}
 
 /// Mirrors `patient-upload.component.ts`/`.html` — create/edit patient
 /// form. `patientId` is null in create mode.
@@ -188,6 +207,50 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     return '$systolic/$diastolic';
   }
 
+  Future<void> _showOfflineDialog() {
+    return showErrorDialog(
+      context,
+      title: "You're offline",
+      message:
+          "This patient couldn't be uploaded because your device has no connection right now. "
+          "Nothing has been lost — your entries are still here. Try again once you're back online.",
+    );
+  }
+
+  // Only network-shaped failures get the offline-specific popup — anything
+  // else (validation, permission-denied, etc.) keeps surfacing as today's
+  // generic error message. uploadPatient wraps the callable's own error in
+  // a PatientSaveException, so unwrap that first to see the real cause.
+  bool _isNetworkUploadError(Object error) {
+    final cause = error is PatientSaveException ? error.cause : error;
+    return cause is FirebaseFunctionsException &&
+        (cause.code == 'unavailable' || cause.code == 'deadline-exceeded');
+  }
+
+  // Only shown once vitalsHistory has more than one entry — a single
+  // reading isn't a trend, and returning null here (rather than an
+  // invisible/disabled icon) lets each field's decoration omit the
+  // suffixIcon slot entirely.
+  Widget? _trendSuffixIcon(
+    String label,
+    List<VitalsHistoryEntry> history,
+    List<VitalSeries> series, {
+    String? unit,
+  }) {
+    if (history.length <= 1) return null;
+    return IconButton(
+      icon: const Icon(Icons.show_chart, size: 20),
+      tooltip: '$label trend',
+      onPressed: () => showVitalsTrendDialog(
+        context,
+        title: label,
+        history: history,
+        series: series,
+        unit: unit,
+      ),
+    );
+  }
+
   Future<void> _showLocationPermissionDialog() async {
     if (!mounted) return;
     await showErrorDialog(
@@ -205,6 +268,19 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     // (e.g. a fast real double-tap, or two dispatched-close-together
     // synthetic taps) — not just relying on the button being disabled.
     if (_submitting) return;
+
+    // Only the create path is at risk here — edits go through Firestore's
+    // normal write path and get its automatic offline queueing for free.
+    // Creating a patient instead calls uploadPatientDocument, which must
+    // atomically seed location/current alongside the patient doc (see that
+    // function's own doc comment), so it can't be queued client-side the
+    // same way; skip the doomed network call entirely rather than let it
+    // time out.
+    final isCreate = _editingId == null;
+    if (isCreate && ref.read(isOfflineProvider)) {
+      await _showOfflineDialog();
+      return;
+    }
 
     final values = PatientFormValues(
       name: _nameController.text.trim(),
@@ -275,12 +351,16 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
         ),
       });
     } catch (error) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Failed to upload patient. Please try again.';
-          _submitting = false;
-        });
+      if (!mounted) return;
+      if (isCreate && _isNetworkUploadError(error)) {
+        setState(() => _submitting = false);
+        await _showOfflineDialog();
+        return;
       }
+      setState(() {
+        _errorMessage = 'Failed to upload patient. Please try again.';
+        _submitting = false;
+      });
       return;
     }
 
@@ -309,6 +389,9 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
   Widget build(BuildContext context) {
     _maybePrefill(ref.watch(uploadedPatientsProvider).valueOrNull ?? const []);
     final hospitalNames = ref.watch(hospitalNamesProvider);
+    final vitalsHistory = _editingId == null
+        ? const <VitalsHistoryEntry>[]
+        : ref.watch(vitalsHistoryProvider(_editingId!)).valueOrNull ?? const [];
 
     // No Scaffold/NavBar of its own — this screen lives inside the app's
     // ShellRoute now, which owns those. OfflineBanner matters more here
@@ -395,8 +478,19 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
                     _section('Vitals', [
                       TextField(
                         controller: _heartRateController,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Heart Rate (bpm)',
+                          suffixIcon: _trendSuffixIcon(
+                            'Heart Rate',
+                            vitalsHistory,
+                            [
+                              VitalSeries(
+                                label: 'Heart Rate',
+                                selector: (v) => _numOrNull(v.heartRate),
+                              ),
+                            ],
+                            unit: ' bpm',
+                          ),
                         ),
                         keyboardType: TextInputType.number,
                         inputFormatters: [
@@ -444,12 +538,36 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
                               ],
                             ),
                           ),
+                          _trendSuffixIcon('Blood Pressure', vitalsHistory, [
+                                VitalSeries(
+                                  label: 'Systolic',
+                                  selector: (v) =>
+                                      _bloodPressurePart(v.bloodPressure, 0),
+                                ),
+                                VitalSeries(
+                                  label: 'Diastolic',
+                                  selector: (v) =>
+                                      _bloodPressurePart(v.bloodPressure, 1),
+                                ),
+                              ]) ??
+                              const SizedBox.shrink(),
                         ],
                       ),
                       TextField(
                         controller: _oxygenController,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Oxygen (%)',
+                          suffixIcon: _trendSuffixIcon(
+                            'Oxygen',
+                            vitalsHistory,
+                            [
+                              VitalSeries(
+                                label: 'Oxygen',
+                                selector: (v) => _numOrNull(v.oxygen),
+                              ),
+                            ],
+                            unit: '%',
+                          ),
                         ),
                         keyboardType: TextInputType.number,
                         inputFormatters: [
@@ -458,8 +576,19 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
                       ),
                       TextField(
                         controller: _temperatureController,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Temperature (°C)',
+                          suffixIcon: _trendSuffixIcon(
+                            'Temperature',
+                            vitalsHistory,
+                            [
+                              VitalSeries(
+                                label: 'Temperature',
+                                selector: (v) => _numOrNull(v.temperature),
+                              ),
+                            ],
+                            unit: '°C',
+                          ),
                         ),
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
@@ -472,8 +601,19 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
                       ),
                       TextField(
                         controller: _respiratoryRateController,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Respiratory Rate (breaths/min)',
+                          suffixIcon: _trendSuffixIcon(
+                            'Respiratory Rate',
+                            vitalsHistory,
+                            [
+                              VitalSeries(
+                                label: 'Respiratory Rate',
+                                selector: (v) => v.respiratoryRate,
+                              ),
+                            ],
+                            unit: '/min',
+                          ),
                         ),
                         keyboardType: TextInputType.number,
                         inputFormatters: [
@@ -482,9 +622,12 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
                       ),
                       TextField(
                         controller: _gcsController,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'GCS',
                           hintText: '3-15',
+                          suffixIcon: _trendSuffixIcon('GCS', vitalsHistory, [
+                            VitalSeries(label: 'GCS', selector: (v) => v.gcs),
+                          ]),
                         ),
                         keyboardType: TextInputType.number,
                         inputFormatters: [

@@ -1,13 +1,15 @@
-import 'package:amdash_core/amdash_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+import 'patient.dart';
 
 /// One past vitals reading for a patient, from
 /// `patients/{patientId}/vitalsHistory` — appended server-side
 /// (functions/src/patients.ts's onPatientCreated/onPatientUpdated)
 /// whenever EMS submits a patient with different vitals than last time,
 /// never written by a client directly. [VitalsHistoryService] orders these
-/// newest-first, so index 0 is always the most recently recorded set —
-/// what `PatientViewer`'s Vital Signs card shows by default.
+/// newest-first, so index 0 is always the most recently recorded set.
+/// Shared by physician (read-only vitals display) and EMS (edit-form trend
+/// icons) — lives in amdash_core rather than either app's private lib.
 class VitalsHistoryEntry {
   const VitalsHistoryEntry({required this.vitals, required this.recordedAt});
 
