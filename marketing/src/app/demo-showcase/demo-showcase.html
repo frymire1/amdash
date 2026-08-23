@@ -1,0 +1,42 @@
+<div class="showcase" role="region" aria-label="AmDash app demo">
+  <div class="track-wrap" [style.height.px]="trackHeight()">
+    <div class="track" #track (scroll)="onScroll()">
+      @for (slide of slides; track slide.src; let i = $index) {
+        <div class="slide">
+          <div class="slide-media" #slideMedia>
+            <img [src]="slide.src" [alt]="slide.alt" (load)="onImageLoad(i)" />
+            @for (callout of slide.callouts; track callout.label) {
+              <div class="callout" [style.left.%]="callout.xPercent" [style.top.%]="callout.yPercent">
+                <span class="callout-dot"></span>
+                <span class="callout-label">{{ callout.label }}</span>
+              </div>
+            }
+          </div>
+        </div>
+      }
+    </div>
+  </div>
+
+  <div class="slide-info">
+    <div class="eyebrow">{{ slides[currentIndex()].eyebrow }}</div>
+    <h3>{{ slides[currentIndex()].title }}</h3>
+    <p>{{ slides[currentIndex()].caption }}</p>
+  </div>
+
+  <div class="controls">
+    <button class="nav-arrow" type="button" (click)="prev()" aria-label="Previous screenshot">&#8249;</button>
+    <div class="dots">
+      @for (slide of slides; track slide.src; let i = $index) {
+        <button
+          type="button"
+          class="dot"
+          [class.dot--active]="i === currentIndex()"
+          (click)="goTo(i)"
+          [attr.aria-label]="'Go to slide ' + (i + 1)"
+          [attr.aria-current]="i === currentIndex() ? 'true' : null"
+        ></button>
+      }
+    </div>
+    <button class="nav-arrow" type="button" (click)="next()" aria-label="Next screenshot">&#8250;</button>
+  </div>
+</div>

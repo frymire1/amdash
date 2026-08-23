@@ -173,6 +173,18 @@ section h2 {
   }
 }
 
+.demo {
+  padding: 64px 0;
+
+  &__subhead {
+    text-align: center;
+    color: $text-muted;
+    font-size: 15px;
+    max-width: 480px;
+    margin: 12px auto 40px;
+  }
+}
+
 .features {
   padding: 64px 40px;
   background: $bg-tint;
