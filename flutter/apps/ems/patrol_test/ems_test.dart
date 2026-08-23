@@ -146,11 +146,27 @@ Future<void> pumpUntil(
 /// running out of clock while still actively finding something to
 /// dismiss every pass.
 ///
-/// Checks the in-app dialog before the two native checks and `continue`s
-/// immediately when it's found, skipping them for that iteration — each
-/// native check blocks for up to 500ms even when it has nothing to find,
-/// which is most iterations once (1)/(2) are already resolved, and that
-/// tax was most of why dismissal attempts landed so infrequently.
+/// Checks (1)/(2) (native) before (3) (in-app) on every single iteration,
+/// never skipping either — an earlier version of this function skipped
+/// the native checks for a whole iteration whenever the in-app dialog's
+/// text was found, on the assumption that (1) only ever fires once per
+/// screen. Confirmed wrong via a downloaded recording *and* the raw
+/// logcat from a real GHA failure: `LocationTrackingSection`'s 15s
+/// re-poll timer calls `Geolocator.requestPermission()` again on every
+/// tick, and Android doesn't necessarily treat a single prior "Don't
+/// allow" as permanent — the real system dialog can and does pop back up
+/// completely independently of whatever the in-app dialog is doing. With
+/// the native checks skipped, this function's own `pressBack()` calls
+/// (meant for the in-app `AlertDialog`) started landing on that
+/// re-appeared native dialog instead of Patrol's purpose-built
+/// `denyPermission()` API — the logcat showed a real ANR in Android's own
+/// permission activity ("Dispatching key to ... even though there are
+/// other unprocessed events" → "Input dispatching timed out ... Waited
+/// 5003ms for FocusEvent"), which is a real Android input-dispatch
+/// backlog, not a Flutter-level issue. Checking both every iteration
+/// costs a bit of latency (each native check blocks for up to 500ms even
+/// when it finds nothing) but means a re-appeared native dialog is always
+/// routed to the API actually meant for it.
 Future<void> settleLocationPrompts(PatrolIntegrationTester $) async {
   // Safety net against a genuinely stuck dialog, not a normal budget —
   // see this function's own doc comment.
@@ -159,6 +175,40 @@ Future<void> settleLocationPrompts(PatrolIntegrationTester $) async {
   var everHandledSomething = false;
   var consecutiveMisses = 0;
   while (DateTime.now().isBefore(ceiling)) {
+    var handledSomething = false;
+
+    if (!kIsWeb) {
+      if (await $.platform.mobile.isPermissionDialogVisible(
+        timeout: const Duration(milliseconds: 500),
+      )) {
+        handledSomething = true;
+        try {
+          await $.platform.mobile.denyPermission();
+        } catch (_) {
+          // Best-effort — see this function's own doc comment.
+        }
+        // Longer than the other post-action pumps in this function —
+        // real GHA evidence (a downloaded logcat) showed a single native
+        // call taking nearly 7 real seconds on a loaded Test Lab device,
+        // and looping back too soon risks firing another native call
+        // before Android's own input dispatch has caught up, which is
+        // exactly the sequence that produced a real ANR in Android's
+        // permission activity in that same run.
+        await $.pump(const Duration(milliseconds: 800));
+      }
+
+      try {
+        await $.platform.tap(
+          Selector(text: 'No thanks'),
+          timeout: const Duration(milliseconds: 500),
+        );
+        handledSomething = true;
+        await $.pump(const Duration(milliseconds: 300));
+      } catch (_) {
+        // Not present this pass — see this function's own doc comment.
+      }
+    }
+
     // Scoped to the dialog's own title, NOT LocationTrackingSection's
     // inline "Could not get your current location..." banner text (an
     // earlier version of this check used that instead — a real bug,
@@ -171,6 +221,7 @@ Future<void> settleLocationPrompts(PatrolIntegrationTester $) async {
     // PatientUploadScreen entirely). This dialog's own title only exists
     // while it's actually mounted.
     if (find.text('Location permission is off').evaluate().isNotEmpty) {
+      handledSomething = true;
       if (kIsWeb) {
         // Tapping the OK button directly is the only option on web — no
         // native automation there. Already established reliable on this
@@ -205,36 +256,6 @@ Future<void> settleLocationPrompts(PatrolIntegrationTester $) async {
         }
       }
       await $.pump(const Duration(milliseconds: 300));
-      everHandledSomething = true;
-      consecutiveMisses = 0;
-      continue;
-    }
-
-    var handledSomething = false;
-
-    if (!kIsWeb) {
-      if (await $.platform.mobile.isPermissionDialogVisible(
-        timeout: const Duration(milliseconds: 500),
-      )) {
-        handledSomething = true;
-        try {
-          await $.platform.mobile.denyPermission();
-        } catch (_) {
-          // Best-effort — see this function's own doc comment.
-        }
-        await $.pump(const Duration(milliseconds: 300));
-      }
-
-      try {
-        await $.platform.tap(
-          Selector(text: 'No thanks'),
-          timeout: const Duration(milliseconds: 500),
-        );
-        handledSomething = true;
-        await $.pump(const Duration(milliseconds: 300));
-      } catch (_) {
-        // Not present this pass — see this function's own doc comment.
-      }
     }
 
     if (handledSomething) {
