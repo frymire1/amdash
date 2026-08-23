@@ -63,14 +63,18 @@ $heading-font:
 
 .callout {
   position: absolute;
-  // Sits fully above its anchor point (the target's own top-left corner)
-  // with a small gap, rather than centered on/overlapping it — the
-  // targets are often small (a status pill, a field label), so centering
-  // would just bury them under the callout itself.
+  // Pinned to a fixed inset from the left edge — not the target's own
+  // x-position — so every callout lines up in a consistent outer column
+  // instead of floating over more central content. Only the vertical
+  // position (top.%) still tracks the real target, keeping each label
+  // roughly level with the thing it's calling out. Sits fully above that
+  // point (not centered on it) so it never buries a small target like a
+  // status pill or field label.
+  left: 10px;
   transform: translateY(calc(-100% - 8px));
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   pointer-events: none;
   max-width: calc(100% - 20px);
 }
@@ -88,9 +92,9 @@ $heading-font:
 .callout-label {
   background: rgba(10, 26, 28, 0.88);
   color: #ffffff;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 4px 9px;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 6px 13px;
   border-radius: 999px;
   white-space: nowrap;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);

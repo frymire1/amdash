@@ -1,7 +1,6 @@
 import { AfterViewInit, Component, ElementRef, QueryList, ViewChild, ViewChildren, signal } from '@angular/core';
 
 interface Callout {
-  xPercent: number;
   yPercent: number;
   label: string;
 }
@@ -45,7 +44,7 @@ export class DemoShowcase implements AfterViewInit {
       title: 'EMS enters vitals in seconds',
       caption:
         "Patient details, vitals, treatment, and IV access — captured on scene and synced the moment it's saved.",
-      callouts: [{ xPercent: 9, yPercent: 18.3, label: '🔒 Encrypted end-to-end' }],
+      callouts: [{ yPercent: 18.3, label: '🔒 Encrypted end-to-end' }],
     },
     {
       src: '/demo/ems-tracking.webp',
@@ -53,16 +52,15 @@ export class DemoShowcase implements AfterViewInit {
       eyebrow: 'Always in sync',
       title: 'EMS stays in the loop too',
       caption: "The crew can see tracking status and update the patient's record right up until handoff.",
-      callouts: [{ xPercent: 9, yPercent: 37.6, label: 'Updates live, right from the field' }],
+      callouts: [{ yPercent: 37.6, label: 'Updates live, right from the field' }],
     },
     {
       src: '/demo/physician-incoming.webp',
       alt: "Physician's incoming patient list with a tracking status pill and vitals chips",
       eyebrow: 'Instantly',
       title: "The hospital sees it the moment it's entered",
-      caption:
-        'No phone calls, no faxes — the receiving team sees the incoming patient in their own dashboard immediately.',
-      callouts: [{ xPercent: 9, yPercent: 24.4, label: 'Appears instantly — no phone calls' }],
+      caption: 'The receiving team sees the incoming patient in their own dashboard immediately.',
+      callouts: [{ yPercent: 24.4, label: 'Appears instantly' }],
     },
     {
       src: '/demo/physician-live-map.webp',
@@ -72,8 +70,8 @@ export class DemoShowcase implements AfterViewInit {
       caption:
         'A live map, a moving marker, and a continuously updating ETA — so the care team knows exactly when to be ready.',
       callouts: [
-        { xPercent: 9, yPercent: 60.6, label: 'Live GPS tracking & ETA' },
-        { xPercent: 9, yPercent: 18.2, label: 'Vitals update in real time' },
+        { yPercent: 60.6, label: 'Live GPS tracking & ETA' },
+        { yPercent: 18.2, label: 'Vitals update in real time' },
       ],
     },
     {
@@ -82,7 +80,7 @@ export class DemoShowcase implements AfterViewInit {
       eyebrow: 'Stay informed',
       title: 'Get notified the moment a patient is inbound',
       caption: 'Arm new-patient push alerts for a set window — no need to keep the app open and watching.',
-      callouts: [{ xPercent: 4.6, yPercent: 68, label: 'Notification settings' }],
+      callouts: [{ yPercent: 68, label: 'Notification settings' }],
     },
     {
       src: '/demo/admin-settings.webp',
@@ -92,8 +90,8 @@ export class DemoShowcase implements AfterViewInit {
       caption:
         'Opt into Cloud KMS encryption, audit logging, and data retention per organization — and add hospitals or invite your team in minutes.',
       callouts: [
-        { xPercent: 4.6, yPercent: 34.8, label: 'Opt into additional protection' },
-        { xPercent: 4.6, yPercent: 74.4, label: 'Add hospitals in minutes' },
+        { yPercent: 34.8, label: 'Opt into additional protection' },
+        { yPercent: 74.4, label: 'Add hospitals in minutes' },
       ],
     },
   ];

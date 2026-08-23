@@ -6,7 +6,7 @@
           <div class="slide-media" #slideMedia>
             <img [src]="slide.src" [alt]="slide.alt" (load)="onImageLoad(i)" />
             @for (callout of slide.callouts; track callout.label) {
-              <div class="callout" [style.left.%]="callout.xPercent" [style.top.%]="callout.yPercent">
+              <div class="callout" [style.top.%]="callout.yPercent">
                 <span class="callout-dot"></span>
                 <span class="callout-label">{{ callout.label }}</span>
               </div>
