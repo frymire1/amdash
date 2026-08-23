@@ -52,7 +52,7 @@ export class DemoShowcase implements AfterViewInit {
       eyebrow: 'Always in sync',
       title: 'EMS stays in the loop too',
       caption: "The crew can see tracking status and update the patient's record right up until handoff.",
-      callouts: [{ yPercent: 37.6, label: 'Updates live, right from the field' }],
+      callouts: [{ yPercent: 49.8, label: 'Updates live, right from the field' }],
     },
     {
       src: '/demo/physician-incoming.webp',
@@ -60,7 +60,7 @@ export class DemoShowcase implements AfterViewInit {
       eyebrow: 'Instantly',
       title: "The hospital sees it the moment it's entered",
       caption: 'The receiving team sees the incoming patient in their own dashboard immediately.',
-      callouts: [{ yPercent: 24.4, label: 'Appears instantly' }],
+      callouts: [{ yPercent: 33.2, label: 'Appears instantly' }],
     },
     {
       src: '/demo/physician-live-map.webp',
@@ -88,10 +88,10 @@ export class DemoShowcase implements AfterViewInit {
       eyebrow: 'Versatile admin',
       title: 'Secure, flexible, and easy to run',
       caption:
-        'Opt into Cloud KMS encryption, audit logging, and data retention per organization — and add hospitals or invite your team in minutes.',
+        'Opt into encryption, audit logging, and data retention per organization — and add hospitals or invite your team in minutes.',
       callouts: [
-        { yPercent: 34.8, label: 'Opt into additional protection' },
-        { yPercent: 74.4, label: 'Add hospitals in minutes' },
+        { yPercent: 55.5, label: 'Opt into additional protection' },
+        { yPercent: 74.9, label: 'Add hospitals in minutes' },
       ],
     },
   ];
