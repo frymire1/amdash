@@ -481,6 +481,13 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
                 ),
                 if (showTrend)
                   InkWell(
+                    // Keyed (rather than found by ancestor/type) because
+                    // MainViewScreen wraps PatientViewer in its own Row for
+                    // its wide-layout mode — a Row-typed ancestor search
+                    // from this row's label text would also match that
+                    // outer Row, pulling in every other vital's trend icon
+                    // as a false-positive descendant match.
+                    key: Key('vitals_trend_$label'),
                     onTap: () => showVitalsTrendDialog(
                       context,
                       title: label,

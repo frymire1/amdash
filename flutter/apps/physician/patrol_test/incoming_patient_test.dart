@@ -111,10 +111,12 @@ void main() {
         isNot(0.0),
         reason: 'pass --dart-define=SMOKE_LONGITUDE=...',
       );
-      // Fixed literals matching patient_upload_flow_test.dart's own
-      // constants of the same name — see that file's comment on why
-      // these don't need to be dart-defines.
-      const initialHeartRate = '88';
+      // Fixed literal matching patient_upload_flow_test.dart's own
+      // constant of the same name — see that file's comment on why it
+      // doesn't need to be a dart-define. Its counterpart
+      // initialHeartRate isn't needed here: this test only confirms the
+      // trend dialog actually charts data (proving a second history
+      // entry exists), not the specific pre-edit value.
       const updatedHeartRate = '92';
 
       await Firebase.initializeApp(
@@ -200,7 +202,7 @@ void main() {
             "the map's vehicle marker should reflect ems's mocked GPS fix exactly, not a stale or default position",
       );
 
-      // Vital Signs defaults to the newest history entry (see
+      // The vitals card always shows the patient's current vitals (see
       // patient_viewer.dart's _vitalsCard) — ems's edit ran after the
       // initial upload, so this should already be the edited value, not
       // the original one, proving the edit (not just the upload) is what
@@ -217,21 +219,30 @@ void main() {
             "vital signs should default to ems's edited heart rate, not the original upload",
       );
 
-      // Stepping back through history should reveal the original value —
-      // confirms the edit appended a new entry rather than overwriting
-      // the only one (the vitals-history feature this is exercising).
-      await tapFinder($, find.byTooltip('Previous vitals'));
-      await pumpUntil(
-        $,
-        () => find.text('$initialHeartRate bpm').evaluate().isNotEmpty,
-        maxIterations: 20,
+      // Vitals history browsing now happens through the per-vital trend
+      // chart icon rather than dedicated back/forward arrows (see
+      // patient_viewer.dart's _vitalsCard/_infoRow) — opening Heart
+      // Rate's trend dialog and confirming it actually rendered a chart,
+      // not the "not enough data" placeholder that shows for a single
+      // reading, proves the edit appended a new vitalsHistory entry
+      // rather than overwriting the only one.
+      final heartRateTrendIcon = find.byKey(
+        const Key('vitals_trend_Heart Rate'),
       );
+      // vitalsHistoryProvider is a one-time fetch (not a live listener —
+      // see its own doc comment), so the icon only appears once that
+      // fetch resolves; wait for it rather than assuming it's already
+      // there on the first frame this card renders.
+      await pumpUntil($, () => heartRateTrendIcon.evaluate().isNotEmpty);
+      await tapFinder($, heartRateTrendIcon);
+      await pumpUntil($, () => find.byType(AlertDialog).evaluate().isNotEmpty);
       expect(
-        find.text('$initialHeartRate bpm'),
-        findsOneWidget,
+        find.text('Not enough recorded data yet to show a trend.'),
+        findsNothing,
         reason:
-            'stepping back through vitals history should reveal the original upload value',
+            "the trend dialog should chart ems's original upload and later edit as two points, not report insufficient data",
       );
+      await tapText($, 'Close');
     },
   );
 }
