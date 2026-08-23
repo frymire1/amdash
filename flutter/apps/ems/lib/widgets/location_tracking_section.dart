@@ -64,6 +64,7 @@ class _LocationTrackingSectionState extends ConsumerState<LocationTrackingSectio
   String? _locationError;
   bool _locationShared = false;
   bool _liveTrackingEnabled = true;
+  bool _isFetchingLocation = false;
   Timer? _locationPollTimer;
 
   @override
@@ -122,7 +123,12 @@ class _LocationTrackingSectionState extends ConsumerState<LocationTrackingSectio
   }
 
   Future<void> _useCurrentLocation() async {
-    setState(() => _locationError = null);
+    // Guards against overlapping attempts — the 15s periodic timer below
+    // could otherwise fire again while a slow fetch (up to the 12s timeout)
+    // from the previous tick is still in flight, and an explicit Retry tap
+    // could land mid-background-attempt too.
+    if (_isFetchingLocation) return;
+    setState(() => _isFetchingLocation = true);
 
     try {
       var permission = await Geolocator.checkPermission();
@@ -146,6 +152,8 @@ class _LocationTrackingSectionState extends ConsumerState<LocationTrackingSectio
         _latitude = position.latitude;
         _longitude = position.longitude;
         _locationShared = true;
+        _locationError = null;
+        _isFetchingLocation = false;
       });
       _reportChange();
     } catch (error) {
@@ -158,6 +166,7 @@ class _LocationTrackingSectionState extends ConsumerState<LocationTrackingSectio
         // onChanged below) rather than letting the EMS worker turn on a
         // promise the app can't keep.
         _liveTrackingEnabled = false;
+        _isFetchingLocation = false;
       });
       _reportChange();
     }
@@ -185,9 +194,18 @@ class _LocationTrackingSectionState extends ConsumerState<LocationTrackingSectio
             ),
             // Lets the EMS worker force a fresh attempt without reloading
             // the whole page — shown whenever we don't yet have a
-            // confirmed fix (error, or still waiting).
+            // confirmed fix (error, or still waiting). Disabled (with a
+            // small spinner in place of the label) while a fetch — whether
+            // this tap or the background 15s poll — is already in flight,
+            // rather than leaving it tappable and silently piling up a
+            // second overlapping attempt.
             if (_locationError != null || (_liveTrackingEnabled && !_locationShared))
-              TextButton(onPressed: _useCurrentLocation, child: const Text('Retry')),
+              TextButton(
+                onPressed: _isFetchingLocation ? null : _useCurrentLocation,
+                child: _isFetchingLocation
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Retry'),
+              ),
           ],
         ),
         const SizedBox(height: 8),
