@@ -77,8 +77,25 @@ class AuthService {
     await _clearLocalCache();
   }
 
-  Future<void> resetPassword(String email) {
-    return _auth.sendPasswordResetEmail(email: email);
+  // Calls the requestPasswordReset callable (functions/src/shared.ts)
+  // rather than the Firebase Auth client SDK's own
+  // sendPasswordResetEmail — that method both mints the reset link and
+  // sends Firebase's own unbranded email for it, with no way to
+  // intercept just the delivery. The callable mints the same kind of
+  // link via the Admin SDK, then sends a branded email through Resend
+  // instead (see email.ts's sendPasswordResetEmail).
+  Future<void> resetPassword(String email) async {
+    final callable = _functions.httpsCallable('requestPasswordReset');
+    await callable.call<Map<Object?, Object?>>({'email': email});
+  }
+
+  // Same reasoning as resetPassword above, for email verification: calls
+  // the requestEmailVerification callable instead of the signed-in
+  // user's own currentUser.sendEmailVerification(), so the email is
+  // branded and sent through Resend rather than Firebase's own mailer.
+  Future<void> sendEmailVerification() async {
+    final callable = _functions.httpsCallable('requestEmailVerification');
+    await callable.call<Map<Object?, Object?>>(<String, Object?>{});
   }
 
   /// For an admin-created account that has no password yet: sets its first

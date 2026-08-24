@@ -6,6 +6,7 @@ import { UserRole } from './classes/user-role';
 import { CallerProfile } from './classes/caller-profile';
 import { CheckAccountStatusRequest } from './classes/check-account-status-request';
 import { SetInitialPasswordRequest } from './classes/set-initial-password-request';
+import { RESEND_API_KEY, sendPasswordResetEmail, sendVerificationEmail } from './email';
 
 initializeApp();
 
@@ -113,4 +114,54 @@ export const setInitialPassword = onCall<SetInitialPasswordRequest>({ region: RE
   await getAuth().updateUser(user.uid, { password });
 
   return { email: user.email };
+});
+
+// Both callables below read this off the target's own users/{uid} doc
+// purely to personalize the email greeting — falls back to a generic
+// greeting rather than throwing if it's somehow missing (every account
+// gets one at createUser time, but this shouldn't block a reset/verify
+// email over a cosmetic field).
+async function firstNameFor(uid: string): Promise<string> {
+  const doc = await getFirestore().collection('users').doc(uid).get();
+  return doc.data()?.['firstName'] || 'there';
+}
+
+// Deliberately callable without being signed in, like checkAccountStatus
+// above — this is what the login page's "Forgot password?" now calls
+// instead of the Firebase Auth client SDK's own sendPasswordResetEmail
+// (which both mints the reset link AND sends Firebase's own unbranded
+// email for it, with no way to intercept just the delivery). Admin SDK's
+// generatePasswordResetLink only mints the link; sending it is entirely
+// on us, via the same Resend setup the welcome email uses. No
+// actionCodeSettings passed — the link still lands on Firebase's own
+// hosted reset-password page, unchanged from today's behavior.
+export const requestPasswordReset = onCall<CheckAccountStatusRequest>(
+  { region: REGION, secrets: [RESEND_API_KEY] },
+  async (request) => {
+    const { email } = request.data;
+    if (!email) {
+      throw new HttpsError('invalid-argument', 'A valid email is required.');
+    }
+
+    const user = await findUserByEmail(email);
+    const firstName = await firstNameFor(user.uid);
+    const resetUrl = await getAuth().generatePasswordResetLink(email);
+    await sendPasswordResetEmail({ email, firstName, resetUrl });
+
+    return { email };
+  }
+);
+
+// Requires auth — this is what mfa_setup_screen.dart calls instead of the
+// signed-in user's own currentUser.sendEmailVerification(), for the same
+// reason requestPasswordReset replaces sendPasswordResetEmail above: the
+// client SDK method sends Firebase's own unbranded email with no way to
+// swap just the delivery.
+export const requestEmailVerification = onCall({ region: REGION, secrets: [RESEND_API_KEY] }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+  const firstName = await firstNameFor(profile.uid);
+  const verifyUrl = await getAuth().generateEmailVerificationLink(profile.email);
+  await sendVerificationEmail({ email: profile.email, firstName, verifyUrl });
+
+  return { email: profile.email };
 });

@@ -35,11 +35,13 @@ class _MfaSetupScreenState extends ConsumerState<MfaSetupScreen> {
       _emailMessage = null;
     });
     try {
-      // Firebase's own built-in delivery — deliberately not routed through
-      // functions/src/email.ts's Resend setup, which is still on Resend's
-      // sandbox sender domain and would silently fail to reach a real
-      // address today.
-      await ref.read(authServiceProvider).currentUser!.sendEmailVerification().timeout(const Duration(seconds: 15));
+      // Routed through the requestEmailVerification callable
+      // (functions/src/shared.ts), not currentUser.sendEmailVerification()
+      // — that method sends Firebase's own unbranded email with no way to
+      // swap just the delivery. The callable mints the same kind of link
+      // via the Admin SDK and sends a branded email through Resend
+      // instead (see AuthService.sendEmailVerification's own comment).
+      await ref.read(authServiceProvider).sendEmailVerification().timeout(const Duration(seconds: 15));
       if (mounted) {
         setState(() {
           _emailMessage = 'Verification email sent — check your inbox.';
