@@ -1,6 +1,5 @@
 import { Component, inject } from '@angular/core';
 import { Meta, Title } from '@angular/platform-browser';
-import { DemoShowcase } from './demo-showcase/demo-showcase';
 
 const PAGE_TITLE = 'AmDash — Real-time EMS-to-hospital patient handoff';
 const PAGE_DESCRIPTION =
@@ -11,7 +10,6 @@ const PAGE_DESCRIPTION =
 // crawlers and link-preview scrapers, not just the runtime DOM.
 @Component({
   selector: 'app-root',
-  imports: [DemoShowcase],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })

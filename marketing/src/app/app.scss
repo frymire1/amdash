@@ -173,15 +173,22 @@ section h2 {
   }
 }
 
-.demo {
+.impact {
   padding: 64px 0;
 
-  &__subhead {
-    text-align: center;
-    color: $text-muted;
-    font-size: 15px;
-    max-width: 480px;
-    margin: 12px auto 40px;
+  &__body {
+    max-width: 680px;
+    margin: 40px auto 0;
+
+    p {
+      color: $text-muted;
+      font-size: 16px;
+      line-height: 1.7;
+
+      &:not(:last-child) {
+        margin-bottom: 20px;
+      }
+    }
   }
 }
 
