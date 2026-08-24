@@ -1,7 +1,13 @@
 # Codemagic pipeline for the Flutter apps (physician, ems, admin): build
-# sanity checks, the real Firebase deploy, and manual ad-hoc device
-# distribution. GitHub Actions covers only the Angular `marketing` site
-# (see .github/workflows/ci.yml) — nothing Flutter-related lives there.
+# sanity checks, the real Firebase deploy for admin hosting + functions +
+# firestore rules, and manual ad-hoc device distribution. physician/ems
+# web *hosting* deploys from GitHub Actions instead (see flutter-web-
+# deploy in .github/workflows/flutter-ci.yml), gated on this repo's own
+# e2e passing on GitHub's infra first — everything else Flutter-related
+# (functions, firestore rules, admin hosting, mobile builds/
+# distribution) still lives here, manually triggered. GitHub Actions
+# otherwise covers only the Angular `marketing` site (see
+# .github/workflows/ci.yml).
 #
 # Every workflow below is manually triggered only (from the Codemagic UI or
 # its REST API) — none has a `triggering:` block, so nothing here ever
@@ -106,7 +112,7 @@ workflows:
           fi
 
   flutter-deploy:
-    name: Deploy Flutter apps + functions + firestore rules
+    name: Deploy admin + functions + firestore rules
     instance_type: mac_mini_m2
     max_build_duration: 30
     environment:
@@ -129,13 +135,11 @@ workflows:
       - name: Build functions
         script: npm run build
         working_directory: functions
-      - name: Build physician/ems/admin (web)
+      - name: Build admin (web)
         script: |
           set -e
           cd flutter
-          for app in physician ems admin; do
-            (cd "apps/$app" && flutter build web --release)
-          done
+          (cd apps/admin && flutter build web --release)
       - name: Install Firebase CLI
         # --force: Codemagic's mac_mini_m2 images now ship firebase-tools
         # preinstalled at /usr/local/bin/firebase — a plain global install
@@ -147,13 +151,16 @@ workflows:
         script: |
           echo "$FIREBASE_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/firebase-service-account.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$CM_BUILD_DIR/firebase-service-account.json" >> $CM_ENV
-      # Only the Flutter apps' hosting + functions + firestore rules —
-      # `marketing` hosting stays on GitHub Actions (see ci.yml's
-      # deploy-marketing job) since it's not a Flutter app and has no
-      # reason to depend on Codemagic.
+      # Only admin's hosting + functions + firestore rules now —
+      # physician/ems hosting moved to GitHub Actions (see
+      # flutter-web-deploy in .github/workflows/flutter-ci.yml), gated on
+      # this push's own e2e passing there first. `marketing` hosting has
+      # always stayed on GitHub Actions too (see ci.yml's deploy-marketing
+      # job) since it's not a Flutter app and has no reason to depend on
+      # Codemagic.
       - name: Deploy to amdash-dev
         script: |
-          firebase deploy --only hosting:physician,hosting:ems,hosting:admin,functions,firestore:rules,firestore:indexes --project amdash-dev --non-interactive
+          firebase deploy --only hosting:admin,functions,firestore:rules,firestore:indexes --project amdash-dev --non-interactive
 
   # Manual-trigger utility workflow. Builds a development-signed IPA
   # (installable on any device already registered on the account) and

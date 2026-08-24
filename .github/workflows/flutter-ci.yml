@@ -19,18 +19,21 @@ name: Flutter CI
 # (the more recent iteration — Firebase Test Lab real devices instead of a
 # local Android emulator) for the actual test-script invocations.
 #
-# e2e no longer runs as a gate on a specific deploy the way it used to
-# (the old ci.yml's e2e jobs had `needs: deploy`) — flutter-deploy is now
-# manual-trigger-only on Codemagic, so there's no in-workflow deploy step
-# left to depend on. These jobs test whatever's currently live on
-# amdash-dev instead — a smoke test of current state, not a pre-deploy
-# gate. Deploy manually via Codemagic, then these next run on your next
-# push will exercise it.
+# e2e doesn't gate a deploy the way the old ci.yml's `needs: deploy` did
+# — most of these jobs test whatever's currently live on amdash-dev, a
+# smoke test of current state rather than a pre-deploy check. The one
+# exception is flutter-web-deploy below: physician/ems hosting deploys
+# automatically once this push's own e2e has passed here, the same
+# gated pattern ci.yml's deploy-marketing job already uses. Everything
+# else Flutter-deploy-related (functions, firestore rules, admin
+# hosting, mobile builds/distribution) stays manual-trigger-only on
+# Codemagic — deploy those manually, then the next push's e2e run here
+# will exercise them against whatever's now live.
 #
 # Required repo secrets (GitHub -> Settings -> Secrets and variables ->
 # Actions):
 #   - FIREBASE_SERVICE_ACCOUNT_KEY — already exists (used by ci.yml's
-#     deploy-marketing job already).
+#     deploy-marketing job and this file's own flutter-web-deploy job).
 #
 # flutter-android-e2e authenticates to Google Cloud via Workload Identity
 # Federation, not a service account key — this org has
@@ -463,3 +466,46 @@ jobs:
           node run-physician-patrol-test.mjs --teardown --account-json="$RUNNER_TEMP/physician-account.json" || true
           node run-ems-patrol-test.mjs --teardown --account-json="$RUNNER_TEMP/ems-account.json" || true
         working-directory: scripts
+
+  # Deploys physician/ems web hosting to amdash-dev once this exact push
+  # has genuinely passed e2e on real infrastructure (Chrome + Firebase
+  # Test Lab) — a green-e2e gate GitHub Actions can enforce directly,
+  # mirroring ci.yml's deploy-marketing job. ems's web build is still
+  # never meant for real EMS crews (they use the native app in the
+  # field) — deploying it here keeps it up to date for the user's own
+  # manual testing/QA access, not as a marketed product surface. Admin's
+  # hosting, functions, and firestore rules/indexes stay manual-trigger-
+  # only on Codemagic (see codemagic.yaml's flutter-deploy workflow).
+  flutter-web-deploy:
+    name: Deploy physician/EMS web to amdash-dev
+    runs-on: ubuntu-latest
+    needs: [flutter-web-e2e, flutter-android-e2e]
+    if: github.ref == 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build physician/ems (web)
+        run: |
+          set -e
+          cd flutter
+          for app in physician ems; do
+            (cd "apps/$app" && flutter build web --release)
+          done
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      # Used by `firebase deploy` below — see this file's own header
+      # comment for the required secret.
+      - name: Authenticate to Firebase
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+
+      - name: Deploy physician/ems hosting to amdash-dev
+        run: firebase deploy --only hosting:physician,hosting:ems --project amdash-dev --non-interactive
