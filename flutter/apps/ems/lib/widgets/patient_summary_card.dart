@@ -20,8 +20,10 @@ class PatientSummaryCard extends ConsumerStatefulWidget {
 class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
   bool _deleting = false;
   bool _completing = false;
+  bool _exportingFhir = false;
   String? _deleteError;
   String? _completeError;
+  String? _exportError;
 
   Future<void> _deletePatient() async {
     final confirmed = await showConfirmDialog(
@@ -76,6 +78,41 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
     }
   }
 
+  // Only ever offered right next to "Complete Transport" itself — the
+  // callable (functions/src/patients.ts) enforces status == 'completed'
+  // as a hard precondition regardless, this just avoids showing a button
+  // that would always fail. Named for what it downloads, not what it
+  // calls, since the confirmation dialog is the part worth a second of
+  // someone's attention here — see AuthService/dialogs.dart's
+  // showConfirmDialog for the same "confirm, then act" shape used
+  // elsewhere in this app.
+  Future<void> _exportFhir() async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Export FHIR record?',
+      message:
+          "This downloads an unencrypted file containing ${widget.uploaded.patient.name.display()}'s information to your device. "
+          "AmDash's own access controls no longer apply to it once saved.",
+      confirmLabel: 'Download',
+    );
+    if (!confirmed || !mounted) return;
+
+    setState(() {
+      _exportingFhir = true;
+      _exportError = null;
+    });
+
+    try {
+      await exportPatientFhirBundle(ref.read(fhirExportFunctionsProvider), widget.uploaded.id);
+    } on FhirExportException catch (error) {
+      if (mounted) setState(() => _exportError = error.message);
+    } catch (error) {
+      if (mounted) setState(() => _exportError = "Couldn't export this patient's FHIR record. Please try again.");
+    } finally {
+      if (mounted) setState(() => _exportingFhir = false);
+    }
+  }
+
   // Reflects real tracking health, not just whether tracking was started:
   // a degraded state (location off, permission revoked, or no GPS fix
   // coming through) shows a distinct, non-pulsing warning pill instead of
@@ -113,6 +150,8 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
     // Only meaningful while tracking; skip the watch otherwise so an
     // untracked card doesn't spin up the health poller.
     final health = isTracking ? ref.watch(emsTrackingHealthProvider).valueOrNull : null;
+    final canExportFhir =
+        (ref.watch(ownOrganizationProvider).valueOrNull?.fhirExportEnabled ?? false) && patient.status == 'completed';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -150,6 +189,10 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
               const SizedBox(height: 8),
               Text(_completeError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
             ],
+            if (_exportError != null) ...[
+              const SizedBox(height: 8),
+              Text(_exportError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ],
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
@@ -172,6 +215,14 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
                       : const Icon(Icons.check_circle),
                   label: Text(_completing ? 'Completing…' : 'Complete Transport'),
                 ),
+                if (canExportFhir)
+                  OutlinedButton.icon(
+                    onPressed: _exportingFhir ? null : _exportFhir,
+                    icon: _exportingFhir
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.upload_file),
+                    label: Text(_exportingFhir ? 'Exporting…' : 'Export FHIR record'),
+                  ),
                 OutlinedButton.icon(
                   onPressed: _deleting ? null : _deletePatient,
                   style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),

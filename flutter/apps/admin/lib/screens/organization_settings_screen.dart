@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../classes/organization_country.dart';
 import '../services/admin_service.dart';
-import '../services/organization_service.dart';
 import '../widgets/admin_page.dart';
 import '../widgets/hospital_management_section.dart';
 
@@ -55,6 +54,10 @@ class _OrganizationSettingsScreenState
   bool _savingAuditLogging = false;
   String? _auditLoggingMessage;
   bool _auditLoggingIsError = false;
+
+  bool _savingFhirExport = false;
+  String? _fhirExportMessage;
+  bool _fhirExportIsError = false;
 
   Future<void> _setRetention(bool value) async {
     setState(() {
@@ -144,6 +147,25 @@ class _OrganizationSettingsScreenState
     }
   }
 
+  Future<void> _setFhirExportEnabled(bool value) async {
+    setState(() {
+      _savingFhirExport = true;
+      _fhirExportMessage = null;
+    });
+    try {
+      await ref.read(adminServiceProvider).setOrganizationFhirExportEnabled(value);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _fhirExportMessage = 'Failed to save. Please try again.';
+          _fhirExportIsError = true;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _savingFhirExport = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final organization = ref.watch(ownOrganizationProvider).valueOrNull;
@@ -156,6 +178,8 @@ class _OrganizationSettingsScreenState
     // patient-record audit logging exactly as it already did before this
     // setting existed.
     final auditLoggingEnabled = organization?.auditLoggingEnabled ?? true;
+    // Opt-in, unlike auditLoggingEnabled — missing/never-set means off.
+    final fhirExportEnabled = organization?.fhirExportEnabled ?? false;
 
     return AdminPage(
       children: [
@@ -340,6 +364,51 @@ class _OrganizationSettingsScreenState
               ),
               if (_cmekMessage != null)
                 FormMessage(text: _cmekMessage!, isError: _cmekIsError),
+            ],
+          ),
+        ),
+        AdminCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'FHIR Data Export',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Let EMS or the receiving physician download a completed patient\'s record as a FHIR R4 '
+                'bundle (aligned with the Canadian Baseline profiles), once transport is marked complete — '
+                'for manually importing into a hospital EHR. The downloaded file is no longer protected by '
+                "AmDash's own access controls once saved.",
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Switch(
+                    value: fhirExportEnabled,
+                    onChanged: _savingFhirExport || organization == null
+                        ? null
+                        : _setFhirExportEnabled,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(fhirExportEnabled ? 'Export enabled' : 'Export disabled'),
+                  if (_savingFhirExport) ...[
+                    const SizedBox(width: 12),
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ],
+                ],
+              ),
+              if (_fhirExportMessage != null)
+                FormMessage(
+                  text: _fhirExportMessage!,
+                  isError: _fhirExportIsError,
+                ),
             ],
           ),
         ),

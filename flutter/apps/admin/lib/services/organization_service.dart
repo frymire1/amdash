@@ -16,22 +16,8 @@ final organizationsProvider = StreamProvider<List<Organization>>((ref) {
       .map((snapshot) => snapshot.docs.map((doc) => Organization.fromFirestore(doc.id, doc.data())).toList());
 });
 
-/// Mirrors `OrganizationSettingsComponent`'s direct live listener on
-/// `organizations/{callerOrgId}` — legal per `firestore.rules`'
-/// `sameOrgAsCaller(orgId)` `get`, unlike [organizationsProvider] above.
-/// The retention toggle binds to this live value directly rather than
-/// local optimistic state: on success the listener reflects the confirmed
-/// write on its own; on failure there's nothing to roll back.
-final ownOrganizationProvider = StreamProvider<Organization?>((ref) {
-  final profile = ref.watch(userProfileProvider).valueOrNull;
-  final organizationId = profile?.organizationId;
-
-  if (organizationId == null) {
-    return Stream.value(null);
-  }
-
-  return FirebaseFirestore.instance.collection('organizations').doc(organizationId).snapshots().map((doc) {
-    final data = doc.data();
-    return data == null ? null : Organization.fromFirestore(doc.id, data);
-  });
-});
+// ownOrganizationProvider (this screen's own retention/CMEK/audit-logging/
+// FHIR-export toggles all bind to it) moved to amdash_core's
+// own_organization_service.dart once EMS and physician also needed to
+// read fhirExportEnabled — still available here via the amdash_core
+// import above, just no longer defined in this file.

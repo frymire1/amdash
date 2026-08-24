@@ -1,15 +1,17 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
-import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 import { DecryptPatientFieldsRequest } from './classes/decrypt-patient-fields-request';
 import { DeletePatientRecordRequest } from './classes/delete-patient-record-request';
 import { EmsLocationEvent } from './classes/ems-location-event';
 import { EncryptPatientFieldsRequest } from './classes/encrypt-patient-fields-request';
+import { ExportPatientFhirBundleRequest } from './classes/export-patient-fhir-bundle-request';
 import { UploadPatientDocumentRequest } from './classes/upload-patient-document-request';
 import { VitalsHistoryEntry } from './classes/vitals-history-entry';
 import { REGION, getCallerProfile, patientLocationRef, patientVitalsHistoryCollection } from './shared';
 import { decryptField, encryptField, isEncryptedField } from './kms';
 import { logAudit, resolveActor } from './audit';
+import { FhirExportVitalsEntry, buildPatientFhirBundle } from './fhir';
 
 // Shared by encryptPatientFields (below — EMS's own direct-write update
 // path calls this first) and uploadPatientDocument (which encrypts inline
@@ -207,6 +209,98 @@ async function resolveField(value: unknown): Promise<string | null> {
   if (isEncryptedField(value)) return decryptField(value);
   return null;
 }
+
+function toDateOrNull(value: unknown): Date | null {
+  return value instanceof Timestamp ? value.toDate() : null;
+}
+
+// On-demand, not a background job triggered at completion — a completed
+// record can still be corrected afterward (notes/treatment/destination
+// edits stay possible; only vitals get history-tracked), and generating
+// once at completion time would risk a silently stale export. Building
+// the bundle fresh on every call means it always reflects whatever the
+// record actually says right now.
+//
+// Not exportable until "not before completion, since the record isn't
+// final until then" — `status === 'completed'` is the same signal
+// onPatientUpdated's own `justCompleted` branch already keys off (the one
+// write that ever sets it is EMS's completeTransport, see
+// patient_upload_service.dart) — checked here as a hard precondition, not
+// left to the client UI to enforce alone.
+export const exportPatientFhirBundle = onCall<ExportPatientFhirBundleRequest>({ region: REGION }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+
+  const { patientId } = request.data;
+  if (!patientId) {
+    throw new HttpsError('invalid-argument', 'patientId is required.');
+  }
+
+  const isSuperAdmin = profile.role.includes('super-admin');
+  const snapshot = await getFirestore().collection('patients').doc(patientId).get();
+  const data = snapshot.data();
+  // Same "don't reveal which" shape as decryptPatientFields — a
+  // not-found and a wrong-org patientId look identical from the outside.
+  if (!snapshot.exists || !data || (!isSuperAdmin && data['organizationId'] !== profile.organizationId)) {
+    throw new HttpsError('not-found', `No patient found with id ${patientId}.`);
+  }
+
+  const organizationId = data['organizationId'];
+  if (typeof organizationId !== 'string') {
+    throw new HttpsError('failed-precondition', 'This patient has no organization on record.');
+  }
+
+  const orgDoc = await getFirestore().collection('organizations').doc(organizationId).get();
+  if (orgDoc.data()?.['fhirExportEnabled'] !== true) {
+    throw new HttpsError('failed-precondition', 'FHIR export is not enabled for this organization.');
+  }
+
+  if (data['status'] !== 'completed') {
+    throw new HttpsError('failed-precondition', "This patient's transport must be marked complete before it can be exported.");
+  }
+
+  const [name, healthcareNumber] = await Promise.all([resolveField(data['name']), resolveField(data['healthcareNumber'])]);
+
+  const historySnapshot = await patientVitalsHistoryCollection(patientId).orderBy('recordedAt', 'asc').get();
+  const vitalsHistory: FhirExportVitalsEntry[] = historySnapshot.docs.map((doc) => {
+    const entry = doc.data();
+    return {
+      heartRate: entry['heartRate'],
+      bloodPressure: entry['bloodPressure'],
+      oxygen: entry['oxygen'],
+      temperature: entry['temperature'],
+      respiratoryRate: typeof entry['respiratoryRate'] === 'number' ? entry['respiratoryRate'] : undefined,
+      gcs: typeof entry['gcs'] === 'number' ? entry['gcs'] : undefined,
+      recordedAt: toDateOrNull(entry['recordedAt']),
+    };
+  });
+
+  const bundle = buildPatientFhirBundle(
+    {
+      name: name ?? 'Unknown',
+      healthcareNumber: healthcareNumber ?? 'Unknown',
+      gender: typeof data['gender'] === 'string' ? data['gender'] : 'Unknown',
+      age: data['age'],
+      destination: typeof data['destination'] === 'string' ? data['destination'] : 'Unknown',
+      organizationName: typeof orgDoc.data()?.['name'] === 'string' ? (orgDoc.data()?.['name'] as string) : 'Unknown',
+      treatment: typeof data['treatment'] === 'string' ? data['treatment'] : undefined,
+      notes: typeof data['notes'] === 'string' ? data['notes'] : undefined,
+      ivSize: typeof data['ivSize'] === 'string' ? data['ivSize'] : undefined,
+      ivPlacement: typeof data['ivPlacement'] === 'string' ? data['ivPlacement'] : undefined,
+      status: typeof data['status'] === 'string' ? data['status'] : 'active',
+      submittedAt: toDateOrNull(data['submittedAt']),
+      completedAt: toDateOrNull(data['completedAt']),
+    },
+    vitalsHistory,
+  );
+
+  // A downloaded FHIR bundle is PHI leaving AmDash's own encryption/
+  // access-control boundary entirely as a portable file — at least as
+  // sensitive as patient.decrypt, so it's gated in audit.ts's
+  // GATED_ACTIONS the same way.
+  await logAudit({ action: 'patient.fhirExport', actor: profile, organizationId, target: patientId });
+
+  return { bundle };
+});
 
 // Another mutation routed through a callable rather than a direct client
 // Firestore write (see uploadPatientDocument above for the other one;

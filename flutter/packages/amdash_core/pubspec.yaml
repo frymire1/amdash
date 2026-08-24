@@ -26,6 +26,7 @@ dependencies:
   fl_chart: ^1.2.0
   # Matches physician's/ems's own pin.
   intl: ^0.20.2
+  file_saver: ^0.4.0
 
 dev_dependencies:
   flutter_test:

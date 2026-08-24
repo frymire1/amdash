@@ -26,6 +26,10 @@ const GATED_ACTIONS: ReadonlySet<AuditAction> = new Set([
   'patient.complete',
   'patient.delete',
   'patient.decrypt',
+  // At least as sensitive as patient.decrypt — a FHIR export is PHI
+  // leaving AmDash's own encryption/access-control boundary entirely as
+  // a portable file, not just being viewed on-screen.
+  'patient.fhirExport',
 ]);
 
 export async function logAudit(entry: {

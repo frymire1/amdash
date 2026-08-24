@@ -107,6 +107,12 @@ jobs:
         run: npm run build
         working-directory: functions
 
+      # vitest, added alongside fhir.ts — pure-function unit tests (no
+      # Firestore/KMS emulation), so no other setup needed beyond install.
+      - name: Test
+        run: npm test
+        working-directory: functions
+
   # Only runs on master — real Firebase resource usage (seeding/tearing
   # down live test accounts against amdash-dev), not free just because the
   # CI compute is. Test locally before pushing to any other branch (see

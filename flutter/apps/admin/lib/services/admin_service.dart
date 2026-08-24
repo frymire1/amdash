@@ -195,6 +195,15 @@ class AdminService {
       'auditLoggingEnabled': auditLoggingEnabled,
     });
   }
+
+  // Gates exportPatientFhirBundle (functions/src/patients.ts) — off by
+  // default, opt-in only. The export callable re-checks this itself, so
+  // this toggle is purely a capability switch, not the only enforcement.
+  Future<void> setOrganizationFhirExportEnabled(bool fhirExportEnabled) {
+    return _functions.httpsCallable('setOrganizationFhirExportEnabled').call<Map<Object?, Object?>>({
+      'fhirExportEnabled': fhirExportEnabled,
+    });
+  }
 }
 
 final adminServiceProvider = Provider<AdminService>((ref) {

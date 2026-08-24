@@ -22,6 +22,7 @@ import { SetOrganizationRetentionRequest } from './classes/set-organization-rete
 import { SetOrganizationCountryRequest } from './classes/set-organization-country-request';
 import { SetOrganizationCmekRequest } from './classes/set-organization-cmek-request';
 import { SetOrganizationAuditLoggingRequest } from './classes/set-organization-audit-logging-request';
+import { SetOrganizationFhirExportRequest } from './classes/set-organization-fhir-export-request';
 import { ListAuditLogRequest } from './classes/list-audit-log-request';
 import { GeocodeResult } from './classes/geocode-result';
 import { REGION, findUserByEmail, getCallerProfile } from './shared';
@@ -805,6 +806,36 @@ export const setOrganizationAuditLogging = onCall<SetOrganizationAuditLoggingReq
     });
 
     return { auditLoggingEnabled };
+  },
+);
+
+// Toggles whether this org's patients can be exported as FHIR R4 bundles
+// (patients.ts's exportPatientFhirBundle) at all — off by default, same
+// opt-in-only shape as the CMEK/audit-logging toggles above. Purely a
+// capability gate here; exportPatientFhirBundle re-checks this flag
+// itself on every export rather than trusting client-side UI to hide the
+// action correctly.
+export const setOrganizationFhirExportEnabled = onCall<SetOrganizationFhirExportRequest>(
+  { region: REGION },
+  async (request) => {
+    const profile = await getCallerProfile(request.auth?.uid);
+    requireAdmin(profile, 'Only admins can change FHIR export settings.');
+
+    const { fhirExportEnabled } = request.data;
+    if (typeof fhirExportEnabled !== 'boolean') {
+      throw new HttpsError('invalid-argument', 'fhirExportEnabled must be a boolean.');
+    }
+
+    await getFirestore().collection('organizations').doc(profile.organizationId as string).update({ fhirExportEnabled });
+
+    await logAudit({
+      action: 'organization.setFhirExportEnabled',
+      actor: profile,
+      organizationId: profile.organizationId,
+      details: { fhirExportEnabled },
+    });
+
+    return { fhirExportEnabled };
   },
 );
 

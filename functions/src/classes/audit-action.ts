@@ -22,8 +22,10 @@ export type AuditAction =
   | 'organization.setCountry'
   | 'organization.setCmekPreference'
   | 'organization.setAuditLogging'
+  | 'organization.setFhirExportEnabled'
   | 'patient.create'
   | 'patient.update'
   | 'patient.complete'
   | 'patient.delete'
-  | 'patient.decrypt';
+  | 'patient.decrypt'
+  | 'patient.fhirExport';

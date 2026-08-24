@@ -7,6 +7,7 @@ class Organization {
     this.country,
     this.cmekRequested,
     this.auditLoggingEnabled,
+    this.fhirExportEnabled,
   });
 
   factory Organization.fromFirestore(String id, Map<String, Object?> data) {
@@ -21,6 +22,7 @@ class Organization {
       country: data['country'] as String?,
       cmekRequested: data['cmekRequested'] as bool?,
       auditLoggingEnabled: data['auditLoggingEnabled'] as bool?,
+      fhirExportEnabled: data['fhirExportEnabled'] as bool?,
     );
   }
 
@@ -36,4 +38,9 @@ class Organization {
   // place that default lives, matching how retainAllData/cmekRequested's
   // `?? false` defaults are handled the same way there.
   final bool? auditLoggingEnabled;
+
+  // Null (never set) means disabled — opt-in, unlike auditLoggingEnabled.
+  // Same nullable-here/defaulted-at-the-call-site convention as every
+  // other toggle on this class.
+  final bool? fhirExportEnabled;
 }

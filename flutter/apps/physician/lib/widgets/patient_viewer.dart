@@ -96,6 +96,9 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
   // re-fetch is fine, since it checks the surviving cache's own timestamp.
   final Set<String> _pendingDirectionsFetches = {};
 
+  bool _exportingFhir = false;
+  String? _exportError;
+
   @override
   void dispose() {
     _ticker?.dispose();
@@ -193,6 +196,38 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
     }
   }
 
+  // Only ever offered once the org has opted in and this patient's
+  // transport is actually complete — see canExportFhir in build(). The
+  // callable (functions/src/patients.ts) enforces both as hard
+  // preconditions regardless, this just avoids showing a button that
+  // would always fail.
+  Future<void> _exportFhir(String patientId, Patient patient) async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Export FHIR record?',
+      message:
+          "This downloads an unencrypted file containing ${patient.name.display()}'s information to your device. "
+          "AmDash's own access controls no longer apply to it once saved.",
+      confirmLabel: 'Download',
+    );
+    if (!confirmed || !mounted) return;
+
+    setState(() {
+      _exportingFhir = true;
+      _exportError = null;
+    });
+
+    try {
+      await exportPatientFhirBundle(ref.read(fhirExportFunctionsProvider), patientId);
+    } on FhirExportException catch (error) {
+      if (mounted) setState(() => _exportError = error.message);
+    } catch (error) {
+      if (mounted) setState(() => _exportError = "Couldn't export this patient's FHIR record. Please try again.");
+    } finally {
+      if (mounted) setState(() => _exportingFhir = false);
+    }
+  }
+
   LatLngBounds _boundsFromPoints(List<LatLng> points) {
     var minLat = points.first.latitude;
     var maxLat = points.first.latitude;
@@ -242,6 +277,11 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
     final cachedRoute = patient.id == null
         ? null
         : ref.watch(directionsCacheProvider.select((cache) => cache[patient.id]));
+
+    final patientId = patient.id;
+    final canExportFhir = patientId != null &&
+        patient.status == 'completed' &&
+        (ref.watch(ownOrganizationProvider).valueOrNull?.fhirExportEnabled ?? false);
 
     if (patient.id != null) {
       ref.listen<ActiveLocation?>(
@@ -317,6 +357,23 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
             notAddedText: 'Not added by EMS yet',
             style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
+          if (canExportFhir) ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: _exportingFhir ? null : () => _exportFhir(patientId, patient),
+                icon: _exportingFhir
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.upload_file),
+                label: Text(_exportingFhir ? 'Exporting…' : 'Export FHIR record'),
+              ),
+            ),
+          ],
+          if (_exportError != null) ...[
+            const SizedBox(height: 8),
+            Text(_exportError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ],
           const SizedBox(height: 16),
           _infoCard('Destination Hospital', [_infoRow('Destination', patient.destination)]),
           const SizedBox(height: 12),
