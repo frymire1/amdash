@@ -69,7 +69,32 @@ class HomeScreen extends ConsumerWidget {
                               )
                             : Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [for (final uploaded in patients) PatientSummaryCard(uploaded: uploaded)],
+                                // Keyed by patient id — without this, removing
+                                // one card (e.g. a patient dropping out of
+                                // this active-only list right after Complete
+                                // Transport) makes Flutter's unkeyed-list
+                                // reconciliation reuse every *later* card's
+                                // State object for the next patient that
+                                // shifts into its old position, silently
+                                // swapping which patient `widget.uploaded`
+                                // refers to mid-callback in
+                                // _PatientSummaryCardState — `mounted` stays
+                                // true throughout, so none of its own
+                                // `if (!mounted) return;` guards catch it.
+                                // Confirmed for real via a genuine Patrol e2e
+                                // failure: completeTransportConfirmed
+                                // confirmed the *correct* patient's write via
+                                // a live server-acknowledged snapshot, yet the
+                                // chained FHIR export attempt right after kept
+                                // failing with "must be marked complete" no
+                                // matter how long that export call retried —
+                                // because by then `widget.uploaded.id` had
+                                // silently become a *different*, still-active
+                                // patient's id.
+                                children: [
+                                  for (final uploaded in patients)
+                                    PatientSummaryCard(key: ValueKey(uploaded.id), uploaded: uploaded),
+                                ],
                               ),
                         loading: () => const Padding(
                           padding: EdgeInsets.symmetric(vertical: 32),
