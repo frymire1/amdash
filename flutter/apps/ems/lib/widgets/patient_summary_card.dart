@@ -24,6 +24,7 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
   String? _deleteError;
   String? _completeError;
   String? _exportError;
+  String? _exportSuccessMessage;
 
   Future<void> _deletePatient() async {
     final confirmed = await showConfirmDialog(
@@ -53,57 +54,104 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
   }
 
   Future<void> _completeTransport() async {
+    // organization is read up front so the disclosure about an automatic
+    // export can actually be accurate in this one dialog — there's no
+    // second confirmation for the export itself (see below for why).
+    final organization = await ref.read(ownOrganizationProvider.future);
+    final willAutoExport = organization?.fhirExportEnabled == true;
+    if (!mounted) return;
+
     final confirmed = await showConfirmDialog(
       context,
       title: 'Complete transport?',
-      message:
-          "Mark ${widget.uploaded.patient.name.display()}'s transport as complete? Live tracking will stop and it will no longer appear as active.",
+      message: willAutoExport
+          ? "Mark ${widget.uploaded.patient.name.display()}'s transport as complete? Live tracking will stop and it "
+                "will no longer appear as active. Its record will then be exported as FHIR automatically — this "
+                "downloads an unencrypted file containing this patient's information to your device, and AmDash's "
+                "own access controls no longer apply to it once saved."
+          : "Mark ${widget.uploaded.patient.name.display()}'s transport as complete? Live tracking will stop and it "
+                'will no longer appear as active.',
       confirmLabel: 'Complete Transport',
     );
     if (!confirmed || !mounted) return;
 
-    // Same ordering fix as _deletePatient — flip before stopTracking/complete.
+    // Captured now, not read again later: this card drops out of
+    // HomeScreen's active-only patient list the instant completion lands,
+    // so `widget`/`context` can become unusable partway through this
+    // method (and, before home_screen.dart keyed each card by patient id,
+    // silently started referring to a *different* patient instead of
+    // simply going away — confirmed for real via a genuine Patrol e2e
+    // failure where a confirmed-complete write was followed by an export
+    // attempt that kept failing "must be marked complete", because the
+    // widget had been reused for a still-active patient by then). The
+    // container itself is scoped to the app's ProviderScope, not this
+    // card, so reads through it below stay valid regardless of what
+    // happens to this widget from here on.
+    final container = ProviderScope.containerOf(context, listen: false);
+    final patientId = widget.uploaded.id;
+    final patientDisplayName = widget.uploaded.patient.name.display();
+
     setState(() {
       _completing = true;
       _completeError = null;
     });
 
+    // completeTransportConfirmed (not the plain completeTransport) —
+    // see its own doc comment: this account's first-ever direct
+    // Firestore write can silently miss the wire even though its own
+    // Future resolves without error, so this retries and confirms via a
+    // real server round trip rather than trusting that Future alone.
+    bool completedOk;
     try {
-      await ref.read(emsTrackingProvider.notifier).stopTracking(widget.uploaded.id);
-      await ref.read(patientUploadServiceProvider).completeTransport(widget.uploaded.id);
+      await container.read(emsTrackingProvider.notifier).stopTracking(patientId);
+      await container.read(patientUploadServiceProvider).completeTransportConfirmed(patientId);
+      completedOk = true;
     } catch (error) {
+      completedOk = false;
       if (mounted) setState(() => _completeError = 'Failed to complete transport. Please try again.');
     } finally {
       if (mounted) setState(() => _completing = false);
     }
+    if (!completedOk || !willAutoExport) return;
+
+    await _autoExportFhir(container, patientId, patientDisplayName);
   }
 
-  // Only ever offered right next to "Complete Transport" itself — the
-  // callable (functions/src/patients.ts) enforces status == 'completed'
-  // as a hard precondition regardless, this just avoids showing a button
-  // that would always fail. Named for what it downloads, not what it
-  // calls, since the confirmation dialog is the part worth a second of
-  // someone's attention here — see AuthService/dialogs.dart's
-  // showConfirmDialog for the same "confirm, then act" shape used
-  // elsewhere in this app.
-  Future<void> _exportFhir() async {
-    final confirmed = await showConfirmDialog(
-      context,
-      title: 'Export FHIR record?',
-      message:
-          "This downloads an unencrypted file containing ${widget.uploaded.patient.name.display()}'s information to your device. "
-          "AmDash's own access controls no longer apply to it once saved.",
-      confirmLabel: 'Download',
-    );
-    if (!confirmed || !mounted) return;
-
-    setState(() {
-      _exportingFhir = true;
-      _exportError = null;
-    });
+  // No confirmation dialog of its own — already disclosed as part of
+  // "Complete transport?" above, and a second dialog here would need this
+  // card's own (soon-to-be-gone) context to anchor it, right when this
+  // card is guaranteed to be disappearing from the active list. Runs
+  // automatically instead, using [container] rather than this State's own
+  // `ref`, so it doesn't matter whether this widget is still mounted by
+  // the time it resolves — only the setState calls below (best-effort UI
+  // feedback for the rare case this card is somehow still visible) are
+  // guarded on that.
+  Future<void> _autoExportFhir(ProviderContainer container, String patientId, String patientDisplayName) async {
+    if (mounted) {
+      setState(() {
+        _exportingFhir = true;
+        _exportError = null;
+        _exportSuccessMessage = null;
+      });
+    }
 
     try {
-      await exportPatientFhirBundle(ref.read(fhirExportFunctionsProvider), widget.uploaded.id);
+      final result = await exportPatientFhirBundle(container.read(fhirExportFunctionsProvider), patientId);
+      // Pulled straight out of the callable's own real response, not
+      // re-derived from local form state — this is what proves the
+      // exported file's vitals actually match what's in the app, not
+      // just that the export call didn't throw. (Also captured in
+      // amdash_core's debugLastExportResult — see its own doc comment —
+      // for a test to check directly, since this card may well be gone
+      // from the tree by the time any of this resolves.)
+      final heartRate = latestObservationValue(result.bundle, loincHeartRate);
+      if (mounted) {
+        setState(
+          () => _exportSuccessMessage = heartRate == null
+              ? '$patientDisplayName: FHIR record exported.'
+              : '$patientDisplayName: FHIR record exported (heart rate: ${heartRate.toStringAsFixed(0)} bpm).',
+        );
+      }
     } on FhirExportException catch (error) {
       if (mounted) setState(() => _exportError = error.message);
     } catch (error) {
@@ -150,8 +198,6 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
     // Only meaningful while tracking; skip the watch otherwise so an
     // untracked card doesn't spin up the health poller.
     final health = isTracking ? ref.watch(emsTrackingHealthProvider).valueOrNull : null;
-    final canExportFhir =
-        (ref.watch(ownOrganizationProvider).valueOrNull?.fhirExportEnabled ?? false) && patient.status == 'completed';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -187,11 +233,44 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
             ],
             if (_completeError != null) ...[
               const SizedBox(height: 8),
-              Text(_completeError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              Text(
+                _completeError!,
+                key: const Key('complete_transport_error'),
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+            // No button to show a spinner on anymore — the export is
+            // chained straight onto Complete Transport's own confirm
+            // dialog (see _completeTransport's doc comment on why), so
+            // this inline row is the only feedback that anything is
+            // happening between confirming and the success/error text
+            // below landing.
+            if (_exportingFhir) ...[
+              const SizedBox(height: 8),
+              const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                  SizedBox(width: 8),
+                  Text('Exporting FHIR record…'),
+                ],
+              ),
             ],
             if (_exportError != null) ...[
               const SizedBox(height: 8),
-              Text(_exportError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              Text(
+                _exportError!,
+                key: const Key('fhir_export_error'),
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+            if (_exportSuccessMessage != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _exportSuccessMessage!,
+                key: const Key('fhir_export_success'),
+                style: const TextStyle(color: AppColors.success),
+              ),
             ],
             const SizedBox(height: 12),
             Wrap(
@@ -215,14 +294,6 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
                       : const Icon(Icons.check_circle),
                   label: Text(_completing ? 'Completing…' : 'Complete Transport'),
                 ),
-                if (canExportFhir)
-                  OutlinedButton.icon(
-                    onPressed: _exportingFhir ? null : _exportFhir,
-                    icon: _exportingFhir
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.upload_file),
-                    label: Text(_exportingFhir ? 'Exporting…' : 'Export FHIR record'),
-                  ),
                 OutlinedButton.icon(
                   onPressed: _deleting ? null : _deletePatient,
                   style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -257,6 +259,59 @@ class PatientUploadService {
       'completedAt': FieldValue.serverTimestamp(),
       'updatedBy': _auth.currentUser?.uid,
     });
+  }
+
+  // Confirms completeTransport's own write via a real server round trip
+  // (a `snapshots(includeMetadataChanges: true)` listener, not just a
+  // one-off `get(GetOptions(source: Source.server))` — an earlier attempt
+  // at this used that instead and it kept reporting the pre-completion
+  // status well past when the write had actually landed) rather than
+  // trusting the plain update()'s own Future alone. Most of the
+  // "completeTransport's write never lands" symptoms chased while
+  // building this turned out to actually be a *different* bug —
+  // home_screen.dart's patient list building cards with no `key:`, which
+  // let Flutter silently reuse this card's own State for a different
+  // patient once the completed one dropped out of the active list,
+  // making later code check the wrong patient's status entirely (see that
+  // file's own comment) — not a real write-propagation delay. That bug is
+  // fixed now, but this confirm-and-retry wrapper is kept as a real
+  // safety net regardless: a direct client write's Future resolving
+  // before the write is durably visible to a separate server-side read is
+  // a documented category of Firestore behavior even when everything else
+  // is correct, and re-issuing this identical, idempotent update is cheap
+  // insurance against it.
+  //
+  // Throws [StateError] if every attempt fails to confirm — the caller
+  // decides how to surface that (see patient_summary_card.dart's
+  // _completeTransport).
+  Future<void> completeTransportConfirmed(String id, {int maxAttempts = 3}) async {
+    String? lastFailure;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      await completeTransport(id);
+      lastFailure = await _waitForStatus(id, 'completed', const Duration(seconds: 6));
+      if (lastFailure == null) return;
+    }
+    throw StateError("completeTransport didn't confirm after $maxAttempts attempts: $lastFailure");
+  }
+
+  // Returns the last status actually observed — null if it matched
+  // [status] once server-acknowledged, otherwise whatever was last seen,
+  // for callers that want to surface *why* this gave up.
+  Future<String?> _waitForStatus(String id, String status, Duration timeout) async {
+    Object? lastSeen;
+    final stream = _firestore.collection('patients').doc(id).snapshots(includeMetadataChanges: true);
+    try {
+      await for (final snapshot in stream.timeout(timeout)) {
+        if (snapshot.metadata.hasPendingWrites) continue;
+        lastSeen = snapshot.exists ? (snapshot.data()?['status']) : 'NO_SUCH_DOC';
+        if (lastSeen == status) return null;
+      }
+    } on TimeoutException {
+      // Falls through to the "gave up" return below with whatever was
+      // last observed (possibly still null, if no server-acknowledged
+      // snapshot ever arrived at all).
+    }
+    return 'gave up, last observed status: $lastSeen';
   }
 }
 
