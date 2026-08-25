@@ -102,7 +102,24 @@ export async function runPatrolTest({
   const resolvedDevice = await resolveDeviceId(device);
 
   return new Promise((resolve) => {
-    const args = ['test', '--device', resolvedDevice, '--show-flutter-logs', '--verbose', '--target', target];
+    // patrol_cli's own default (120s) — confirmed for real on a loaded dev
+    // machine that the Flutter web debug-service handshake alone can take
+    // well over 120s (a plain, unmodified `flutter run -d web-server`
+    // outside of Patrol entirely took 90.5s just to connect on one such
+    // run, with no guarantee that's the ceiling), well before Patrol's own
+    // test logic even starts running — bumped so a slow machine gets a
+    // real chance to finish instead of failing before its first test line.
+    const args = [
+      'test',
+      '--device',
+      resolvedDevice,
+      '--show-flutter-logs',
+      '--verbose',
+      '--web-server-timeout',
+      '300',
+      '--target',
+      target,
+    ];
 
     if (IS_WINDOWS) {
       // With shell:true, spawn joins argv with plain spaces and hands the

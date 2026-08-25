@@ -60,6 +60,12 @@ function parseArgs(argv) {
 
 async function createSmokeEmsAccount(db) {
   const organizationId = await findOrganizationId(db, 'test-org');
+  // FHIR export is opt-in per org — ems_test.dart's own flow exercises the
+  // export-on-complete-transport prompt, so make sure it's reachable
+  // regardless of whatever this shared fixture's last state was. Safe to
+  // set unconditionally: it only ever adds a new opt-in prompt, never
+  // changes any other existing behavior this or any other test relies on.
+  await db.doc(`organizations/${organizationId}`).set({ fhirExportEnabled: true }, { merge: true });
   const email = `smoke-ems-${Date.now()}@amdash-e2e.test`;
   const password = 'SmokeTest123';
   // emailVerified: true — required for mandatory MFA's /mfa-setup screen to
@@ -73,19 +79,22 @@ async function createSmokeEmsAccount(db) {
   return { email, password, uid: user.uid };
 }
 
-async function cleanup(db, auth, smokeAccountUid) {
-  await auth.deleteUser(smokeAccountUid).catch(() => {});
-  await db.doc(`users/${smokeAccountUid}`).delete().catch(() => {});
+async function cleanup(db, auth, smokeAccountUids) {
+  const ownUids = new Set(Array.isArray(smokeAccountUids) ? smokeAccountUids : [smokeAccountUids]);
+  for (const uid of ownUids) {
+    await auth.deleteUser(uid).catch(() => {});
+    await db.doc(`users/${uid}`).delete().catch(() => {});
+  }
 
-  // Broad prefix sweep, not just this run's own account — an interrupted
-  // run (killed process, a Test Lab run that crashed between --seed-only
-  // and --teardown) otherwise orphans its account forever, since no
-  // *future* run would ever know to clean up an account it didn't create
-  // itself. Confirmed for real this session: accounts from days earlier
-  // still sitting in Firebase Auth, because this only ever deleted the
-  // one uid passed in. Same pattern admin's cleanup() already uses, and
-  // the same reasoning the patient sweep below already applied to
-  // patients specifically. Age-guarded (isOldEnoughToSweep) on top of
+  // Broad prefix sweep, not just this run's own account(s) — an
+  // interrupted run (killed process, a Test Lab run that crashed between
+  // --seed-only and --teardown) otherwise orphans its account forever,
+  // since no *future* run would ever know to clean up an account it
+  // didn't create itself. Confirmed for real this session: accounts from
+  // days earlier still sitting in Firebase Auth, because this only ever
+  // deleted the one uid passed in. Same pattern admin's cleanup() already
+  // uses, and the same reasoning the patient sweep below already applied
+  // to patients specifically. Age-guarded (isOldEnoughToSweep) on top of
   // that — a broad sweep with no age check can delete a
   // concurrently-running sibling job's still-in-use account (confirmed
   // for real: see that function's own comment).
@@ -94,7 +103,7 @@ async function cleanup(db, auth, smokeAccountUid) {
   do {
     const page = await auth.listUsers(1000, pageToken);
     for (const user of page.users) {
-      if (user.email?.startsWith('smoke-ems-') && user.uid !== smokeAccountUid && isOldEnoughToSweep(user.email)) {
+      if (user.email?.startsWith('smoke-ems-') && !ownUids.has(user.uid) && isOldEnoughToSweep(user.email)) {
         await auth.deleteUser(user.uid).catch(() => {});
         await db.doc(`users/${user.uid}`).delete().catch(() => {});
         deletedUsers++;
@@ -147,7 +156,7 @@ async function cleanup(db, auth, smokeAccountUid) {
   }
 
   console.log(
-    `Cleanup: removed throwaway EMS account, ${deletedUsers} other leftover EMS account(s), ` +
+    `Cleanup: removed ${ownUids.size} throwaway EMS account(s), ${deletedUsers} other leftover EMS account(s), ` +
       `${deletedPatients} leftover patient(s) with a deleted owner.`,
   );
 }
@@ -168,6 +177,7 @@ if (teardown) {
 }
 
 let account;
+let exportTestAccount;
 let exitCode = 1;
 try {
   account = await createSmokeEmsAccount(db);
@@ -178,10 +188,8 @@ try {
     console.log('Wrote seeded account to', accountJsonPath);
     exitCode = 0;
   } else {
-    exitCode = await runPatrolTest({
+    const commonOptions = {
       appDir: EMS_APP_DIR,
-      target: 'patrol_test/ems_test.dart',
-      dartDefines: { SMOKE_EMAIL: account.email, SMOKE_PASSWORD: account.password },
       device: process.env.PATROL_DEVICE || 'chrome',
       // ems_test.dart never grants geolocation (it deliberately leaves
       // live tracking off) — but LocationTrackingSection.initState()
@@ -195,15 +203,54 @@ try {
       // type TextField" right around that ~12s mark. Explicitly denying
       // (empty permissions array, not omitted) makes the browser reject
       // the request immediately instead, removing the race entirely.
+      // complete_and_export_test.dart shares this same need (it also
+      // turns live tracking off during upload), so both runs use it.
       webPermissions: [],
+    };
+
+    const emsTestExitCode = await runPatrolTest({
+      ...commonOptions,
+      target: 'patrol_test/ems_test.dart',
+      dartDefines: { SMOKE_EMAIL: account.email, SMOKE_PASSWORD: account.password },
     });
+
+    // Its own throwaway account, not a reuse of the one above — confirmed
+    // for real (a first attempt shared one account across both runs):
+    // once ems_test.dart enrolls MFA on an account, every *later* sign-in
+    // to that same account hits Firebase's MFA *challenge* (enter a code
+    // from the authenticator app) rather than skipping straight through —
+    // and this separate `patrol test` process has no way to know the TOTP
+    // secret the first process generated and enrolled with (Firebase
+    // never exposes it again after enrollment, by design). A fresh
+    // account sidesteps this entirely: its own sign-in goes through
+    // enrollment instead, where the secret is visible on-screen exactly
+    // like ems_test.dart's own flow already handles.
+    exportTestAccount = await createSmokeEmsAccount(db);
+    console.log('Created throwaway EMS account for the export test:', exportTestAccount.email);
+
+    // Separate `patrol test` process — see complete_and_export_test.dart's
+    // own header comment for why this is its own file rather than folded
+    // into ems_test.dart. Runs regardless of whether the first passed, so
+    // a failure in one doesn't hide whether the other also failed; not
+    // wired into the Firebase Test Lab (Android) path — see that file's
+    // header comment.
+    const exportTestExitCode = await runPatrolTest({
+      ...commonOptions,
+      target: 'patrol_test/complete_and_export_test.dart',
+      dartDefines: { SMOKE_EMAIL: exportTestAccount.email, SMOKE_PASSWORD: exportTestAccount.password },
+    });
+
+    exitCode = emsTestExitCode !== 0 ? emsTestExitCode : exportTestExitCode;
   }
 } finally {
   // --seed-only intentionally skips cleanup — teardown happens in a later,
   // separately-invoked `--teardown` run (see the Test Lab workflows), after
   // `patrol build` + `gcloud firebase test ... run` have both used this
   // seeded state.
-  if (!seedOnly && account) await cleanup(db, auth, account.uid);
+  if (!seedOnly) {
+    const uids = [account, exportTestAccount].filter(Boolean).map((a) => a.uid);
+    if (uids.length > 0) await cleanup(db, auth, uids);
+  }
   if (credentialPath) fs.unlinkSync(credentialPath);
 }
 
