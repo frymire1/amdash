@@ -4,122 +4,23 @@
 // directly via the Firebase Admin SDK, not by this test — pass its
 // email/password via --dart-define, same convention as the EMS/physician
 // apps' own tests.
+//
+// tapFinder/tapKey/tapIcon/enterTextAt/pumpUntil/completeMfaEnrollment
+// come from amdash_patrol_helpers, shared across every app's
+// patrol_test/ suite — see that package for the full rationale/history
+// behind each one.
 import 'package:admin/main.dart';
 import 'package:admin/screens/organization_settings_screen.dart';
 import 'package:admin/screens/user_management_screen.dart';
 import 'package:admin/widgets/edit_user_dialog.dart';
+import 'package:amdash_patrol_helpers/amdash_patrol_helpers.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:otp/otp.dart';
 import 'package:patrol/patrol.dart';
 
 import 'package:admin/firebase_options.dart';
-
-// Patrol's own `.tap()`/`.waitUntilVisible()` require a widget to pass
-// its hit-testable check, which — verified manually against a real
-// browser, where every one of these interactions works fine — proved
-// intermittently unreliable against this app's Material overlays
-// (dropdown menus) and, at least once, an entirely ordinary always-visible
-// button. Tapping through the raw WidgetTester instead (only requires the
-// widget to exist, then simulates the tap at its center directly) has
-// been reliable throughout, so every interaction in this test uses it
-// consistently rather than mixing the two.
-Future<void> tapFinder(PatrolIntegrationTester $, Finder finder) async {
-  // AdminPage wraps every screen's content in a SingleChildScrollView, and
-  // this test's own actions (creating a user, etc.) grow the page tall
-  // enough that later controls — e.g. the "Add Hospital" button — end up
-  // below the fold of the fixed test viewport. $.tester.tap() only checks
-  // that the widget exists and computes its center, it doesn't scroll it
-  // into view first, so a real click dispatched by Playwright at that
-  // (off-screen) coordinate hits nothing. ensureVisible scrolls the
-  // nearest Scrollable ancestor first, same as a real user would.
-  await $.tester.ensureVisible(finder);
-  await $.pump(const Duration(milliseconds: 200));
-  await $.tester.tap(finder);
-  await $.pump(const Duration(milliseconds: 400));
-}
-
-Future<void> tapKey(PatrolIntegrationTester $, String key) =>
-    tapFinder($, find.byKey(Key(key)));
-
-Future<void> tapText(PatrolIntegrationTester $, String text) =>
-    tapFinder($, find.text(text));
-
-Future<void> tapIcon(PatrolIntegrationTester $, IconData icon) =>
-    tapFinder($, find.byIcon(icon).first);
-
-/// Patrol's own `$(...).enterText()` has the same missing-scroll gap as its
-/// `.tap()` (see tapFinder's comment above) — fine for fields already near
-/// the top of a page (sign-in, add-user), but the Settings page stacks
-/// several cards above HospitalManagementSection, putting its Name/Address
-/// fields below the fold on the fixed test viewport. ensureVisible first,
-/// same fix as every button interaction in this file already gets.
-Future<void> enterTextAt(
-  PatrolIntegrationTester $,
-  int index,
-  String text,
-) async {
-  final finder = find.byType(TextField).at(index);
-  await $.tester.ensureVisible(finder);
-  await $.pump(const Duration(milliseconds: 200));
-  await $.tester.enterText(finder, text);
-  await $.pump(const Duration(milliseconds: 200));
-}
-
-/// Polls with fixed pumps rather than a one-shot wait — network round
-/// trips (Cloud Function calls + Firestore listener updates) don't always
-/// land inside a short fixed pump.
-Future<void> pumpUntil(
-  PatrolIntegrationTester $,
-  bool Function() condition, {
-  int maxIterations = 50,
-}) async {
-  for (var i = 0; i < maxIterations; i++) {
-    if (condition()) return;
-    await $.pump(const Duration(milliseconds: 400));
-  }
-}
-
-/// Every account requires TOTP MFA (`AppRouteGuard`'s `requireMfa` tier,
-/// checked right after auth and before anything else) — a freshly created
-/// throwaway account has never enrolled, so sign-in always lands on
-/// /mfa-setup first. There's no server-side shortcut: the Admin SDK can
-/// only pre-enroll *phone* factors, not TOTP, so this drives the real
-/// enrollment UI instead of bypassing it — reads the on-screen secret and
-/// computes an actual valid code, exactly like a real authenticator app
-/// would. The account is created with emailVerified: true already (see
-/// run-admin-patrol-test.mjs), so /mfa-setup goes straight to the TOTP
-/// step without an email-verification detour.
-Future<void> completeMfaEnrollment(PatrolIntegrationTester $) async {
-  await pumpUntil(
-    $,
-    () => find.byKey(const Key('mfa_secret_key')).evaluate().isNotEmpty,
-    maxIterations: 40,
-  );
-  final secret = $.tester
-      .widget<SelectableText>(find.byKey(const Key('mfa_secret_key')))
-      .data!;
-  // SHA1/6 digits/30s is the universal TOTP convention every authenticator
-  // app assumes and the one Firebase's TOTP implementation actually uses
-  // (TotpSecret exposes these as fields, but the enrollment UI doesn't
-  // surface them — there's no Firebase-side way to configure anything
-  // else, so hard-coding the standard is safe, not an assumption).
-  final code = OTP.generateTOTPCodeString(
-    secret,
-    DateTime.now().millisecondsSinceEpoch,
-    algorithm: Algorithm.SHA1,
-    isGoogle: true,
-  );
-  await $(TextField).enterText(code);
-  await tapText($, 'Confirm');
-  await pumpUntil(
-    $,
-    () => find.byKey(const Key('mfa_secret_key')).evaluate().isEmpty,
-    maxIterations: 30,
-  );
-}
 
 void main() {
   patrolTest(

@@ -1,0 +1,31 @@
+name: amdash_patrol_helpers
+description: >
+  Shared Patrol e2e test helpers (tap/enterText/pumpUntil, location-permission
+  prompt handling, MFA enrollment) reused across admin/ems/physician's
+  patrol_test/ suites. Dev-only — never depended on by any shipping app.
+version: 0.0.1
+publish_to: 'none'
+
+environment:
+  sdk: ^3.12.2
+  flutter: ">=1.17.0"
+
+# Regular (not dev) dependencies here — this whole package IS a testing
+# tool, unlike amdash_core, so patrol/flutter_test are what it's actually
+# built on, not something layered on top of it. Each app still declares its
+# own patrol/flutter_test dev_dependencies for its own non-Patrol tests
+# (widget_test.dart etc.); this package doesn't replace those.
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_test:
+    sdk: flutter
+  patrol: ^4.9.0
+  # generateTOTPCodeString — computeMfaEnrollment computes a real TOTP code
+  # from the on-screen secret, the same way an authenticator app would;
+  # there's no server-side shortcut for TOTP enrollment (see that
+  # function's own doc comment).
+  otp: ^3.2.0
+
+dev_dependencies:
+  flutter_lints: ^6.0.0

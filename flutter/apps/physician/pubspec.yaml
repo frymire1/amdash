@@ -67,6 +67,11 @@ dev_dependencies:
   # to drive mandatory MFA enrollment in e2e (see patient_flow_test.dart);
   # never used by the shipping app.
   otp: ^3.2.0
+  # patrol_test only — shared tap/enterText/pumpUntil/MFA helpers reused
+  # across admin/ems/physician's own patrol_test/ suites, instead of each
+  # file duplicating its own copies.
+  amdash_patrol_helpers:
+    path: ../../packages/amdash_patrol_helpers
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

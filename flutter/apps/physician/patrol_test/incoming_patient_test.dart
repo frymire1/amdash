@@ -10,68 +10,20 @@
 // point of the whole two-app flow: proving an upload *and* a later
 // update on one app are genuinely what physician sees, not two tests
 // independently exercising their own UI against synthetic state.
+//
+// tapFinder/pumpUntil/completeMfaEnrollment come from
+// amdash_patrol_helpers, shared across every app's patrol_test/ suite —
+// see that package for the full rationale/history behind each one.
+import 'package:amdash_patrol_helpers/amdash_patrol_helpers.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:otp/otp.dart';
 import 'package:patrol/patrol.dart';
 import 'package:physician/firebase_options.dart';
 import 'package:physician/main.dart';
 import 'package:physician/screens/main_view_screen.dart';
-
-// See patient_flow_test.dart's fuller comment on why this app's Patrol
-// tests use raw WidgetTester taps instead of Patrol's own $(...).tap().
-Future<void> tapFinder(PatrolIntegrationTester $, Finder finder) async {
-  await $.tester.ensureVisible(finder);
-  await $.pump(const Duration(milliseconds: 200));
-  await $.tester.tap(finder);
-  await $.pump(const Duration(milliseconds: 400));
-}
-
-Future<void> tapText(PatrolIntegrationTester $, String text) =>
-    tapFinder($, find.text(text));
-
-/// Polls with fixed pumps rather than a one-shot wait — see
-/// patient_flow_test.dart's equivalent helper, which this mirrors.
-Future<void> pumpUntil(
-  PatrolIntegrationTester $,
-  bool Function() condition, {
-  int maxIterations = 50,
-}) async {
-  for (var i = 0; i < maxIterations; i++) {
-    if (condition()) return;
-    await $.pump(const Duration(milliseconds: 400));
-  }
-}
-
-/// See patient_flow_test.dart's equivalent for the full rationale (no
-/// server-side shortcut exists for TOTP; this drives the real enrollment
-/// UI).
-Future<void> completeMfaEnrollment(PatrolIntegrationTester $) async {
-  await pumpUntil(
-    $,
-    () => find.byKey(const Key('mfa_secret_key')).evaluate().isNotEmpty,
-    maxIterations: 40,
-  );
-  final secret = $.tester
-      .widget<SelectableText>(find.byKey(const Key('mfa_secret_key')))
-      .data!;
-  final code = OTP.generateTOTPCodeString(
-    secret,
-    DateTime.now().millisecondsSinceEpoch,
-    algorithm: Algorithm.SHA1,
-    isGoogle: true,
-  );
-  await $(TextField).enterText(code);
-  await tapText($, 'Confirm');
-  await pumpUntil(
-    $,
-    () => find.byKey(const Key('mfa_secret_key')).evaluate().isEmpty,
-    maxIterations: 30,
-  );
-}
 
 void main() {
   patrolTest(

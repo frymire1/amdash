@@ -8,124 +8,25 @@
 // makes a patient visible there. GPS is mocked via Playwright's
 // geolocation override (--web-geolocation, passed by the orchestrator),
 // not a real device fix — see run-patrol.mjs's webGeolocation param.
+// Deliberately no self-cleanup here (unlike complete_and_export_test.dart)
+// — the whole point is the patient this test uploads/edits stays behind
+// for incoming_patient_test.dart to find; run-patient-flow-e2e.mjs's own
+// orchestration owns tearing it down once both halves are done.
+//
+// tapFinder/enterTextAt/pumpUntil/dismissNativeLocationAccuracyDialog/
+// completeMfaEnrollment come from amdash_patrol_helpers, shared across
+// every app's patrol_test/ suite — see that package for the full
+// rationale/history behind each one.
+import 'package:amdash_patrol_helpers/amdash_patrol_helpers.dart';
 import 'package:ems/firebase_options.dart';
 import 'package:ems/main.dart';
 import 'package:ems/screens/home_screen.dart';
 import 'package:ems/screens/patient_upload_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:otp/otp.dart';
 import 'package:patrol/patrol.dart';
-
-// See ems_test.dart's fuller comment on why this app's Patrol tests use
-// raw WidgetTester taps instead of Patrol's own $(...).tap().
-Future<void> tapFinder(PatrolIntegrationTester $, Finder finder) async {
-  try {
-    await $.tester.ensureVisible(finder);
-  } catch (_) {
-    // Best-effort — see ems_test.dart's comment on why.
-  }
-  await $.pump(const Duration(milliseconds: 200));
-  await $.tester.tap(finder);
-  await $.pump(const Duration(milliseconds: 400));
-}
-
-Future<void> tapText(PatrolIntegrationTester $, String text) =>
-    tapFinder($, find.text(text));
-
-Future<void> tapKey(PatrolIntegrationTester $, String key) =>
-    tapFinder($, find.byKey(Key(key)));
-
-/// See ems_test.dart's equivalent helper for the full rationale — Patrol's
-/// own $(TextField).at(index).enterText() has the same hit-testable-check
-/// unreliability as its .tap(), confirmed for real on ems_test.dart's
-/// identical form. Also waits for the field to exist at all before
-/// touching it, not just a fixed short pump — see ems_test.dart's own
-/// comment on this same helper for the real Android failure that found it.
-Future<void> enterTextAt(
-  PatrolIntegrationTester $,
-  int index,
-  String text,
-) async {
-  for (var i = 0; i < 20; i++) {
-    if (find.byType(TextField).evaluate().length > index) break;
-    await $.pump(const Duration(milliseconds: 200));
-  }
-  final finder = find.byType(TextField).at(index);
-  try {
-    await $.tester.ensureVisible(finder);
-  } catch (_) {
-    // Best-effort — see tapFinder's comment above.
-  }
-  await $.pump(const Duration(milliseconds: 200));
-  await $.tester.enterText(finder, text);
-  await $.pump(const Duration(milliseconds: 400));
-}
-
-/// See ems_test.dart's identical helper for the full rationale (a real
-/// Firebase Test Lab video recording caught two of these stacked native
-/// dialogs hiding the entire app on Android) — not currently exercised
-/// here since this file only runs on Chrome via the cross-app flow, but
-/// this form goes through the exact same LocationTrackingSection mount,
-/// so the same fix applies if this ever runs on Android too.
-Future<void> dismissNativeLocationAccuracyDialog(
-  PatrolIntegrationTester $,
-) async {
-  if (kIsWeb) return;
-  for (var i = 0; i < 2; i++) {
-    try {
-      await $.platform.tap(
-        Selector(text: 'No thanks'),
-        timeout: const Duration(seconds: 2),
-      );
-      await $.pump(const Duration(milliseconds: 300));
-    } catch (_) {
-      break;
-    }
-  }
-}
-
-/// Polls with fixed pumps rather than a one-shot wait — see ems_test.dart's
-/// equivalent helper, which this mirrors.
-Future<void> pumpUntil(
-  PatrolIntegrationTester $,
-  bool Function() condition, {
-  int maxIterations = 50,
-}) async {
-  for (var i = 0; i < maxIterations; i++) {
-    if (condition()) return;
-    await $.pump(const Duration(milliseconds: 400));
-  }
-}
-
-/// See ems_test.dart's equivalent for the full rationale (no server-side
-/// shortcut exists for TOTP; this drives the real enrollment UI).
-Future<void> completeMfaEnrollment(PatrolIntegrationTester $) async {
-  await pumpUntil(
-    $,
-    () => find.byKey(const Key('mfa_secret_key')).evaluate().isNotEmpty,
-    maxIterations: 40,
-  );
-  final secret = $.tester
-      .widget<SelectableText>(find.byKey(const Key('mfa_secret_key')))
-      .data!;
-  final code = OTP.generateTOTPCodeString(
-    secret,
-    DateTime.now().millisecondsSinceEpoch,
-    algorithm: Algorithm.SHA1,
-    isGoogle: true,
-  );
-  await $(TextField).enterText(code);
-  await tapText($, 'Confirm');
-  await pumpUntil(
-    $,
-    () => find.byKey(const Key('mfa_secret_key')).evaluate().isEmpty,
-    maxIterations: 30,
-  );
-}
 
 void main() {
   patrolTest('EMS uploads a live-tracked patient bound for a real hospital', (

@@ -12,119 +12,20 @@
 // it signs in to see are both created directly via the Firebase Admin
 // SDK, not by this test — pass the account's email/password via
 // --dart-define, same convention as EMS's own flutter_driver tests.
+//
+// tapFinder/enterTextAt/pumpUntil/completeMfaEnrollment come from
+// amdash_patrol_helpers, shared across every app's patrol_test/ suite —
+// see that package for the full rationale/history behind each one.
+import 'package:amdash_patrol_helpers/amdash_patrol_helpers.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:otp/otp.dart';
 import 'package:patrol/patrol.dart';
 import 'package:physician/firebase_options.dart';
 import 'package:physician/main.dart';
 import 'package:physician/screens/main_view_screen.dart';
-
-// Patrol's own `.tap()` requires a widget to pass its hit-testable check,
-// which — verified manually against a real browser, where every one of
-// these interactions works fine — proved unreliable against this app's
-// Material overlays (the hospital autocomplete's option list) on Flutter
-// Web/CanvasKit through Patrol's Playwright-backed web runner. Raw
-// $.tester.tap() (only requires the widget to exist, then simulates the
-// tap at its computed center) doesn't have this problem; see the admin
-// app's patrol_test/user_flow_test.dart for the same fix applied there.
-Future<void> tapFinder(PatrolIntegrationTester $, Finder finder) async {
-  await $.tester.ensureVisible(finder);
-  await $.pump(const Duration(milliseconds: 200));
-  await $.tester.tap(finder);
-  await $.pump(const Duration(milliseconds: 400));
-}
-
-Future<void> tapText(PatrolIntegrationTester $, String text) =>
-    tapFinder($, find.text(text));
-
-/// Patrol's own $(TextField).at(index).enterText() has the same
-/// hit-testable-check unreliability as its .tap() (see tapFinder's
-/// comment above) — confirmed for real on Firebase Test Lab's Android
-/// e2e job, the very first time this line ever actually ran on a device
-/// (that job had been silently running zero tests until the native
-/// Patrol setup was fixed — see
-/// android/app/src/androidTest/.../MainActivityTest.java). Reliable all
-/// session on Chrome, but not on Android's real renderer. Raw
-/// $.tester.enterText() only requires the widget to exist, same fix
-/// tapFinder already applies to taps.
-///
-/// Also waits for the field to exist at all before touching it — not
-/// just a fixed short pump — confirmed for real right here: this second
-/// call (the password field, right after tapping 'Continue') threw a
-/// bare RangeError on the very next Android run once sign-in itself got
-/// past its first hurdle. Patrol's own high-level .enterText() waits up
-/// to 10s before acting; a raw enterText with no existence check doesn't,
-/// and the 'Sign In' text this call waits on can visibly appear a moment
-/// before its own TextField actually mounts.
-Future<void> enterTextAt(
-  PatrolIntegrationTester $,
-  int index,
-  String text,
-) async {
-  for (var i = 0; i < 20; i++) {
-    if (find.byType(TextField).evaluate().length > index) break;
-    await $.pump(const Duration(milliseconds: 200));
-  }
-  final finder = find.byType(TextField).at(index);
-  try {
-    await $.tester.ensureVisible(finder);
-  } catch (_) {
-    // Best-effort — see tapFinder's comment above.
-  }
-  await $.pump(const Duration(milliseconds: 200));
-  await $.tester.enterText(finder, text);
-  await $.pump(const Duration(milliseconds: 400));
-}
-
-/// Polls with fixed pumps rather than a one-shot wait — see admin's
-/// user_flow_test.dart, whose equivalent helper this mirrors.
-Future<void> pumpUntil(
-  PatrolIntegrationTester $,
-  bool Function() condition, {
-  int maxIterations = 50,
-}) async {
-  for (var i = 0; i < maxIterations; i++) {
-    if (condition()) return;
-    await $.pump(const Duration(milliseconds: 400));
-  }
-}
-
-/// Every account requires TOTP MFA (`AppRouteGuard`'s `requireMfa` tier,
-/// checked right after auth and before the work-location tier below) — a
-/// freshly created throwaway account has never enrolled, so sign-in always
-/// lands on /mfa-setup first. See admin's user_flow_test.dart for the full
-/// rationale (no server-side shortcut exists; this drives the real
-/// enrollment UI with a computed code instead of bypassing it). The
-/// account is created with emailVerified: true already (see
-/// run-physician-patrol-test.mjs), so /mfa-setup skips straight to the
-/// TOTP step.
-Future<void> completeMfaEnrollment(PatrolIntegrationTester $) async {
-  await pumpUntil(
-    $,
-    () => find.byKey(const Key('mfa_secret_key')).evaluate().isNotEmpty,
-    maxIterations: 40,
-  );
-  final secret = $.tester
-      .widget<SelectableText>(find.byKey(const Key('mfa_secret_key')))
-      .data!;
-  final code = OTP.generateTOTPCodeString(
-    secret,
-    DateTime.now().millisecondsSinceEpoch,
-    algorithm: Algorithm.SHA1,
-    isGoogle: true,
-  );
-  await enterTextAt($, 0, code);
-  await tapText($, 'Confirm');
-  await pumpUntil(
-    $,
-    () => find.byKey(const Key('mfa_secret_key')).evaluate().isEmpty,
-    maxIterations: 30,
-  );
-}
 
 void main() {
   patrolTest(

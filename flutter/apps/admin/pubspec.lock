@@ -16,6 +16,13 @@ packages:
       relative: true
     source: path
     version: "0.0.1"
+  amdash_patrol_helpers:
+    dependency: "direct dev"
+    description:
+      path: "../../packages/amdash_patrol_helpers"
+      relative: true
+    source: path
+    version: "0.0.1"
   archive:
     dependency: transitive
     description:
