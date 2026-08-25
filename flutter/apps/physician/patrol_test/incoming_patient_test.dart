@@ -181,10 +181,11 @@ void main() {
       final heartRateTrendIcon = find.byKey(
         const Key('vitals_trend_Heart Rate'),
       );
-      // vitalsHistoryProvider is a one-time fetch (not a live listener —
-      // see its own doc comment), so the icon only appears once that
-      // fetch resolves; wait for it rather than assuming it's already
-      // there on the first frame this card renders.
+      // vitalsHistoryProvider's first emission is still async even though
+      // it's a live listener (see its own doc comment) — the icon only
+      // appears once that first snapshot resolves, so wait for it rather
+      // than assuming it's already there on the first frame this card
+      // renders.
       await pumpUntil($, () => heartRateTrendIcon.evaluate().isNotEmpty);
       await tapFinder($, heartRateTrendIcon);
       await pumpUntil($, () => find.byType(AlertDialog).evaluate().isNotEmpty);
