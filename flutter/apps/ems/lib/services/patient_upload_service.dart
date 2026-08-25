@@ -173,6 +173,14 @@ class PatientUploadService {
   static int debugCallCount = 0;
   static final List<StackTrace> debugCallStacks = [];
 
+  // Diagnostic only, same rationale as debugCallCount above — lets a test
+  // clean up the exact patient it just created (via deletePatient) once
+  // it's done with it, rather than relying on some other process to
+  // eventually sweep it away. Set on every successful uploadPatient call;
+  // a test that runs more than one upload should read this right after
+  // each call it cares about, not just once at the end.
+  static String? debugLastUploadedPatientId;
+
   // Unlike every other write here, this is not a direct Firestore write —
   // firestore.rules flatly blocks a direct client create now (see its own
   // comment) because creation has to atomically seed this patient's
@@ -211,6 +219,7 @@ class PatientUploadService {
       throw PatientSaveException(error);
     }
 
+    debugLastUploadedPatientId = data['id'] as String;
     return PatientSaveResult(
       id: data['id'] as String,
       nameFingerprint: _fingerprintOf(data['name']),
