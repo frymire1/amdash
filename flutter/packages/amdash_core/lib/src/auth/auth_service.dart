@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/account_status.dart';
@@ -127,5 +128,13 @@ final authServiceProvider = Provider<AuthService>((ref) {
 /// (see `guards/`) wait for this provider's first non-loading value the
 /// same way the Angular guards wait for `initializing` to settle.
 final authStateProvider = StreamProvider<User?>((ref) {
-  return ref.watch(authServiceProvider).authStateChanges;
+  // TODO(debug): temporary — tracking down a real, reported "patient list
+  // spinner never stops on first load" bug that only a live browser
+  // console can help diagnose (Flutter Web release builds don't strip
+  // print()). Remove once the root cause is confirmed.
+  debugPrint('[DIAG] authStateProvider: subscribing at ${DateTime.now()}');
+  return ref.watch(authServiceProvider).authStateChanges.map((user) {
+    debugPrint('[DIAG] authStateProvider: emitted user=${user?.uid} at ${DateTime.now()}');
+    return user;
+  });
 });
