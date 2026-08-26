@@ -40,6 +40,16 @@ class AccessDeniedScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(userProfileProvider).valueOrNull;
     final matchingApps = _matchingApps(profile?.role ?? const []);
+    // TODO(debug): temporary — see AuthService.signOut()'s own TODO(debug).
+    // Confirms/denies whether the route guard ever sends a valid,
+    // successfully-signed-in user here even briefly (this screen itself
+    // never calls signOut() on its own — only the button below does — but
+    // landing here at all before self-correcting would be its own real bug
+    // worth knowing about).
+    debugPrint(
+      '[DIAG] AccessDeniedScreen: build() entered at ${DateTime.now()}, '
+      'orgId=${profile?.organizationId} roles=${profile?.role}',
+    );
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -70,7 +80,12 @@ class AccessDeniedScreen extends ConsumerWidget {
               ],
               const SizedBox(height: 20),
               TextButton(
-                onPressed: () => ref.read(authServiceProvider).signOut(),
+                onPressed: () {
+                  // TODO(debug): temporary — see AuthService.signOut()'s
+                  // own TODO(debug).
+                  debugPrint('[DIAG] AccessDeniedScreen: Log out button pressed at ${DateTime.now()}');
+                  ref.read(authServiceProvider).signOut();
+                },
                 child: const Text('Log out'),
               ),
             ],

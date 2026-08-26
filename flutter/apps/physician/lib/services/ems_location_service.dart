@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:amdash_core/amdash_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../classes/active_location.dart';
@@ -89,6 +90,13 @@ class EmsLocationController extends Notifier<EmsLocationState> {
   }
 
   void _resubscribe(String? organizationId) {
+    // TODO(debug): temporary — see AuthService.signOut()'s own TODO(debug)
+    // in amdash_core. This controller's 5s staleness timer is the closest
+    // timing match found so far to a real, reported spurious sign-out
+    // ~5-5.5s after a successful sign-in — logging its own subscribe/tick
+    // timestamps directly against signOut()'s to confirm or rule out the
+    // correlation with real data instead of guessing.
+    debugPrint('[DIAG] EmsLocationController._resubscribe: orgId=$organizationId at ${DateTime.now()}');
     _subscription?.cancel();
     _staleTimer?.cancel();
     _latest = {};
@@ -123,9 +131,22 @@ class EmsLocationController extends Notifier<EmsLocationState> {
         .where('organizationId', isEqualTo: organizationId)
         .where('active', isEqualTo: true)
         .snapshots()
-        .listen(_onSnapshot, onError: (_) {});
+        .listen(
+          _onSnapshot,
+          // TODO(debug): temporary — see this file's other TODO(debug).
+          // onError previously swallowed silently; logging it while
+          // tracking down the spurious-signout bug in case this listener
+          // erroring is actually a contributing factor, not the timer.
+          onError: (Object error) => debugPrint('[DIAG] EmsLocationController: location query error: $error'),
+        );
 
-    _staleTimer = Timer.periodic(const Duration(seconds: 5), (_) => _recompute());
+    _staleTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) {
+        debugPrint('[DIAG] EmsLocationController: 5s staleTimer tick at ${DateTime.now()}');
+        _recompute();
+      },
+    );
   }
 
   void _onSnapshot(QuerySnapshot<Map<String, Object?>> snapshot) {
