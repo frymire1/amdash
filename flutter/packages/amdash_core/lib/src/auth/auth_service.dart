@@ -74,6 +74,16 @@ class AuthService {
   }
 
   Future<void> signOut() async {
+    // TODO(debug): temporary — tracking down a real, reported bug: signOut()
+    // firing unexpectedly ~5s after a normal, successful sign-in (confirmed
+    // via authStateProvider's own diagnostic logging emitting user=null
+    // shortly after a real sign-in, followed by "client has already been
+    // terminated" on every later Firestore op). This stack trace identifies
+    // which of the known call sites (IdleTimeoutWrapper's idle check, or an
+    // explicit Sign Out button in nav_bar.dart/access_denied_screen.dart)
+    // actually fired, or reveals a call site not yet accounted for. Remove
+    // once the root cause is confirmed.
+    debugPrint('[DIAG] AuthService.signOut() called at ${DateTime.now()}\n${StackTrace.current}');
     await _auth.signOut();
     await _clearLocalCache();
   }
