@@ -27,6 +27,9 @@ dependencies:
   # Matches physician's/ems's own pin.
   intl: ^0.20.2
   file_saver: ^0.4.0
+  # Matches physician's own pin — for AuthService's post-sign-out reload
+  # (see reload_page_web.dart).
+  web: ^1.1.0
 
 dev_dependencies:
   flutter_test:

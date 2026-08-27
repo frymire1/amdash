@@ -29,11 +29,6 @@ class _NavBarState extends ConsumerState<NavBar> {
   bool _loggingOut = false;
 
   Future<void> _logOut() async {
-    // TODO(debug): temporary — see AuthService.signOut()'s own TODO(debug).
-    // StackTrace.current isn't readable in a release web build (dart2js
-    // strips symbols even from captured stack traces), so this tags the
-    // call site directly instead.
-    debugPrint('[DIAG] NavBar._logOut: Logout menu item selected at ${DateTime.now()}');
     setState(() => _loggingOut = true);
     try {
       await ref.read(authServiceProvider).signOut();

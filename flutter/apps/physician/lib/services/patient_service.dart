@@ -1,6 +1,5 @@
 import 'package:amdash_core/amdash_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// Mirrors `apps/physician/src/app/services/patient.service.ts`:
@@ -12,13 +11,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// splicing.
 final _rawPhysicianPatientsProvider = StreamProvider<List<Patient>>((ref) async* {
   final profileAsync = ref.watch(userProfileProvider);
-  // TODO(debug): temporary — tracking down a real, reported "patient list
-  // spinner never stops on first load" bug. See authStateProvider's own
-  // TODO(debug) in amdash_core. Remove once the root cause is confirmed.
-  debugPrint(
-    '[DIAG] _rawPhysicianPatientsProvider: build() entered, profileAsync.isLoading=${profileAsync.isLoading} '
-    'hasValue=${profileAsync.hasValue} orgId=${profileAsync.valueOrNull?.organizationId} at ${DateTime.now()}',
-  );
 
   // userProfileProvider mid-rebuild (e.g. right after a fresh sign-in
   // replaces a signed-out session) reports `hasValue: true` while
@@ -30,14 +22,10 @@ final _rawPhysicianPatientsProvider = StreamProvider<List<Patient>>((ref) async*
   // forward stale data. Confirmed via a real run: without this, a fresh
   // login briefly saw a stale `orgId: null` and reported "zero patients"
   // before the real profile settled.
-  if (profileAsync.isLoading) {
-    debugPrint('[DIAG] _rawPhysicianPatientsProvider: returning early, profileAsync still loading');
-    return;
-  }
+  if (profileAsync.isLoading) return;
 
   final organizationId = profileAsync.valueOrNull?.organizationId;
   if (organizationId == null) {
-    debugPrint('[DIAG] _rawPhysicianPatientsProvider: no organizationId, yielding empty list');
     yield const [];
     return;
   }
@@ -48,17 +36,10 @@ final _rawPhysicianPatientsProvider = StreamProvider<List<Patient>>((ref) async*
       .where('status', isEqualTo: 'active')
       .orderBy('submittedAt', descending: true);
 
-  debugPrint('[DIAG] _rawPhysicianPatientsProvider: subscribing to patients query at ${DateTime.now()}');
   // Only trust a server-confirmed snapshot — see userProfileProvider's own
   // doc listener for why `includeMetadataChanges: true` is required for a
   // `!isFromCache` filter to ever unblock.
-  yield* query.snapshots(includeMetadataChanges: true).map((snapshot) {
-    debugPrint(
-      '[DIAG] _rawPhysicianPatientsProvider: snapshot docs=${snapshot.docs.length} '
-      'isFromCache=${snapshot.metadata.isFromCache} at ${DateTime.now()}',
-    );
-    return snapshot;
-  }).where((snapshot) => !snapshot.metadata.isFromCache).map(
+  yield* query.snapshots(includeMetadataChanges: true).where((snapshot) => !snapshot.metadata.isFromCache).map(
     (snapshot) => snapshot.docs.map((doc) => Patient.fromFirestore(doc.id, doc.data())).toList(),
   );
 });

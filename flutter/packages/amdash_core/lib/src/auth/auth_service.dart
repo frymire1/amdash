@@ -1,10 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/account_status.dart';
+import 'reload_page.dart';
 
 /// Every callable Cloud Function this app hits runs in this region — must
 /// match `REGION` in `functions/src/shared.ts`.
@@ -57,10 +57,7 @@ class AuthService {
   // that don't necessarily tear down the instant sign-out fires — reliably
   // tracking down and cancelling every one of them here isn't realistic.
   // terminate() sidesteps that by forcibly closing every open
-  // listener/connection at the SDK level, whatever's holding it. Firestore
-  // transparently reconnects on its own next use regardless (e.g. a
-  // different worker signing into the same shared device right after), so
-  // this doesn't leave the app in any kind of broken state.
+  // listener/connection at the SDK level, whatever's holding it.
   //
   // Best-effort: swallows any failure rather than blocking sign-out on it —
   // this is defense in depth on top of encryption/access control, not the
@@ -73,19 +70,26 @@ class AuthService {
     } catch (_) {}
   }
 
+  // Confirmed for real (a live amdash-dev repro with console logging added
+  // to trace it, not a hypothesis): once terminate() above has fired,
+  // `FirebaseFirestore.instance` throws
+  // "The client has already been terminated" on every future operation —
+  // it does NOT transparently reconnect on next use, contrary to what an
+  // earlier version of this comment claimed. A different worker signing
+  // into the same shared device right after would hit exactly the bug
+  // this reload() call now prevents: userProfileProvider's next
+  // .snapshots() call would fail immediately and silently, and everything
+  // downstream (the patient list, etc.) would stay stuck loading forever
+  // with no visible error — reproduced live via a physician signing out
+  // then back in within the same page session. A full reload gives the
+  // next sign-in a genuinely fresh Firestore client instead. Web-only
+  // (see reload_page.dart) — a no-op on mobile, where terminate() isn't
+  // reachable from a UI action the same way (there's no equivalent
+  // "reload" concept, and no report of this affecting native builds).
   Future<void> signOut() async {
-    // TODO(debug): temporary — tracking down a real, reported bug: signOut()
-    // firing unexpectedly ~5s after a normal, successful sign-in (confirmed
-    // via authStateProvider's own diagnostic logging emitting user=null
-    // shortly after a real sign-in, followed by "client has already been
-    // terminated" on every later Firestore op). This stack trace identifies
-    // which of the known call sites (IdleTimeoutWrapper's idle check, or an
-    // explicit Sign Out button in nav_bar.dart/access_denied_screen.dart)
-    // actually fired, or reveals a call site not yet accounted for. Remove
-    // once the root cause is confirmed.
-    debugPrint('[DIAG] AuthService.signOut() called at ${DateTime.now()}\n${StackTrace.current}');
     await _auth.signOut();
     await _clearLocalCache();
+    reloadPage();
   }
 
   // Calls the requestPasswordReset callable (functions/src/shared.ts)
@@ -138,13 +142,5 @@ final authServiceProvider = Provider<AuthService>((ref) {
 /// (see `guards/`) wait for this provider's first non-loading value the
 /// same way the Angular guards wait for `initializing` to settle.
 final authStateProvider = StreamProvider<User?>((ref) {
-  // TODO(debug): temporary — tracking down a real, reported "patient list
-  // spinner never stops on first load" bug that only a live browser
-  // console can help diagnose (Flutter Web release builds don't strip
-  // print()). Remove once the root cause is confirmed.
-  debugPrint('[DIAG] authStateProvider: subscribing at ${DateTime.now()}');
-  return ref.watch(authServiceProvider).authStateChanges.map((user) {
-    debugPrint('[DIAG] authStateProvider: emitted user=${user?.uid} at ${DateTime.now()}');
-    return user;
-  });
+  return ref.watch(authServiceProvider).authStateChanges;
 });

@@ -78,14 +78,7 @@ class _IdleTimeoutWrapperState extends ConsumerState<IdleTimeoutWrapper> with Wi
 
   void _checkIdle() {
     final elapsed = DateTime.now().difference(_lastActivity);
-    // TODO(debug): temporary — see AuthService.signOut()'s own TODO(debug).
-    // Rules this class in/out as the trigger for a spurious sign-out
-    // reported ~5s after a normal sign-in (idleTimeoutDuration is 15
-    // minutes, so this shouldn't be able to fire that early — but this
-    // confirms rather than assumes).
-    debugPrint('[DIAG] IdleTimeoutWrapper._checkIdle: elapsed=$elapsed at ${DateTime.now()}');
     if (elapsed >= idleTimeoutDuration) {
-      debugPrint('[DIAG] IdleTimeoutWrapper._checkIdle: idle threshold exceeded, considering sign-out');
       if (ref.read(authServiceProvider).isAuthenticated) {
         ref.read(authServiceProvider).signOut();
       }

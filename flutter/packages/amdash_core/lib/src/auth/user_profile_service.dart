@@ -1,5 +1,4 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/user_profile.dart';
@@ -62,11 +61,6 @@ final userProfileServiceProvider = Provider<UserProfileService>((ref) {
 /// yields `null`).
 final userProfileProvider = StreamProvider<UserProfile?>((ref) async* {
   final authState = ref.watch(authStateProvider);
-  // TODO(debug): temporary — see authStateProvider's own TODO(debug).
-  debugPrint(
-    '[DIAG] userProfileProvider: build() entered, authState.isLoading=${authState.isLoading} '
-    'hasValue=${authState.hasValue} uid=${authState.valueOrNull?.uid} at ${DateTime.now()}',
-  );
 
   // While a recomputation is in flight, authState.hasValue can still be
   // true — Riverpod carries the *previous* value forward during a
@@ -74,15 +68,11 @@ final userProfileProvider = StreamProvider<UserProfile?>((ref) async* {
   // signal (see physicianPatientsProvider's identical check for the real
   // failure this guards against: a stale value read as if it were
   // settled).
-  if (authState.isLoading) {
-    debugPrint('[DIAG] userProfileProvider: returning early, authState still loading');
-    return;
-  }
+  if (authState.isLoading) return;
 
   final user = authState.valueOrNull;
 
   if (user == null) {
-    debugPrint('[DIAG] userProfileProvider: no user, yielding null');
     yield null;
     return;
   }
@@ -102,19 +92,10 @@ final userProfileProvider = StreamProvider<UserProfile?>((ref) async* {
   // plain `.where((s) => !s.metadata.isFromCache)` then blocks forever
   // (confirmed the hard way: this exact bug, on this exact line, minus
   // `includeMetadataChanges: true`, broke fresh sign-in outright).
-  debugPrint('[DIAG] userProfileProvider: subscribing to users/${user.uid} snapshots at ${DateTime.now()}');
   yield* FirebaseFirestore.instance
       .collection('users')
       .doc(user.uid)
       .snapshots(includeMetadataChanges: true)
-      .map((snapshot) {
-        debugPrint(
-          '[DIAG] userProfileProvider: snapshot exists=${snapshot.exists} '
-          'isFromCache=${snapshot.metadata.isFromCache} '
-          'hasPendingWrites=${snapshot.metadata.hasPendingWrites} at ${DateTime.now()}',
-        );
-        return snapshot;
-      })
       .where((snapshot) => !snapshot.metadata.isFromCache)
       .map((snapshot) {
         final data = snapshot.data();
