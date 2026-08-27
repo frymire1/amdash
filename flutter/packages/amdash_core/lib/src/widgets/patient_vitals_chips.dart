@@ -25,17 +25,30 @@ class PatientVitalsChips extends StatelessWidget {
       runSpacing: 8,
       children: [
         _chip(context, 'GCS', vitals.gcs, gcsStatus(vitals.gcs)),
-        _chip(context, 'Heart Rate', vitals.heartRate, heartRateStatus(vitals.heartRate)),
+        // Suffix matters here, not just cosmetically: EMS's e2e suite
+        // asserts the exact text "95 bpm" on this list card after editing
+        // heart rate (ems_test.dart/patient_upload_flow_test.dart) — a
+        // real CI failure caught this chip silently dropping the unit
+        // when this widget replaced EMS's old plain-text heart rate
+        // display.
+        _chip(context, 'Heart Rate', vitals.heartRate, heartRateStatus(vitals.heartRate), suffix: 'bpm'),
         _chip(context, 'Blood Pressure', vitals.bloodPressure, bloodPressureStatus(vitals.bloodPressure)),
-        _chip(context, 'Oxygen', vitals.oxygen, oxygenStatus(vitals.oxygen)),
-        _chip(context, 'Resp. Rate', vitals.respiratoryRate, respiratoryRateStatus(vitals.respiratoryRate)),
-        _chip(context, 'Temp', vitals.temperature, temperatureStatus(vitals.temperature)),
+        _chip(context, 'Oxygen', vitals.oxygen, oxygenStatus(vitals.oxygen), suffix: '%'),
+        _chip(
+          context,
+          'Resp. Rate',
+          vitals.respiratoryRate,
+          respiratoryRateStatus(vitals.respiratoryRate),
+          suffix: 'breaths/min',
+        ),
+        _chip(context, 'Temp', vitals.temperature, temperatureStatus(vitals.temperature), suffix: '°C'),
       ],
     );
   }
 
-  Widget _chip(BuildContext context, String label, Object? value, VitalStatus? status) {
+  Widget _chip(BuildContext context, String label, Object? value, VitalStatus? status, {String? suffix}) {
     final provided = isProvidedValue(value);
+    final text = provided ? (suffix == null ? '$value' : '$value $suffix') : 'Not added yet';
     final palette = context.palette;
     final colorScheme = Theme.of(context).colorScheme;
     final statusColor = status == null ? null : vitalStatusColor(palette, status);
@@ -52,7 +65,7 @@ class PatientVitalsChips extends StatelessWidget {
         children: [
           Text(label, style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant)),
           Text(
-            provided ? value.toString() : 'Not added yet',
+            text,
             style: TextStyle(
               fontSize: 13,
               fontStyle: provided ? FontStyle.normal : FontStyle.italic,
