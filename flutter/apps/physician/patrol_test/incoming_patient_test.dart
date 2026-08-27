@@ -14,6 +14,7 @@
 // tapFinder/pumpUntil/completeMfaEnrollment come from
 // amdash_patrol_helpers, shared across every app's patrol_test/ suite —
 // see that package for the full rationale/history behind each one.
+import 'package:amdash_core/amdash_core.dart';
 import 'package:amdash_patrol_helpers/amdash_patrol_helpers.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -155,17 +156,26 @@ void main() {
       );
 
       // The vitals card always shows the patient's current vitals (see
-      // patient_viewer.dart's _vitalsCard) — ems's edit ran after the
-      // initial upload, so this should already be the edited value, not
-      // the original one, proving the edit (not just the upload) is what
-      // physician actually sees.
+      // amdash_core's PatientVitalsCard, used by patient_viewer.dart) —
+      // ems's edit ran after the initial upload, so this should already be
+      // the edited value, not the original one, proving the edit (not just
+      // the upload) is what physician actually sees. Scoped to
+      // PatientVitalsCard specifically (not a bare find.text) — the
+      // selected patient's list card (PatientVitalsChips, a different
+      // widget) stays visible alongside the detail pane in this app's
+      // split view and shows the exact same "92 bpm" text, so an
+      // unscoped finder now matches both.
+      final vitalsCardHeartRate = find.descendant(
+        of: find.byType(PatientVitalsCard),
+        matching: find.text('$updatedHeartRate bpm'),
+      );
       await pumpUntil(
         $,
-        () => find.text('$updatedHeartRate bpm').evaluate().isNotEmpty,
+        () => vitalsCardHeartRate.evaluate().isNotEmpty,
         maxIterations: 40,
       );
       expect(
-        find.text('$updatedHeartRate bpm'),
+        vitalsCardHeartRate,
         findsOneWidget,
         reason:
             "vital signs should default to ems's edited heart rate, not the original upload",
