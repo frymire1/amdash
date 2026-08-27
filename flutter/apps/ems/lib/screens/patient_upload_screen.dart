@@ -29,24 +29,6 @@ const _ivPlacements = [
 
 const _genders = ['Male', 'Female', 'Other'];
 
-/// `PatientVitals`' numeric-ish fields (heartRate/oxygen/temperature) are
-/// typed `Object?` because they can also be the 'Unknown' string sentinel
-/// (see `_sharedFields` in patient_upload_service.dart) — used by the
-/// trend-chart series selectors below to filter those out rather than
-/// plot them as zero.
-num? _numOrNull(Object? value) => value is num ? value : null;
-
-/// Splits a "120/80"-shaped blood pressure reading into its systolic
-/// (index 0) or diastolic (index 1) half, or null if it isn't in that
-/// shape at all (missing, or the 'Unknown' sentinel — splitting either by
-/// '/' yields a single-element list, so this returns null for both parts
-/// without needing to special-case the sentinel directly).
-num? _bloodPressurePart(String bloodPressure, int index) {
-  final parts = bloodPressure.split('/');
-  if (parts.length != 2) return null;
-  return num.tryParse(parts[index].trim());
-}
-
 /// Mirrors `patient-upload.component.ts`/`.html` — create/edit patient
 /// form. `patientId` is null in create mode.
 class PatientUploadScreen extends ConsumerStatefulWidget {
@@ -486,7 +468,7 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
                             [
                               VitalSeries(
                                 label: 'Heart Rate',
-                                selector: (v) => _numOrNull(v.heartRate),
+                                selector: (v) => numOrNull(v.heartRate),
                               ),
                             ],
                             unit: ' bpm',
@@ -542,12 +524,12 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
                                 VitalSeries(
                                   label: 'Systolic',
                                   selector: (v) =>
-                                      _bloodPressurePart(v.bloodPressure, 0),
+                                      bloodPressurePart(v.bloodPressure, 0),
                                 ),
                                 VitalSeries(
                                   label: 'Diastolic',
                                   selector: (v) =>
-                                      _bloodPressurePart(v.bloodPressure, 1),
+                                      bloodPressurePart(v.bloodPressure, 1),
                                 ),
                               ]) ??
                               const SizedBox.shrink(),
@@ -563,7 +545,7 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
                             [
                               VitalSeries(
                                 label: 'Oxygen',
-                                selector: (v) => _numOrNull(v.oxygen),
+                                selector: (v) => numOrNull(v.oxygen),
                               ),
                             ],
                             unit: '%',
@@ -584,7 +566,7 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
                             [
                               VitalSeries(
                                 label: 'Temperature',
-                                selector: (v) => _numOrNull(v.temperature),
+                                selector: (v) => numOrNull(v.temperature),
                               ),
                             ],
                             unit: '°C',

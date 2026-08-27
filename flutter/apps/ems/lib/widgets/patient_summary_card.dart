@@ -201,79 +201,95 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: _trackingPill(isTracking, health),
-            ),
-            const SizedBox(height: 8),
-            PatientFieldText(patient.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            PatientFieldText(
-              patient.healthcareNumber,
-              prefix: 'Healthcare #',
-              style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Text(patient.gender),
-                const SizedBox(width: 12),
-                Text('${patient.age} yrs'),
-              ],
-            ),
-            const SizedBox(height: 8),
-            PatientVitalsChips(vitals: patient.vitals),
-            if (_deleteError != null) ...[
-              const SizedBox(height: 8),
-              Text(_deleteError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-            ],
-            if (_completeError != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                _completeError!,
-                key: const Key('complete_transport_error'),
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
-            // No button to show a spinner on anymore — the export is
-            // chained straight onto Complete Transport's own confirm
-            // dialog (see _completeTransport's doc comment on why), so
-            // this inline row is the only feedback that anything is
-            // happening between confirming and the success/error text
-            // below landing.
-            if (_exportingFhir) ...[
-              const SizedBox(height: 8),
-              const Row(
-                mainAxisSize: MainAxisSize.min,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            // Tap anywhere on the summary to open the read-only patient
+            // viewer. The buttons below live outside this InkWell entirely
+            // — a sibling, not a nested tap target inside it — so there's
+            // no ambiguity about a tap on Edit/Complete/Delete also
+            // triggering this navigation.
+            onTap: () => context.push('/patient/${widget.uploaded.id}'),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.md)),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
-                  SizedBox(width: 8),
-                  Text('Exporting FHIR record…'),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: _trackingPill(isTracking, health),
+                  ),
+                  const SizedBox(height: 8),
+                  PatientFieldText(patient.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  PatientFieldText(
+                    patient.healthcareNumber,
+                    prefix: 'Healthcare #',
+                    style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Text(patient.gender),
+                      const SizedBox(width: 12),
+                      Text('${patient.age} yrs'),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  PatientVitalsChips(vitals: patient.vitals),
+                  if (_deleteError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(_deleteError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  ],
+                  if (_completeError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _completeError!,
+                      key: const Key('complete_transport_error'),
+                      style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    ),
+                  ],
+                  // No button to show a spinner on anymore — the export is
+                  // chained straight onto Complete Transport's own confirm
+                  // dialog (see _completeTransport's doc comment on why), so
+                  // this inline row is the only feedback that anything is
+                  // happening between confirming and the success/error text
+                  // below landing.
+                  if (_exportingFhir) ...[
+                    const SizedBox(height: 8),
+                    const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                        SizedBox(width: 8),
+                        Text('Exporting FHIR record…'),
+                      ],
+                    ),
+                  ],
+                  if (_exportError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _exportError!,
+                      key: const Key('fhir_export_error'),
+                      style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    ),
+                  ],
+                  if (_exportSuccessMessage != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _exportSuccessMessage!,
+                      key: const Key('fhir_export_success'),
+                      style: const TextStyle(color: AppColors.success),
+                    ),
+                  ],
                 ],
               ),
-            ],
-            if (_exportError != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                _exportError!,
-                key: const Key('fhir_export_error'),
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
-            if (_exportSuccessMessage != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                _exportSuccessMessage!,
-                key: const Key('fhir_export_success'),
-                style: const TextStyle(color: AppColors.success),
-              ),
-            ],
-            const SizedBox(height: 12),
-            Wrap(
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            child: Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
@@ -308,8 +324,8 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

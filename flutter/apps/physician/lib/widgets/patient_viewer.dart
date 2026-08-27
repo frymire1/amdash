@@ -22,24 +22,6 @@ const _directionsRefreshDistanceM = 75.0;
 const _routeColor = Color(0xFF1A73E8);
 const _routeWidth = 6;
 
-/// `PatientVitals`' numeric-ish fields (heartRate/oxygen/temperature) are
-/// typed `Object?` because they can also be the 'Unknown' string sentinel
-/// (see `_sharedFields` in patient_upload_service.dart) — used by
-/// `_vitalsCard`'s trend-chart series selectors to filter those out rather
-/// than plot them as zero.
-num? _numOrNull(Object? value) => value is num ? value : null;
-
-/// Splits a "120/80"-shaped blood pressure reading into its systolic
-/// (index 0) or diastolic (index 1) half, or null if it isn't in that
-/// shape at all (missing, or the 'Unknown' sentinel — splitting either by
-/// '/' yields a single-element list, so this returns null for both parts
-/// without needing to special-case the sentinel directly).
-num? _bloodPressurePart(String bloodPressure, int index) {
-  final parts = bloodPressure.split('/');
-  if (parts.length != 2) return null;
-  return num.tryParse(parts[index].trim());
-}
-
 /// Mirrors `patient-viewer.component.ts`/`.html` — the core screen: patient
 /// info/vitals cards, a live map with the animated EMS vehicle marker
 /// (lerped between Firestore fixes over the real elapsed wall-clock gap —
@@ -318,14 +300,14 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
             style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 16),
-          _infoCard('Destination Hospital', [_infoRow('Destination', patient.destination)]),
+          PatientInfoCard(title: 'Destination Hospital', rows: [PatientInfoChip('Destination', patient.destination)]),
           const SizedBox(height: 12),
-          _vitalsCard(patient),
+          PatientVitalsCard(patient: patient),
           const SizedBox(height: 12),
-          _treatmentCard(patient),
+          PatientTreatmentCard(patient: patient),
           const SizedBox(height: 12),
           if (isProvidedValue(patient.notes)) ...[
-            _textCard('Patient Notes', patient.notes!),
+            PatientTextCard(title: 'Patient Notes', text: patient.notes!),
             const SizedBox(height: 12),
           ],
           if (vehiclePosition != null)
@@ -338,228 +320,6 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
               cachedRoute?.result,
             ),
         ],
-      ),
-    );
-  }
-
-  Widget _infoCard(String title, List<Widget> rows) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            Wrap(spacing: 16, runSpacing: 12, children: rows),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Same shape as _infoCard, but the header carries a "Recorded {time}"
-  // stamp from the latest vitalsHistoryProvider entry. Used to let you
-  // step back through older readings inline (arrow buttons swapping which
-  // snapshot the whole card showed) — replaced by a per-vital trend icon
-  // in _infoRow instead (see showVitalsTrendDialog), so this card always
-  // shows the patient's current vitals and history browsing only happens
-  // through that dialog. Falls back to patient.vitals with no timestamp
-  // while history is still loading, or for a patient that predates this
-  // feature (no history entries exist for it at all).
-  Widget _vitalsCard(Patient patient) {
-    final patientId = patient.id;
-    final history = patientId == null ? const <VitalsHistoryEntry>[] : ref.watch(vitalsHistoryProvider(patientId)).valueOrNull ?? const [];
-    final vitals = patient.vitals;
-    final latestRecordedAt = history.isEmpty ? null : history.first.recordedAt;
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Vital Signs', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            Padding(
-              padding: const EdgeInsets.only(top: 4, bottom: 12),
-              child: Text(
-                latestRecordedAt == null
-                    ? 'No upload history recorded for this patient'
-                    : 'Recorded ${DateFormat('MMM d, h:mm a').format(latestRecordedAt)}',
-                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              ),
-            ),
-            Wrap(
-              spacing: 16,
-              runSpacing: 12,
-              children: [
-                _infoRow(
-                  'Heart Rate',
-                  vitals.heartRate,
-                  suffix: 'bpm',
-                  history: history,
-                  trendSeries: [VitalSeries(label: 'Heart Rate', selector: (v) => _numOrNull(v.heartRate))],
-                ),
-                _infoRow(
-                  'Blood Pressure',
-                  vitals.bloodPressure,
-                  history: history,
-                  trendSeries: [
-                    VitalSeries(label: 'Systolic', selector: (v) => _bloodPressurePart(v.bloodPressure, 0), color: AppColors.trackingAccent),
-                    VitalSeries(label: 'Diastolic', selector: (v) => _bloodPressurePart(v.bloodPressure, 1), color: AppColors.brand),
-                  ],
-                ),
-                _infoRow(
-                  'Oxygen',
-                  vitals.oxygen,
-                  suffix: '%',
-                  history: history,
-                  trendSeries: [VitalSeries(label: 'Oxygen', selector: (v) => _numOrNull(v.oxygen))],
-                ),
-                _infoRow(
-                  'Temperature',
-                  vitals.temperature,
-                  suffix: '°C',
-                  history: history,
-                  trendSeries: [VitalSeries(label: 'Temperature', selector: (v) => _numOrNull(v.temperature))],
-                ),
-                _infoRow(
-                  'Respiratory Rate',
-                  vitals.respiratoryRate,
-                  suffix: 'breaths/min',
-                  history: history,
-                  trendSeries: [VitalSeries(label: 'Respiratory Rate', selector: (v) => v.respiratoryRate)],
-                ),
-                _infoRow(
-                  'GCS',
-                  vitals.gcs,
-                  history: history,
-                  trendSeries: [VitalSeries(label: 'GCS', selector: (v) => v.gcs)],
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // [trendSeries]/[history] are only passed by _vitalsCard — every other
-  // call site (IV size/placement, etc.) leaves them at their defaults and
-  // gets no trend icon, since there's no history for those fields at all.
-  Widget _infoRow(
-    String label,
-    Object? value, {
-    String? suffix,
-    List<VitalSeries>? trendSeries,
-    List<VitalsHistoryEntry> history = const [],
-  }) {
-    final provided = isProvidedValue(value);
-    final text = provided ? (suffix == null ? '$value' : '$value $suffix') : 'Not added by EMS yet';
-    final palette = context.palette;
-    final colorScheme = Theme.of(context).colorScheme;
-    // A single reading isn't a trend — the icon only appears once there's
-    // actually something to chart.
-    final showTrend = trendSeries != null && history.length > 1;
-    return SizedBox(
-      width: 200,
-      child: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: palette.glassSurface,
-          border: Border(left: BorderSide(color: AppColors.trackingAccent, width: 3)),
-          borderRadius: BorderRadius.circular(AppRadius.md),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(label, style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant)),
-                ),
-                if (showTrend)
-                  InkWell(
-                    // Keyed (rather than found by ancestor/type) because
-                    // MainViewScreen wraps PatientViewer in its own Row for
-                    // its wide-layout mode — a Row-typed ancestor search
-                    // from this row's label text would also match that
-                    // outer Row, pulling in every other vital's trend icon
-                    // as a false-positive descendant match.
-                    key: Key('vitals_trend_$label'),
-                    onTap: () => showVitalsTrendDialog(
-                      context,
-                      title: label,
-                      history: history,
-                      series: trendSeries,
-                      unit: suffix == null ? null : ' $suffix',
-                    ),
-                    borderRadius: BorderRadius.circular(4),
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 4),
-                      child: Icon(Icons.show_chart, size: 14, color: AppColors.trackingAccent),
-                    ),
-                  ),
-              ],
-            ),
-            Text(
-              text,
-              style: TextStyle(
-                fontStyle: provided ? FontStyle.normal : FontStyle.italic,
-                color: provided ? colorScheme.onSurface : colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _treatmentCard(Patient patient) {
-    final treatmentProvided = isProvidedValue(patient.treatment);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Treatment / Medication Given', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text(
-              treatmentProvided ? patient.treatment! : 'Not added by EMS yet',
-              style: TextStyle(
-                fontStyle: treatmentProvided ? FontStyle.normal : FontStyle.italic,
-                color: treatmentProvided ? null : Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 16,
-              runSpacing: 12,
-              children: [
-                _infoRow('IV Size', patient.ivSize),
-                _infoRow('IV Placement', patient.ivPlacement),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _textCard(String title, String text) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text(text),
-          ],
-        ),
       ),
     );
   }

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import 'screens/home_screen.dart';
 import 'screens/patient_upload_screen.dart';
+import 'screens/patient_viewer_screen.dart';
 import 'screens/user_settings_screen.dart';
 
 /// Mirrors `apps/ems/src/app/app.routes.ts`'s route table and guard chain
@@ -57,6 +58,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: '/upload/:id',
             pageBuilder: (context, state) =>
                 fastFadePage(context, state, PatientUploadScreen(patientId: state.pathParameters['id'])),
+          ),
+          GoRoute(
+            path: '/patient/:id',
+            pageBuilder: (context, state) =>
+                fastFadePage(context, state, PatientViewerScreen(patientId: state.pathParameters['id']!)),
           ),
         ],
       ),
