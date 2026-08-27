@@ -35,6 +35,16 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # Unit-test mocking stack (see /TESTING.md) — no build_runner/code-gen
+  # step for any of these, matching this repo's existing no-codegen
+  # convention. mocktail mocks FirebaseFunctions/HttpsCallable and other
+  # interface-shaped dependencies; fake_cloud_firestore/firebase_auth_mocks
+  # are real in-memory fakes for Firestore/Auth-backed services and
+  # providers, confirmed compatible with this package's pinned
+  # cloud_firestore ^6.x/firebase_auth ^6.x.
+  mocktail: ^1.0.4
+  fake_cloud_firestore: ^4.1.0
+  firebase_auth_mocks: ^0.15.2
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

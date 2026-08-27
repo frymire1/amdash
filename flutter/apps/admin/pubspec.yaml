@@ -65,6 +65,11 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  # Unit-test mocking stack — see amdash_core/pubspec.yaml's identical
+  # entries and /TESTING.md for the rationale.
+  mocktail: ^1.0.4
+  fake_cloud_firestore: ^4.1.0
+  firebase_auth_mocks: ^0.15.2
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

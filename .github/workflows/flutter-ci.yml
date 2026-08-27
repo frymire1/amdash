@@ -79,13 +79,32 @@ jobs:
           done
         working-directory: flutter
 
+      # --coverage on all four so lcov.info is always produced/uploaded as
+      # an artifact-free build log signal, even for physician/ems/admin,
+      # which (as of this step's addition) only have placeholder tests and
+      # so get an *empty* lcov.info — real coverage collection starts the
+      # moment each app gets its first real test, without another workflow
+      # change. Only amdash_core is actually gated below (see TESTING.md's
+      # backfill roadmap for why the other three aren't yet: gating an
+      # empty lcov.info is either a no-op that looks like enforcement or an
+      # outright tool error, neither of which is honest).
       - name: Run widget/unit tests
         run: |
           set -e
           for dir in packages/amdash_core apps/physician apps/ems apps/admin; do
-            (cd "$dir" && flutter test)
+            (cd "$dir" && flutter test --coverage)
           done
         working-directory: flutter
+
+      # See TESTING.md for the current threshold and the plan to ratchet
+      # it up (and add the other three packages here) as they gain real
+      # tests. min_coverage is a floor set to what's actually measured
+      # today, not a guess.
+      - name: Enforce amdash_core coverage threshold
+        uses: VeryGoodOpenSource/very_good_coverage@v3
+        with:
+          path: flutter/packages/amdash_core/coverage/lcov.info
+          min_coverage: 4
 
   functions-build:
     name: Functions build (tsc)
@@ -107,10 +126,15 @@ jobs:
         run: npm run build
         working-directory: functions
 
-      # vitest, added alongside fhir.ts — pure-function unit tests (no
+      # vitest, added alongside fhir.ts — pure-function unit tests with
+      # firebase-admin/@google-cloud/kms mocked at the module level (no
       # Firestore/KMS emulation), so no other setup needed beyond install.
+      # --coverage self-enforces the thresholds in vitest.config.ts —
+      # vitest exits non-zero if measured coverage drops below them, so
+      # this one step is both the test run and the coverage gate. See
+      # TESTING.md for the current threshold and backfill roadmap.
       - name: Test
-        run: npm test
+        run: npm test -- --coverage
         working-directory: functions
 
   # Only runs on master — real Firebase resource usage (seeding/tearing

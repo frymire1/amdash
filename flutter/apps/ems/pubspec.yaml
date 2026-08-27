@@ -73,6 +73,11 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   flutter_native_splash: ^2.4.8
+  # Unit-test mocking stack — see amdash_core/pubspec.yaml's identical
+  # entries and /TESTING.md for the rationale.
+  mocktail: ^1.0.4
+  fake_cloud_firestore: ^4.1.0
+  firebase_auth_mocks: ^0.15.2
 
 # Read by patrol_cli — package_name feeds the PATROL_APP_PACKAGE_NAME
 # dart-define and `patrol test`'s own instrumentation-component
