@@ -1,18 +1,75 @@
 name: CI
 
+# One workflow, one run per push — covers the whole repo: GitGuardian
+# secrets scanning, marketing (Angular) test/lint/build, functions
+# (TypeScript build + vitest coverage), and Flutter analyze/unit-test
+# (+ coverage gate) on every push; e2e (Chrome + Firebase Test Lab
+# Android) and physician/ems web hosting deploy on master only. This used
+# to be two separate workflow files (`ci.yml` for marketing, `flutter-ci.yml`
+# for everything else) that both fired on every push — merged into one so
+# a single push only shows one CI run instead of two unrelated ones.
+#
+# marketing's hosting deploy is deliberately NOT automated here (it used
+# to be, as a `deploy-marketing` job gated on this file's own test/lint/
+# build jobs) — the marketing site changes rarely enough that auto-deploying
+# it on every push (even push that doesn't touch marketing/) wasn't worth
+# keeping. Deploy it manually when it actually changes:
+#   cd marketing && npm run build && firebase deploy --only hosting:marketing --project amdash-dev
+# Physician/ems/admin's other deploys (functions, firestore rules, admin
+# hosting, mobile builds/distribution) remain manual-trigger-only on
+# Codemagic, unchanged — see codemagic.yaml.
+#
+# Deliberately not on Codemagic: none of the jobs below need macOS, and
+# GitHub's Linux runners are free on the plans this repo uses, unlike
+# Codemagic's per-minute mac_mini_m2 pricing (see codemagic.yaml's own
+# history — that's exactly why its testing workflows were removed and
+# this file exists instead). iOS e2e stays off entirely — Xcode/signing
+# is the genuinely expensive, complex part regardless of which CI system
+# runs it; flutter-deploy and the ios-adhoc-distribute* workflows in
+# codemagic.yaml remain the way to get a real iOS build, manually, when
+# needed.
+#
+# e2e doesn't gate a deploy the way this file's old ci.yml `deploy-marketing`
+# job did — flutter-web-e2e/flutter-android-e2e are a smoke test of
+# whatever's currently live on amdash-dev, not a pre-deploy check, with
+# one exception: flutter-web-deploy below deploys physician/ems hosting
+# automatically once this exact push's own e2e has passed here.
+#
+# Required repo secrets (GitHub -> Settings -> Secrets and variables ->
+# Actions):
+#   - GITGUARDIAN_API_KEY — GitGuardian dashboard-issued key (scoped to
+#     "scan").
+#   - FIREBASE_SERVICE_ACCOUNT_KEY — used by flutter-web-deploy below.
+#
+# flutter-android-e2e authenticates to Google Cloud via Workload Identity
+# Federation, not a service account key — this org has
+# iam.managed.disableServiceAccountKeyCreation enforced (a real security
+# improvement, not something to work around), which blocks minting a new
+# key for the codemagic-testlab service account entirely. WIF is Google's
+# recommended keyless replacement for exactly this scenario: GitHub issues
+# a short-lived OIDC token per run, which Google exchanges for that
+# service account's permissions, scoped so only the frymire1/amdash repo
+# can do this at all — no long-lived credential stored anywhere. One-time
+# setup already done (Cloud Shell, project amdash-dev):
+#   - Workload identity pool: github-actions-pool
+#   - Provider: github-actions-provider (OIDC issuer
+#     https://token.actions.githubusercontent.com, attribute-condition
+#     restricting to assertion.repository=='frymire1/amdash')
+#   - codemagic-testlab@amdash-dev.iam.gserviceaccount.com granted
+#     roles/iam.workloadIdentityUser to that pool's principalSet, scoped
+#     to this repo.
+# The job below needs `permissions: id-token: write` for GitHub to be
+# allowed to mint that OIDC token in the first place — without it, the
+# auth step fails even with everything above configured correctly.
+
 on:
   push:
 
 jobs:
-  # Scans the whole repo (not just marketing/ like every other job here) —
-  # the one job in this file that isn't Flutter-vs-Angular-scoped, since a
-  # leaked secret is exactly as bad in functions/ or a Flutter app as it is
-  # here. Runs independently of test/lint/build/deploy-marketing (no
-  # `needs:`), so a Flutter/functions-only push still gets scanned even
-  # though it wouldn't touch any of those other jobs' actual work.
-  # GITGUARDIAN_API_KEY is a GitGuardian dashboard-issued key (scoped to
-  # "scan") stored as a repo secret — GitHub → Settings → Secrets and
-  # variables → Actions.
+  # Scans the whole repo (not just marketing/ or flutter/) — a leaked
+  # secret is exactly as bad in functions/ or a Flutter app as it is in
+  # marketing. Runs independently of every other job here (no `needs:`),
+  # so any push gets scanned even if it only touches one part of the repo.
   secrets-scan:
     name: GitGuardian scan
     runs-on: ubuntu-latest
@@ -33,7 +90,8 @@ jobs:
           GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
 
-  test:
+  marketing-test:
+    name: Marketing test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +110,8 @@ jobs:
         run: npm test
         working-directory: marketing
 
-  lint:
+  marketing-lint:
+    name: Marketing lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,7 +130,8 @@ jobs:
         run: npm run lint
         working-directory: marketing
 
-  build:
+  marketing-build:
+    name: Marketing build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,20 +150,55 @@ jobs:
         run: npm run build
         working-directory: marketing
 
-  # physician/ems/admin (Flutter unit tests, web/android/ios builds, e2e,
-  # and their Firebase deploy) moved to Codemagic — see codemagic.yaml at
-  # the repo root. This workflow now covers only `marketing` (a standalone
-  # Angular app, formerly under an Nx monorepo). Its hosting deploy is
-  # deliberately kept here rather than moved to Codemagic too: `marketing`
-  # isn't a Flutter app and has no reason to depend on Codemagic's
-  # toolchain. This does mean marketing's deploy and the Flutter
-  # apps'/functions' deploy (on Codemagic) are two independent pipelines
-  # against the same amdash-dev project instead of one atomic
-  # `firebase deploy` — a change/push that touches both is no longer
-  # guaranteed to land together, unlike before this split.
-  deploy-marketing:
+  flutter-analyze-test:
+    name: Flutter analyze + unit/widget tests
     runs-on: ubuntu-latest
-    needs: [test, lint, build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Analyze amdash_core, physician, ems, admin
+        run: |
+          set -e
+          for dir in packages/amdash_core apps/physician apps/ems apps/admin; do
+            (cd "$dir" && flutter pub get && flutter analyze)
+          done
+        working-directory: flutter
+
+      # --coverage on all four so lcov.info is always produced/uploaded as
+      # an artifact-free build log signal, even for physician/ems/admin,
+      # which (as of this step's addition) only have placeholder tests and
+      # so get an *empty* lcov.info — real coverage collection starts the
+      # moment each app gets its first real test, without another workflow
+      # change. Only amdash_core is actually gated below (see TESTING.md's
+      # backfill roadmap for why the other three aren't yet: gating an
+      # empty lcov.info is either a no-op that looks like enforcement or an
+      # outright tool error, neither of which is honest).
+      - name: Run widget/unit tests
+        run: |
+          set -e
+          for dir in packages/amdash_core apps/physician apps/ems apps/admin; do
+            (cd "$dir" && flutter test --coverage)
+          done
+        working-directory: flutter
+
+      # See TESTING.md for the current threshold and the plan to ratchet
+      # it up (and add the other three packages here) as they gain real
+      # tests. min_coverage is a floor set to what's actually measured
+      # today, not a guess.
+      - name: Enforce amdash_core coverage threshold
+        uses: VeryGoodOpenSource/very_good_coverage@v3
+        with:
+          path: flutter/packages/amdash_core/coverage/lcov.info
+          min_coverage: 4
+
+  functions-build:
+    name: Functions build (tsc)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -111,31 +206,428 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: marketing/package-lock.json
+          cache-dependency-path: functions/package-lock.json
 
       - name: Install dependencies
         run: npm ci
-        working-directory: marketing
+        working-directory: functions
 
-      # This job runs on its own fresh runner (no filesystem shared with the
-      # `build` job above), so the production build has to happen again
-      # here too — deploy needs the actual build output on disk, not just
-      # proof that it built successfully.
-      - name: Build marketing
+      - name: Build
         run: npm run build
-        working-directory: marketing
+        working-directory: functions
 
-      - name: Install Firebase CLI
-        run: npm install -g firebase-tools
+      # vitest, added alongside fhir.ts — pure-function unit tests with
+      # firebase-admin/@google-cloud/kms mocked at the module level (no
+      # Firestore/KMS emulation), so no other setup needed beyond install.
+      # --coverage self-enforces the thresholds in vitest.config.ts —
+      # vitest exits non-zero if measured coverage drops below them, so
+      # this one step is both the test run and the coverage gate. See
+      # TESTING.md for the current threshold and backfill roadmap.
+      - name: Test
+        run: npm test -- --coverage
+        working-directory: functions
 
-      # Used by `firebase deploy` below. Requires a real GCP service account
-      # key stored as the FIREBASE_SERVICE_ACCOUNT_KEY repo secret (Firebase
-      # Console → Project Settings → Service Accounts → Generate new private
-      # key, for the amdash-dev project).
+  # Only runs on master — real Firebase resource usage (seeding/tearing
+  # down live test accounts against amdash-dev), not free just because the
+  # CI compute is. Test locally before pushing to any other branch (see
+  # scripts/run-*-patrol-test.mjs — built to work standalone, not just in
+  # CI).
+  flutter-web-e2e:
+    name: Web e2e (Chrome)
+    runs-on: ubuntu-latest
+    needs: flutter-analyze-test
+    if: github.ref == 'refs/heads/master'
+    # Flutter Web's engine crashes on startup ("Error: Invalid argument:
+    # Incorrect locale information provided", thrown from
+    # parseBrowserLanguages) when the headless Chromium Patrol/Playwright
+    # launches reports a locale list the engine can't parse — which is
+    # what happens on a bare ubuntu-latest runner, where LANG/LC_ALL
+    # default to C/POSIX rather than a real locale. Setting a real one
+    # job-wide fixes it; the runner has en_US.UTF-8 pre-generated already,
+    # just not active.
+    env:
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
+    steps:
+      - uses: actions/checkout@v4
+
+      # Belt-and-suspenders alongside the job-level LANG/LC_ALL above:
+      # locale-gen is a no-op if en_US.UTF-8 is already generated.
+      - name: Ensure en_US.UTF-8 locale is generated
+        run: sudo locale-gen en_US.UTF-8
+
+      # Patrol launches Chromium headed, which needs a (virtual) display —
+      # see scripts/lib/run-patrol.mjs's xvfb-run wrapping (skipped on
+      # macOS, which is why Codemagic's own mac_mini_m2-based version of
+      # this job never needed this step).
+      - name: Ensure xvfb is installed
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # `dart pub global activate` compiles patrol_cli from source — real
+      # time cost, repeated identically in both e2e jobs every run.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-cache-${{ runner.os }}-patrol-cli
+
+      - name: Install patrol_cli
+        # Pinned, not latest: patrol_cli's own compatibility checker rejects
+        # a mismatched pairing against this repo's `patrol: ^4.9.0` pin
+        # (all three apps) — hit this for real on a GHA run once already
+        # (unpinned-latest 4.7.0 against a then-current patrol 4.8.0), so
+        # don't go back to unpinned even though 4.7.0 happens to be latest
+        # right now. 4.7.0 is the version whose own changelog states
+        # "Requires patrol 4.9.0 or newer" — bump both together alongside
+        # any future patrol/pubspec.yaml version bump.
+        run: |
+          dart pub global activate patrol_cli 4.7.0
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: Install scripts dependencies
+        run: npm ci
+        working-directory: scripts
+
+      # `patrol test` bootstraps its own Playwright setup on demand but
+      # that only downloads the browser binary, not the OS-level shared
+      # libraries (libnss3, libatk, etc.) a fresh ubuntu-latest runner
+      # doesn't have — without them Chromium fails to launch at all.
+      # Playwright caches the downloaded browser globally
+      # (~/.cache/ms-playwright), so installing it once here means
+      # patrol's own later install step just finds it already present.
+      - name: Install Playwright browser + OS dependencies
+        run: npx playwright install --with-deps chromium
+        working-directory: scripts
+
+      # Used by the run-*-patrol-test.mjs scripts' own Admin SDK calls
+      # (see scripts/lib/firebase-admin-cli.mjs) — the Admin SDK
+      # auto-detects this standard env var, no extra plumbing needed.
       - name: Authenticate to Firebase
         run: |
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
 
-      - name: Deploy marketing hosting to amdash-dev
-        run: firebase deploy --only hosting:marketing --project amdash-dev --non-interactive
+      # Each script creates its own throwaway Firebase account (+
+      # hospital/patient as needed), drives `patrol test` against a real
+      # Chrome instance, and tears its own state back down.
+      - name: Run admin Patrol e2e
+        run: node run-admin-patrol-test.mjs
+        working-directory: scripts
+
+      - name: Run physician Patrol e2e
+        run: node run-physician-patrol-test.mjs
+        working-directory: scripts
+
+      - name: Run EMS Patrol e2e
+        run: node run-ems-patrol-test.mjs
+        working-directory: scripts
+
+      # Unlike the three above (each app's own UI against Admin
+      # SDK-seeded state), this drives the real cross-app path: an EMS
+      # account uploads a live-tracked patient through the EMS app's own
+      # UI (GPS mocked via Playwright's geolocation override, since a
+      # headless CI browser has no real GPS), then a physician account
+      # signs in and confirms that exact patient — not a seeded stand-in
+      # — shows up with a live map centered on the mocked coordinates.
+      # Patrol can't drive two apps in one process, so this is two
+      # sequential `patrol test` runs coordinated by shared, deterministic
+      # naming rather than any live signal between them — see
+      # run-patient-flow-e2e.mjs's own header comment.
+      - name: Run cross-app patient flow e2e (EMS upload -> physician view)
+        run: node run-patient-flow-e2e.mjs
+        working-directory: scripts
+
+      - name: Upload Patrol reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patrol-reports
+          path: |
+            flutter/apps/admin/playwright-report
+            flutter/apps/physician/playwright-report
+            flutter/apps/ems/playwright-report
+          retention-days: 7
+
+  # Only runs on master — see flutter-web-e2e's identical note on real
+  # Firebase/Test Lab resource usage. Mirrors codemagic.yaml's own
+  # android-e2e job (real Test Lab devices, not a local emulator) rather
+  # than the older local-emulator approach this repo used before the
+  # Codemagic migration — keeping the real-device upgrade, just triggering
+  # it from a free runner instead of a paid one.
+  flutter-android-e2e:
+    name: Android e2e (Firebase Test Lab)
+    runs-on: ubuntu-latest
+    needs: flutter-analyze-test
+    if: github.ref == 'refs/heads/master'
+    # id-token: write is what lets this job request the short-lived OIDC
+    # token Workload Identity Federation exchanges for GCP credentials
+    # (see the file-level comment above) — required for the auth step
+    # below to work at all. Setting `permissions` here replaces the
+    # default token permissions for this job rather than adding to them,
+    # so contents: read has to be listed explicitly too (actions/checkout
+    # needs it) — it's not implied just because id-token is granted.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('flutter/apps/*/android/**/*.gradle*', 'flutter/apps/*/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-cache-${{ runner.os }}-patrol-cli
+
+      - name: Install patrol_cli
+        # Pinned — see the matching comment in flutter-web-e2e above.
+        run: |
+          dart pub global activate patrol_cli 4.7.0
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: Install scripts dependencies
+        run: npm ci
+        working-directory: scripts
+
+      - name: Authenticate to Firebase Admin SDK
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+
+      # ems's own run step below needs `gcloud beta` (--grant-permissions
+      # is beta-only — see that step's own comment). ubuntu-latest's
+      # preinstalled gcloud is an apt/system package with its component
+      # manager disabled entirely (confirmed for real: `gcloud components
+      # install beta` fails outright with "the Google Cloud CLI component
+      # manager is disabled for this installation") — swap it for a real,
+      # component-manageable Cloud SDK install instead of trying to
+      # extend the locked one. Installed *before* auth below (standard
+      # ordering for these two actions together) so the fresh install
+      # doesn't risk clobbering the auth step's own gcloud-level config.
+      - name: Install gcloud (component-manageable, with beta)
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: beta
+
+      # google-github-actions/auth sets up both gcloud CLI credentials and
+      # Application Default Credentials from the service account key in
+      # one step — the GHA-native replacement for manually writing a key
+      # file and calling `gcloud auth activate-service-account`.
+      - name: Authenticate gcloud to Test Lab
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/577422583971/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
+          service_account: 'codemagic-testlab@amdash-dev.iam.gserviceaccount.com'
+
+      - name: Set gcloud project
+        run: gcloud config set project amdash-dev
+
+      # Seeding and teardown are split into their own steps (rather than
+      # one seed->test->teardown script per app, the way web-e2e works)
+      # because `patrol build` + `gcloud ... run` doesn't fit that shape —
+      # see run-physician-patrol-test.mjs / run-ems-patrol-test.mjs's
+      # --seed-only/--teardown modes.
+      - name: Seed physician + ems smoke accounts
+        run: |
+          node run-physician-patrol-test.mjs --seed-only --account-json="$RUNNER_TEMP/physician-account.json"
+          node run-ems-patrol-test.mjs --seed-only --account-json="$RUNNER_TEMP/ems-account.json"
+        working-directory: scripts
+
+      - name: Build + run physician Test Lab suite (Android)
+        run: |
+          # Without pipefail, `gcloud ... | tee file` takes tee's exit code
+          # (always 0), not gcloud's — silently turning a real test FAILURE
+          # into a green step. Confirmed for real: once the actual Patrol
+          # native setup was fixed (see MainActivityTest.java), Test Lab
+          # started reporting genuine "1 test cases failed" outcomes, yet
+          # this step still showed a checkmark. bash -e (GHA's default
+          # shell) does not imply pipefail on its own.
+          set -o pipefail
+          ACCOUNT="$RUNNER_TEMP/physician-account.json"
+          cd flutter/apps/physician
+          patrol build android --target patrol_test/patient_flow_test.dart \
+            --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
+            --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")" \
+            --dart-define SMOKE_HOSPITAL="$(jq -r .hospitalName "$ACCOUNT")" \
+            --dart-define SMOKE_PATIENT_NAME="$(jq -r .patientName "$ACCOUNT")"
+          # tee'd to a file (not just relying on the job log) so the next
+          # DEBUG step can grep the GCS bucket path back out of it — see
+          # that step's own comment for why. That next step runs via
+          # `if: always()`, so this step is deliberately left free to fail
+          # normally (no `|| true`) rather than swallowing whatever real
+          # pass/fail signal gcloud does give — pipefail above is what
+          # actually makes that true now.
+          gcloud firebase test android run \
+            --type instrumentation \
+            --app build/app/outputs/apk/debug/app-debug.apk \
+            --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            --device model=MediumPhone.arm,version=35,locale=en,orientation=portrait \
+            --results-bucket=gs://amdash-dev-test-lab-results \
+            2>&1 | tee /tmp/physician-testlab.log
+
+      # Permanent diagnostic, not tied to any specific investigation — the
+      # gcloud CLI's own summary never shows the actual crash/error detail
+      # (a real device failure just reads "1 test cases failed" with no
+      # further context), so pull the GCS bucket path out of the run's own
+      # "Raw results will be stored in your GCS bucket at [...]" line, list
+      # everything in it, and cat anything that looks like text
+      # (logcat/instrumentation.results especially). This is what made
+      # every real Android e2e bug this session traceable at all —
+      # including the empty-test-APK root cause, a location-permission
+      # dialog invisible to Flutter's own finders, and a RenderFlex
+      # overflow — worth keeping for whatever's next.
+      - name: Dump physician Test Lab raw results
+        if: always()
+        run: |
+          BUCKET_PATH=$(grep -oE 'storage/browser/[^]]+' /tmp/physician-testlab.log | head -1 | sed 's#storage/browser/##')
+          if [ -z "$BUCKET_PATH" ]; then
+            echo "Could not find a GCS bucket path in the run's output."
+            exit 0
+          fi
+          echo "=== gs://$BUCKET_PATH (recursive listing) ==="
+          gcloud storage ls -r "gs://$BUCKET_PATH" || true
+          echo "=== catting anything text-like found above ==="
+          for f in $(gcloud storage ls -r "gs://$BUCKET_PATH" 2>/dev/null | grep -E '\.(txt|xml|log)$|logcat$|instrumentation\.results$'); do
+            echo "--- $f ---"
+            gcloud storage cat "$f" 2>&1 | head -c 20000
+            echo
+          done
+
+      - name: Build + run ems Test Lab suite (Android)
+        run: |
+          # See physician's identical step above for why this matters.
+          set -o pipefail
+          ACCOUNT="$RUNNER_TEMP/ems-account.json"
+          cd flutter/apps/ems
+          patrol build android --target patrol_test/ems_test.dart \
+            --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
+            --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")"
+          # --grant-permissions=none (gcloud *beta* only — the stable
+          # `gcloud firebase test android run` has no equivalent flag at
+          # all): without it, Test Lab pre-grants ACCESS_FINE_LOCATION/
+          # ACCESS_COARSE_LOCATION before the test starts, so
+          # LocationTrackingSection's unconditional
+          # Geolocator.getCurrentPosition() call (on every
+          # PatientUploadScreen mount) reaches real Google Play Services,
+          # which — confirmed for real via a downloaded Test Lab video
+          # recording — throws up a native "For a better experience, your
+          # device will need to use Location Accuracy" dialog outside the
+          # Flutter view entirely, and keeps re-showing it roughly every
+          # 15s via that section's own re-poll timer for as long as the
+          # form stays mounted. Denying every permission outright instead
+          # (mirrors run-ems-patrol-test.mjs's webPermissions: [] on
+          # Chrome) makes Geolocator fail fast with a permission error
+          # before ever reaching Play Services' settings-resolution step,
+          # which this app already handles correctly (the same
+          # "Could not get your current location..." dialog the Chrome
+          # path exercises) — no native dialog, no dismiss-and-hope. This
+          # test doesn't need any OTHER runtime permission granted either.
+          gcloud beta firebase test android run \
+            --type instrumentation \
+            --app build/app/outputs/apk/debug/app-debug.apk \
+            --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            --device model=MediumPhone.arm,version=35,locale=en,orientation=portrait \
+            --grant-permissions=none \
+            --results-bucket=gs://amdash-dev-test-lab-results \
+            2>&1 | tee /tmp/ems-testlab.log
+
+      # Permanent diagnostic — see the physician one above, same rationale.
+      - name: Dump ems Test Lab raw results
+        if: always()
+        run: |
+          BUCKET_PATH=$(grep -oE 'storage/browser/[^]]+' /tmp/ems-testlab.log | head -1 | sed 's#storage/browser/##')
+          if [ -z "$BUCKET_PATH" ]; then
+            echo "Could not find a GCS bucket path in the run's output."
+            exit 0
+          fi
+          echo "=== gs://$BUCKET_PATH (recursive listing) ==="
+          gcloud storage ls -r "gs://$BUCKET_PATH" || true
+          echo "=== catting anything text-like found above ==="
+          for f in $(gcloud storage ls -r "gs://$BUCKET_PATH" 2>/dev/null | grep -E '\.(txt|xml|log)$|logcat$|instrumentation\.results$'); do
+            echo "--- $f ---"
+            gcloud storage cat "$f" 2>&1 | head -c 20000
+            echo
+          done
+
+      # Runs regardless of whether the steps above succeeded or failed —
+      # the GHA equivalent of Codemagic's `publishing.scripts` guarantee.
+      # `|| true` on each so one app's teardown failing doesn't skip the
+      # other's.
+      - name: Teardown physician + ems smoke accounts
+        if: always()
+        run: |
+          node run-physician-patrol-test.mjs --teardown --account-json="$RUNNER_TEMP/physician-account.json" || true
+          node run-ems-patrol-test.mjs --teardown --account-json="$RUNNER_TEMP/ems-account.json" || true
+        working-directory: scripts
+
+  # Deploys physician/ems web hosting to amdash-dev once this exact push
+  # has genuinely passed e2e on real infrastructure (Chrome + Firebase
+  # Test Lab) — a green-e2e gate GitHub Actions can enforce directly.
+  # ems's web build is still never meant for real EMS crews (they use the
+  # native app in the field) — deploying it here keeps it up to date for
+  # the user's own manual testing/QA access, not as a marketed product
+  # surface. Admin's hosting, functions, and firestore rules/indexes stay
+  # manual-trigger-only on Codemagic (see codemagic.yaml's flutter-deploy
+  # workflow); marketing's hosting deploy is manual too (see the
+  # file-level comment above) — this is the one auto-deploy left in this
+  # workflow.
+  flutter-web-deploy:
+    name: Deploy physician/EMS web to amdash-dev
+    runs-on: ubuntu-latest
+    needs: [flutter-web-e2e, flutter-android-e2e]
+    if: github.ref == 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build physician/ems (web)
+        run: |
+          set -e
+          cd flutter
+          for app in physician ems; do
+            (cd "apps/$app" && flutter build web --release)
+          done
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      # Used by `firebase deploy` below — see this file's own header
+      # comment for the required secret.
+      - name: Authenticate to Firebase
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+
+      - name: Deploy physician/ems hosting to amdash-dev
+        run: firebase deploy --only hosting:physician,hosting:ems --project amdash-dev --non-interactive

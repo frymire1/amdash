@@ -2,12 +2,14 @@
 # sanity checks, the real Firebase deploy for admin hosting + functions +
 # firestore rules, and manual ad-hoc device distribution. physician/ems
 # web *hosting* deploys from GitHub Actions instead (see flutter-web-
-# deploy in .github/workflows/flutter-ci.yml), gated on this repo's own
-# e2e passing on GitHub's infra first — everything else Flutter-related
+# deploy in .github/workflows/ci.yml), gated on this repo's own e2e
+# passing on GitHub's infra first — everything else Flutter-related
 # (functions, firestore rules, admin hosting, mobile builds/
 # distribution) still lives here, manually triggered. GitHub Actions
-# otherwise covers only the Angular `marketing` site (see
-# .github/workflows/ci.yml).
+# (.github/workflows/ci.yml — a single workflow covering secrets
+# scanning, the Angular `marketing` site, `functions/`, and the Flutter
+# apps) otherwise handles marketing's test/lint/build only; its hosting
+# deploy is manual (see that file's own header comment).
 #
 # Every workflow below is manually triggered only (from the Codemagic UI or
 # its REST API) — none has a `triggering:` block, so nothing here ever
@@ -153,11 +155,11 @@ workflows:
           echo "GOOGLE_APPLICATION_CREDENTIALS=$CM_BUILD_DIR/firebase-service-account.json" >> $CM_ENV
       # Only admin's hosting + functions + firestore rules now —
       # physician/ems hosting moved to GitHub Actions (see
-      # flutter-web-deploy in .github/workflows/flutter-ci.yml), gated on
-      # this push's own e2e passing there first. `marketing` hosting has
-      # always stayed on GitHub Actions too (see ci.yml's deploy-marketing
-      # job) since it's not a Flutter app and has no reason to depend on
-      # Codemagic.
+      # flutter-web-deploy in .github/workflows/ci.yml), gated on this
+      # push's own e2e passing there first. `marketing` hosting is
+      # deployed manually (not from either CI system, and not on every
+      # push — see ci.yml's own header comment) since it's not a Flutter
+      # app and has no reason to depend on Codemagic.
       - name: Deploy to amdash-dev
         script: |
           firebase deploy --only hosting:admin,functions,firestore:rules,firestore:indexes --project amdash-dev --non-interactive
