@@ -28,7 +28,7 @@ const ACTOR = { uid: 'actor-uid', email: 'actor@example.com' };
 
 describe('logAudit', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockAdd.mockResolvedValue(undefined);
   });
 
@@ -98,7 +98,7 @@ describe('logAudit', () => {
 
 describe('resolveActor', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
 
   it('returns unknown/unknown without touching Firestore for a non-string uid', async () => {

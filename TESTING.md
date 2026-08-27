@@ -99,12 +99,43 @@ any of them, matching this repo's existing no-build_runner convention):
   tree (dozens of files, including every trivial `classes/*.ts`
   interface), which is neither needed for CI's machine-readable gate
   nor something to generate locally on every test run.
+- `/* v8 ignore next */` marks a line as *provably* unreachable (not
+  just untested) — used exactly twice in `functions/`, both a
+  defensive `x ?? {}`/`: 'active'` fallback that can never actually
+  trigger because an earlier check in the same function already
+  guaranteed the truthy case (see the comment above each one, in
+  `admin.ts`'s `updateUser` and `patient-data.ts`'s
+  `exportPatientFhirBundle`). This is the exception, not the pattern —
+  reach for a real test first; only mark a line unreachable when you
+  can point to the specific earlier check that makes it so.
+
+## `functions/` file organization
+
+Organized by domain, not by which app calls them (an earlier version of
+this repo grouped by caller, which produced a confusingly-named
+`shared.ts` grab-bag — see git history if curious):
+- `auth.ts` — sign-in/account callables (`checkAccountStatus`,
+  `setInitialPassword`, `requestPasswordReset`,
+  `requestEmailVerification`), plus `getCallerProfile`/`findUserByEmail`,
+  which every other domain file reads off of.
+- `patient-data.ts` — patient CRUD/triggers, plus the
+  `patientLocationRef`/`patientVitalsHistoryCollection` Firestore ref
+  builders (`ems.ts`/`physician.ts` import these from here, a real
+  cross-domain dependency rather than routing through a generic
+  "shared" file).
+- `admin.ts`, `ems.ts`, `physician.ts` — still per-app, since those
+  genuinely are app-specific (org/user/hospital management; the EMS
+  live-location pipeline; the new-patient push alert + Directions
+  proxy).
+- `kms.ts`/`audit.ts`/`fhir.ts`/`email.ts` — infrastructure/utility
+  modules, not Cloud Functions themselves; imported directly by
+  whichever domain file needs them.
 
 ## Current thresholds (as of this file's last update)
 
 | Package | Gated in CI? | Threshold | Real coverage today |
 |---|---|---|---|
-| `functions/` | Yes (vitest self-enforces) | 16–20% per metric | ~17–21% |
+| `functions/` | Yes (vitest self-enforces) | 100% per metric | 100%/100%/100%/100% (stmts/branch/funcs/lines) |
 | `amdash_core` | Yes (`very_good_coverage`) | 4% | ~4.2% |
 | `ems` | Collected, not gated | — | ~0% (placeholder test only) |
 | `physician` | Collected, not gated | — | ~0% (placeholder test only) |
@@ -118,15 +149,15 @@ regression or get real agreement first.
 
 ## Backfill roadmap (highest-value/lowest-effort first)
 
-**`functions/`** (~2,750 lines outside `fhir.ts`/`kms.ts`/`audit.ts`,
-all currently 0%):
-- [x] `kms.ts` — pure crypto/KMS-wrapper helpers
-- [x] `audit.ts` — `logAudit`/`resolveActor`
-- [ ] `shared.ts` — `getCallerProfile` and friends
-- [ ] `admin.ts` (958 lines) — the org/user/hospital management callables
-- [ ] `patients.ts` (424 lines) — create/update/complete/delete, the
-      Firestore triggers, `exportPatientFhirBundle`
-- [ ] `physician.ts`, `ems.ts`, `email.ts`
+**`functions/`** — done: 100% on all four metrics, 248 tests, across
+every file (`kms.ts`, `audit.ts`, `auth.ts`, `email.ts`,
+`patient-data.ts`, `ems.ts`, `physician.ts`, `admin.ts` — 958 lines,
+20 callables — and `fhir.ts`). The two lines that aren't literally
+executed by a test are marked `/* v8 ignore next */` with a comment
+explaining exactly why they're unreachable (see the mocking
+conventions section above), not silently excluded from the count.
+- [x] `kms.ts`, `audit.ts`, `auth.ts`, `email.ts`, `patient-data.ts`,
+      `ems.ts`, `physician.ts`, `admin.ts`, `fhir.ts`
 
 **Dart** (pure parsers done in `amdash_core`; everything else at ~0%):
 - [x] `amdash_core`: `isProvidedValue`/`numOrNull`/`bloodPressurePart`,

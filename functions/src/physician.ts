@@ -7,7 +7,8 @@ import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore';
 import { DirectionsApiResult } from './classes/directions-api-result';
 import { FetchDirectionsRequest } from './classes/fetch-directions-request';
 import { FetchDirectionsResponse } from './classes/fetch-directions-response';
-import { REGION, getCallerProfile, patientLocationRef } from './shared';
+import { REGION, getCallerProfile } from './auth';
+import { patientLocationRef } from './patient-data';
 
 const DIRECTIONS_API_KEY = defineSecret('DIRECTIONS_API_KEY');
 

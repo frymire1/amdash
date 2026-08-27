@@ -25,7 +25,7 @@ import { SetOrganizationAuditLoggingRequest } from './classes/set-organization-a
 import { SetOrganizationFhirExportRequest } from './classes/set-organization-fhir-export-request';
 import { ListAuditLogRequest } from './classes/list-audit-log-request';
 import { GeocodeResult } from './classes/geocode-result';
-import { REGION, findUserByEmail, getCallerProfile } from './shared';
+import { REGION, findUserByEmail, getCallerProfile } from './auth';
 import { getOrCreateOrgKey } from './kms';
 import { RESEND_API_KEY, sendWelcomeEmail } from './email';
 import { SYSTEM_ACTOR, logAudit } from './audit';
@@ -245,6 +245,11 @@ export const updateUser = onCall<UpdateUserRequest>({ region: REGION }, async (r
     details: firestoreUpdate,
   });
 
+  // The ?? {} fallback here is provably unreachable, not an untested gap:
+  // requireSameOrg above already required targetDoc.data()?.['organizationId']
+  // to match profile.organizationId to get this far, which is impossible if
+  // .data() returns undefined — so by this line it never does.
+  /* v8 ignore next */
   const data = targetDoc.data() ?? {};
   const role = data['role'];
   return {

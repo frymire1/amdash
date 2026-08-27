@@ -78,7 +78,7 @@ describe('isEncryptedField', () => {
 
 describe('encryptField / decryptField', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     // Identity "wrap": whatever DEK bytes encryptField hands KMS to wrap,
     // hand back unchanged as the wrapped ciphertext — decryptField's mock
     // below does the matching identity "unwrap", so the pair together
@@ -106,6 +106,12 @@ describe('encryptField / decryptField', () => {
     expect(first.iv).not.toBe(second.iv);
   });
 
+  it('defaults keyVersion to an empty string when the wrap response omits a key-version name', async () => {
+    mockEncrypt.mockImplementationOnce(async ({ plaintext }: { plaintext: Buffer }) => [{ ciphertext: plaintext, name: undefined }]);
+    const encrypted = await encryptField('secret', 'org-key-name');
+    expect(encrypted.keyVersion).toBe('');
+  });
+
   it('throws if Cloud KMS does not return a wrapped key on encrypt', async () => {
     mockEncrypt.mockResolvedValueOnce([{ ciphertext: undefined }]);
     await expect(encryptField('secret', 'org-key-name')).rejects.toThrow('did not return a wrapped key');
@@ -120,7 +126,7 @@ describe('encryptField / decryptField', () => {
 
 describe('getOrCreateOrgKey', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockGetProjectId.mockResolvedValue('amdash-dev');
     mockKeyRingPath.mockReturnValue('projects/amdash-dev/locations/northamerica-northeast2/keyRings/patient-pii-ca');
   });
@@ -132,6 +138,16 @@ describe('getOrCreateOrgKey', () => {
 
     expect(result).toBe('existing-key-name');
     expect(mockCreateCryptoKey).not.toHaveBeenCalled();
+  });
+
+  it('creates a new key when getCryptoKey resolves successfully but with no name (falls through, same as NOT_FOUND)', async () => {
+    mockGetCryptoKey.mockResolvedValue([{ name: undefined }]);
+    mockCreateCryptoKey.mockResolvedValue([{ name: 'newly-created-key-name' }]);
+
+    const result = await getOrCreateOrgKey('org-1b');
+
+    expect(result).toBe('newly-created-key-name');
+    expect(mockCreateCryptoKey).toHaveBeenCalledTimes(1);
   });
 
   it('creates a new key when getCryptoKey reports NOT_FOUND (code 5)', async () => {

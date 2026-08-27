@@ -8,10 +8,40 @@ import { EncryptPatientFieldsRequest } from './classes/encrypt-patient-fields-re
 import { ExportPatientFhirBundleRequest } from './classes/export-patient-fhir-bundle-request';
 import { UploadPatientDocumentRequest } from './classes/upload-patient-document-request';
 import { VitalsHistoryEntry } from './classes/vitals-history-entry';
-import { REGION, getCallerProfile, patientLocationRef, patientVitalsHistoryCollection } from './shared';
+import { REGION, getCallerProfile } from './auth';
 import { decryptField, encryptField, isEncryptedField } from './kms';
 import { logAudit, resolveActor } from './audit';
 import { FhirExportVitalsEntry, buildPatientFhirBundle } from './fhir';
+
+// patients/{patientId}/location/current — the one place a patient's live
+// GPS position lives (written by ems.ts's onEmsLocationEvent for every
+// ongoing fix, and uploadPatientDocument below for the very first one). A
+// subcollection rather than a field on the patient doc itself, and rather
+// than its own top-level collection: a sibling document means every ~15s
+// GPS tick never fires onPatientUpdated's audit trigger or re-emits the
+// patients-collection listener the whole patient list watches (a Firestore
+// subcollection write is invisible to both), while still living naturally
+// alongside the patient it belongs to. Read org-wide via a
+// collectionGroup('location') query (see EmsLocationController on the
+// physician client) rather than a per-patient listener each.
+export function patientLocationRef(patientId: string) {
+  return getFirestore().collection('patients').doc(patientId).collection('location').doc('current');
+}
+
+// patients/{patientId}/vitalsHistory/{entryId} — an append-only log of
+// every distinct vitals reading a patient has had, in the order EMS
+// submitted them (see onPatientCreated/onPatientUpdated below, the only
+// writers, and their own vitalsEqual/appendVitalsHistory). A subcollection
+// for the same reason location is one — a sibling write never fires
+// onPatientUpdated's own audit trigger or re-emits the patients-collection
+// listener the whole patient list watches — plus this one is a genuine
+// history (multiple documents, append-only), which couldn't be a single
+// field on the patient doc regardless. Read per-patient, not org-wide like
+// location, so this returns the whole collection rather than one fixed
+// document.
+export function patientVitalsHistoryCollection(patientId: string) {
+  return getFirestore().collection('patients').doc(patientId).collection('vitalsHistory');
+}
 
 // Shared by encryptPatientFields (below — EMS's own direct-write update
 // path calls this first) and uploadPatientDocument (which encrypts inline
@@ -286,6 +316,10 @@ export const exportPatientFhirBundle = onCall<ExportPatientFhirBundleRequest>({ 
       notes: typeof data['notes'] === 'string' ? data['notes'] : undefined,
       ivSize: typeof data['ivSize'] === 'string' ? data['ivSize'] : undefined,
       ivPlacement: typeof data['ivPlacement'] === 'string' ? data['ivPlacement'] : undefined,
+      // The : 'active' fallback is provably unreachable, not an untested
+      // gap: the precondition check above already required
+      // data['status'] === 'completed' (a string) to get this far.
+      /* v8 ignore next */
       status: typeof data['status'] === 'string' ? data['status'] : 'active',
       submittedAt: toDateOrNull(data['submittedAt']),
       completedAt: toDateOrNull(data['completedAt']),

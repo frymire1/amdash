@@ -17,19 +17,23 @@ export default defineConfig({
       // 'lcovonly' writes just the lcov.info CI actually reads.
       reporter: ['text', 'lcovonly'],
       include: ['src/**/*.ts'],
-      // Pure re-export wiring — nothing here to unit test beyond what tsc
-      // already guarantees (the right names are exported).
-      exclude: ['src/index.ts', 'src/**/*.test.ts'],
-      // Current real numbers (kms.ts + audit.ts + fhir.ts fully covered;
-      // admin.ts/patients.ts/physician.ts/ems.ts/shared.ts/email.ts not
-      // yet — see TESTING.md's backfill roadmap), floored slightly below
-      // the exact measured value so a harmless rounding difference between
-      // Node/v8 versions doesn't flake CI.
+      // index.ts: pure re-export wiring — nothing here to unit test beyond
+      // what tsc already guarantees (the right names are exported).
+      // test-utils.ts: test infrastructure (fakeCallableRequest), not
+      // production code.
+      exclude: ['src/index.ts', 'src/test-utils.ts', 'src/**/*.test.ts'],
+      // 100% on all four metrics, for real — the only two lines that
+      // aren't unit-testable (provably unreachable defensive fallbacks;
+      // see their own /* v8 ignore next */ comments in admin.ts and
+      // patient-data.ts) are explicitly excluded rather than silently
+      // dragging the percentage down. This is a hard floor: dropping it
+      // means either a real regression or a new untested branch snuck
+      // in — fix that, don't lower the number.
       thresholds: {
-        lines: 16,
-        functions: 20,
-        branches: 16,
-        statements: 17,
+        lines: 100,
+        functions: 100,
+        branches: 100,
+        statements: 100,
       },
     },
   },

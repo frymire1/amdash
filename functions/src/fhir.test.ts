@@ -181,4 +181,79 @@ describe('buildPatientFhirBundle', () => {
     expect(encounters[0].status).toBe('in-progress');
     expect(encounters[0].period.end).toBeUndefined();
   });
+
+  it('omits period entirely when both submittedAt and completedAt are null', () => {
+    const bundle: any = buildPatientFhirBundle({ ...BASE_PATIENT, submittedAt: null, completedAt: null }, []);
+    const encounters = resourcesOf(bundle, 'Encounter');
+    expect(encounters[0].period).toBeUndefined();
+  });
+
+  it('omits Patient.identifier when healthcareNumber is the "Unknown" sentinel', () => {
+    const bundle: any = buildPatientFhirBundle({ ...BASE_PATIENT, healthcareNumber: 'Unknown' }, []);
+    const patients = resourcesOf(bundle, 'Patient');
+    expect(patients[0].identifier).toBeUndefined();
+  });
+
+  it('maps gender to "unknown" for a value outside Male/Female/Other', () => {
+    const bundle: any = buildPatientFhirBundle({ ...BASE_PATIENT, gender: 'Unknown' }, []);
+    const patients = resourcesOf(bundle, 'Patient');
+    expect(patients[0].gender).toBe('unknown');
+  });
+
+  it('omits effectiveDateTime on a vital Observation when the reading has no recordedAt', () => {
+    const history: FhirExportVitalsEntry[] = [
+      { heartRate: 88, bloodPressure: '', oxygen: 'Unknown', temperature: 'Unknown', recordedAt: null },
+    ];
+    const bundle: any = buildPatientFhirBundle(BASE_PATIENT, history);
+    const heartRateObs = resourcesOf(bundle, 'Observation').find((o) => o.code.coding[0].code === '8867-4');
+    expect(heartRateObs.effectiveDateTime).toBeUndefined();
+  });
+
+  it('omits effectiveDateTime on a blood-pressure-panel Observation with no recordedAt either', () => {
+    const history: FhirExportVitalsEntry[] = [
+      { heartRate: 'Unknown', bloodPressure: '120/80', oxygen: 'Unknown', temperature: 'Unknown', recordedAt: null },
+    ];
+    const bundle: any = buildPatientFhirBundle(BASE_PATIENT, history);
+    const bpObs = resourcesOf(bundle, 'Observation').find((o) => o.code.coding[0].code === '85354-9');
+    expect(bpObs.effectiveDateTime).toBeUndefined();
+  });
+
+  it('skips a heart-rate Observation entirely when the reading is the "Unknown" sentinel', () => {
+    const history: FhirExportVitalsEntry[] = [
+      { heartRate: 'Unknown', bloodPressure: '', oxygen: 'Unknown', temperature: 'Unknown', recordedAt: new Date() },
+    ];
+    const bundle: any = buildPatientFhirBundle(BASE_PATIENT, history);
+    expect(resourcesOf(bundle, 'Observation').find((o) => o.code.coding[0].code === '8867-4')).toBeUndefined();
+  });
+
+  it('does not build a blood-pressure panel from a non-string reading, or one with non-numeric parts', () => {
+    const history: FhirExportVitalsEntry[] = [
+      { heartRate: 'Unknown', bloodPressure: 12080 /* not a string at all */, oxygen: 'Unknown', temperature: 'Unknown', recordedAt: null },
+      { heartRate: 'Unknown', bloodPressure: 'abc/def' /* non-numeric parts */, oxygen: 'Unknown', temperature: 'Unknown', recordedAt: null },
+    ];
+    const bundle: any = buildPatientFhirBundle(BASE_PATIENT, history);
+    expect(resourcesOf(bundle, 'Observation').filter((o) => o.code.coding[0].code === '85354-9')).toHaveLength(0);
+  });
+
+  it('omits the Treatment & Notes section entirely when treatment/notes/IV fields are all absent', () => {
+    const bundle: any = buildPatientFhirBundle(
+      { ...BASE_PATIENT, treatment: undefined, notes: undefined, ivSize: undefined, ivPlacement: undefined },
+      [],
+    );
+    const composition = bundle.entry[0].resource;
+    expect(composition.section.find((s: any) => s.title === 'Treatment & Notes')).toBeUndefined();
+  });
+
+  it('includes only the IV-access line when treatment/notes are absent but IV fields are present', () => {
+    const bundle: any = buildPatientFhirBundle(
+      { ...BASE_PATIENT, treatment: undefined, notes: undefined, ivSize: '18G', ivPlacement: undefined },
+      [],
+    );
+    const composition = bundle.entry[0].resource;
+    const section = composition.section.find((s: any) => s.title === 'Treatment & Notes');
+    expect(section.text.div).toContain('IV access');
+    expect(section.text.div).toContain('18G');
+    expect(section.text.div).not.toContain('Treatment given');
+    expect(section.text.div).not.toContain('Notes');
+  });
 });

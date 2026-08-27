@@ -7,7 +7,8 @@ import { CallerProfile } from './classes/caller-profile';
 import { EmsLocationEvent } from './classes/ems-location-event';
 import { PublishLocationRequest } from './classes/publish-location-request';
 import { StopLocationRequest } from './classes/stop-location-request';
-import { REGION, getCallerProfile, patientLocationRef } from './shared';
+import { REGION, getCallerProfile } from './auth';
+import { patientLocationRef } from './patient-data';
 
 const LOCATION_TOPIC = 'ems-location-updates';
 const pubsub = new PubSub();
