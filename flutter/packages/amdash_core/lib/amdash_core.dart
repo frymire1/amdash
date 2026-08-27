@@ -15,7 +15,6 @@ export 'src/organizations/own_organization_service.dart';
 export 'src/patients/fhir_export_service.dart';
 export 'src/patients/patient_decryption_service.dart';
 export 'src/patients/vitals_history_service.dart';
-export 'src/patients/vitals_status.dart';
 export 'src/screens/access_denied_screen.dart';
 export 'src/screens/login_screen.dart';
 export 'src/screens/mfa_setup_screen.dart';

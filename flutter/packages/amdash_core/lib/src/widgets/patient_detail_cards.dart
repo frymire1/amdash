@@ -5,9 +5,25 @@ import 'package:intl/intl.dart';
 import '../models/patient.dart';
 import '../models/vitals_history_entry.dart';
 import '../patients/vitals_history_service.dart';
-import '../patients/vitals_status.dart';
 import '../theme/app_theme.dart';
 import 'vitals_trend_dialog.dart';
+
+/// `PatientVitals`' numeric-ish fields (heartRate/oxygen/temperature) are
+/// typed `Object?` because they can also be the 'Unknown' string sentinel —
+/// used by [PatientVitalsCard]'s trend-chart series selectors to filter
+/// those out rather than plot them as zero.
+num? numOrNull(Object? value) => value is num ? value : null;
+
+/// Splits a "120/80"-shaped blood pressure reading into its systolic
+/// (index 0) or diastolic (index 1) half, or null if it isn't in that shape
+/// at all (missing, or the 'Unknown' sentinel — splitting either by '/'
+/// yields a single-element list, so this returns null for both parts
+/// without needing to special-case the sentinel directly).
+num? bloodPressurePart(String bloodPressure, int index) {
+  final parts = bloodPressure.split('/');
+  if (parts.length != 2) return null;
+  return num.tryParse(parts[index].trim());
+}
 
 /// A titled card wrapping a `Wrap` of rows — the generic shape shared by
 /// every read-only patient-detail card other than [PatientVitalsCard]
@@ -39,28 +55,15 @@ class PatientInfoCard extends StatelessWidget {
 /// A single labeled, bordered field — with a tappable trend-chart icon
 /// (via [showVitalsTrendDialog]) once [trendSeries] is given and [history]
 /// has more than one entry (a single reading isn't a trend). Falls back to
-/// "Not added by EMS yet" via [isProvidedValue]. [status], when given,
-/// shades the chip's fill/outline to flag a safe/moderate/danger reading —
-/// text color is never touched, only the chip itself. Fields with no vital
-/// range (Destination, IV Size, etc.) simply leave [status] null and get
-/// the plain accent-stripe look.
+/// "Not added by EMS yet" via [isProvidedValue].
 class PatientInfoChip extends StatelessWidget {
-  const PatientInfoChip(
-    this.label,
-    this.value, {
-    this.suffix,
-    this.trendSeries,
-    this.history = const [],
-    this.status,
-    super.key,
-  });
+  const PatientInfoChip(this.label, this.value, {this.suffix, this.trendSeries, this.history = const [], super.key});
 
   final String label;
   final Object? value;
   final String? suffix;
   final List<VitalSeries>? trendSeries;
   final List<VitalsHistoryEntry> history;
-  final VitalStatus? status;
 
   @override
   Widget build(BuildContext context) {
@@ -73,16 +76,13 @@ class PatientInfoChip extends StatelessWidget {
     // plain method parameter) never promotes past a null check.
     final series = trendSeries;
     final showTrend = series != null && history.length > 1;
-    final statusColor = status == null ? null : vitalStatusColor(palette, status!);
     return SizedBox(
       width: 200,
       child: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: statusColor == null ? palette.glassSurface : statusColor.withValues(alpha: 0.16),
-          border: statusColor == null
-              ? Border(left: BorderSide(color: AppColors.trackingAccent, width: 3))
-              : Border.all(color: darkenForOutline(statusColor)),
+          color: palette.glassSurface,
+          border: Border(left: BorderSide(color: AppColors.trackingAccent, width: 3)),
           borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         child: Column(
@@ -177,7 +177,6 @@ class PatientVitalsCard extends ConsumerWidget {
                   suffix: 'bpm',
                   history: history,
                   trendSeries: [VitalSeries(label: 'Heart Rate', selector: (v) => numOrNull(v.heartRate))],
-                  status: heartRateStatus(vitals.heartRate),
                 ),
                 PatientInfoChip(
                   'Blood Pressure',
@@ -191,7 +190,6 @@ class PatientVitalsCard extends ConsumerWidget {
                     ),
                     VitalSeries(label: 'Diastolic', selector: (v) => bloodPressurePart(v.bloodPressure, 1), color: AppColors.brand),
                   ],
-                  status: bloodPressureStatus(vitals.bloodPressure),
                 ),
                 PatientInfoChip(
                   'Oxygen',
@@ -199,7 +197,6 @@ class PatientVitalsCard extends ConsumerWidget {
                   suffix: '%',
                   history: history,
                   trendSeries: [VitalSeries(label: 'Oxygen', selector: (v) => numOrNull(v.oxygen))],
-                  status: oxygenStatus(vitals.oxygen),
                 ),
                 PatientInfoChip(
                   'Temperature',
@@ -207,7 +204,6 @@ class PatientVitalsCard extends ConsumerWidget {
                   suffix: '°C',
                   history: history,
                   trendSeries: [VitalSeries(label: 'Temperature', selector: (v) => numOrNull(v.temperature))],
-                  status: temperatureStatus(vitals.temperature),
                 ),
                 PatientInfoChip(
                   'Respiratory Rate',
@@ -215,14 +211,12 @@ class PatientVitalsCard extends ConsumerWidget {
                   suffix: 'breaths/min',
                   history: history,
                   trendSeries: [VitalSeries(label: 'Respiratory Rate', selector: (v) => v.respiratoryRate)],
-                  status: respiratoryRateStatus(vitals.respiratoryRate),
                 ),
                 PatientInfoChip(
                   'GCS',
                   vitals.gcs,
                   history: history,
                   trendSeries: [VitalSeries(label: 'GCS', selector: (v) => v.gcs)],
-                  status: gcsStatus(vitals.gcs),
                 ),
               ],
             ),
