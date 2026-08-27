@@ -74,18 +74,7 @@ class PatientCard extends StatelessWidget {
                 style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _fieldChip(context, 'GCS', patient.vitals.gcs),
-                  _fieldChip(context, 'Heart Rate', patient.vitals.heartRate),
-                  _fieldChip(context, 'Blood Pressure', patient.vitals.bloodPressure),
-                  _fieldChip(context, 'Oxygen', patient.vitals.oxygen),
-                  _fieldChip(context, 'Temp', patient.vitals.temperature),
-                  _fieldChip(context, 'Resp. Rate', patient.vitals.respiratoryRate),
-                ],
-              ),
+              PatientVitalsChips(vitals: patient.vitals),
             ],
           ),
         ),
@@ -113,34 +102,5 @@ class PatientCard extends StatelessWidget {
       EmsTrackingStatus.loading => (StatusPillKind.neutral, 'Tracking…', false),
     };
     return StatusPill(kind: kind, label: label, pulsing: pulsing);
-  }
-
-  Widget _fieldChip(BuildContext context, String label, Object? value) {
-    final provided = isProvidedValue(value);
-    final palette = context.palette;
-    final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: palette.glassSurface,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(color: palette.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(label, style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant)),
-          Text(
-            provided ? value.toString() : 'Not added yet',
-            style: TextStyle(
-              fontSize: 13,
-              fontStyle: provided ? FontStyle.normal : FontStyle.italic,
-              color: provided ? colorScheme.onSurface : colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }

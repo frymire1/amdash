@@ -30,5 +30,6 @@ export 'src/widgets/mfa_security_card.dart';
 export 'src/widgets/nav_bar.dart';
 export 'src/widgets/offline_banner.dart';
 export 'src/widgets/patient_field_text.dart';
+export 'src/widgets/patient_vitals_chips.dart';
 export 'src/widgets/status_pill.dart';
 export 'src/widgets/vitals_trend_dialog.dart';

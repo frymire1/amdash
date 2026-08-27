@@ -223,10 +223,10 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
                 Text(patient.gender),
                 const SizedBox(width: 12),
                 Text('${patient.age} yrs'),
-                const SizedBox(width: 12),
-                Text('${patient.vitals.heartRate} bpm'),
               ],
             ),
+            const SizedBox(height: 8),
+            PatientVitalsChips(vitals: patient.vitals),
             if (_deleteError != null) ...[
               const SizedBox(height: 8),
               Text(_deleteError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
