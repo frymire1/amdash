@@ -268,15 +268,25 @@ class PatientTreatmentCard extends StatelessWidget {
 }
 
 /// A titled card of plain text — used for free-text fields like patient
-/// notes that don't fit [PatientInfoCard]'s chip-grid shape.
+/// notes that don't fit [PatientInfoCard]'s chip-grid shape, or a single
+/// value that doesn't need [PatientInfoChip]'s own bordered box (e.g. the
+/// destination hospital) — a title-only [PatientInfoCard] wrapping one
+/// [PatientInfoChip] just repeats the same label twice (a "Destination
+/// Hospital" card containing a "Destination" chip). Passing [notAddedText]
+/// renders it in place of an unprovided [text], italicized the same way
+/// [PatientInfoChip] falls back, instead of the caller omitting the card
+/// entirely (which is still how "Patient Notes" uses this, by guarding the
+/// call with `isProvidedValue` itself and never passing [notAddedText]).
 class PatientTextCard extends StatelessWidget {
-  const PatientTextCard({required this.title, required this.text, super.key});
+  const PatientTextCard({required this.title, required this.text, this.notAddedText, super.key});
 
   final String title;
-  final String text;
+  final String? text;
+  final String? notAddedText;
 
   @override
   Widget build(BuildContext context) {
+    final provided = isProvidedValue(text);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -285,7 +295,13 @@ class PatientTextCard extends StatelessWidget {
           children: [
             Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            Text(text),
+            Text(
+              provided ? text! : (notAddedText ?? ''),
+              style: TextStyle(
+                fontStyle: provided ? FontStyle.normal : FontStyle.italic,
+                color: provided ? null : Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
           ],
         ),
       ),

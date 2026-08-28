@@ -141,7 +141,9 @@ void main() {
       // real Google Map for its uploaded pickup location.
       await pumpUntil(
         $,
-        () => find.text('Destination Hospital').evaluate().isNotEmpty,
+        // 'Destination' — see incoming_patient_test.dart's identical wait
+        // for why this isn't 'Destination Hospital' anymore.
+        () => find.text('Destination').evaluate().isNotEmpty,
       );
       expect($('Vital Signs'), findsOneWidget);
       expect(

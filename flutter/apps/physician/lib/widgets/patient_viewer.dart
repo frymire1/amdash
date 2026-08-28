@@ -300,7 +300,7 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
             style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 16),
-          PatientInfoCard(title: 'Destination Hospital', rows: [PatientInfoChip('Destination', patient.destination)]),
+          PatientTextCard(title: 'Destination', text: patient.destination, notAddedText: 'Not added by EMS yet'),
           const SizedBox(height: 12),
           PatientVitalsCard(patient: patient),
           const SizedBox(height: 12),

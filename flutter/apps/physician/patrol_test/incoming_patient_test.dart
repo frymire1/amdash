@@ -115,7 +115,11 @@ void main() {
 
       await pumpUntil(
         $,
-        () => find.text('Destination Hospital').evaluate().isNotEmpty,
+        // 'Destination' — the read-only viewer's destination card title
+        // (was 'Destination Hospital' until that redundant wording — a
+        // "Destination Hospital" card containing a "Destination" chip —
+        // got collapsed into one card titled just 'Destination').
+        () => find.text('Destination').evaluate().isNotEmpty,
       );
       await pumpUntil($, () => find.byType(GoogleMap).evaluate().isNotEmpty);
       expect(
