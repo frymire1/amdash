@@ -2,24 +2,6 @@
   "projects": {
     "default": "amdash-dev"
   },
-  "targets": {
-    "amdash-dev": {
-      "hosting": {
-        "physician": [
-          "amdash-physician-dev"
-        ],
-        "ems": [
-          "amdash-ems-dev"
-        ],
-        "admin": [
-          "amdash-admin-dev"
-        ],
-        "marketing": [
-          "amdash-marketing-dev"
-        ]
-      }
-    }
-  },
   "etags": {
     "amdash-dev": {
       "extensionInstances": {}

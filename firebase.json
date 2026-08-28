@@ -21,68 +21,6 @@
       ]
     }
   ],
-  "hosting": [
-    {
-      "target": "physician",
-      "public": "flutter/apps/physician/build/web",
-      "ignore": [
-        "firebase.json",
-        "**/.*",
-        "**/node_modules/**"
-      ],
-      "rewrites": [
-        {
-          "source": "**",
-          "destination": "/index.html"
-        }
-      ]
-    },
-    {
-      "target": "ems",
-      "public": "flutter/apps/ems/build/web",
-      "ignore": [
-        "firebase.json",
-        "**/.*",
-        "**/node_modules/**"
-      ],
-      "rewrites": [
-        {
-          "source": "**",
-          "destination": "/index.html"
-        }
-      ]
-    },
-    {
-      "target": "admin",
-      "public": "flutter/apps/admin/build/web",
-      "ignore": [
-        "firebase.json",
-        "**/.*",
-        "**/node_modules/**"
-      ],
-      "rewrites": [
-        {
-          "source": "**",
-          "destination": "/index.html"
-        }
-      ]
-    },
-    {
-      "target": "marketing",
-      "public": "marketing/dist/browser",
-      "ignore": [
-        "firebase.json",
-        "**/.*",
-        "**/node_modules/**"
-      ],
-      "rewrites": [
-        {
-          "source": "**",
-          "destination": "/index.html"
-        }
-      ]
-    }
-  ],
   "storage": {
     "rules": "storage.rules"
   },
@@ -98,9 +36,6 @@
     },
     "pubsub": {
       "port": 8085
-    },
-    "hosting": {
-      "port": 5000
     },
     "storage": {
       "port": 9199
