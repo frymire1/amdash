@@ -1,0 +1,61 @@
+name: Deploy Cloud Functions
+
+# Manual-trigger-only (Actions tab -> this workflow -> Run workflow, or
+# `gh workflow run deploy-functions.yml`). Moved here from Codemagic's
+# old bundled `flutter-deploy` workflow (admin + functions + firestore
+# rules, all one job) — functions deploy has zero macOS/Xcode
+# dependency, just `npm run build` + `firebase deploy --only
+# functions`, so it runs on a free GitHub-hosted Linux runner instead
+# of a paid mac_mini_m2 one, same reasoning as everything else in
+# ci.yml. Split into its own workflow rather than kept bundled so
+# admin/functions/firestore rules can each be redeployed independently
+# — see deploy-web-cloud-run.yml (`-f app=admin`) for admin's web
+# hosting and deploy-firestore-rules.yml for the other one.
+#
+# Reuses the same FIREBASE_SERVICE_ACCOUNT_KEY secret ci.yml's e2e jobs
+# already authenticate with (see that file's own header comment) —
+# not WIF/github-actions-web-deploy, since firebase-adminsdk-fbsvc
+# (this key's underlying service account) already has every permission
+# a functions deploy needs (cloudfunctions.admin, secretmanager access
+# for the RESEND_API_KEY secret, etc. — it's been doing exactly this
+# via Codemagic for a long time already), unlike
+# github-actions-web-deploy's narrowly-scoped Cloud Run/Artifact
+# Registry-only grants. Routing this through WIF instead would need a
+# pile of new IAM grants for zero real benefit, since
+# FIREBASE_SERVICE_ACCOUNT_KEY isn't going away regardless (still
+# needed for e2e Admin SDK auth).
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Build + deploy functions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: functions
+
+      - name: Build
+        run: npm run build
+        working-directory: functions
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Authenticate to Firebase
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+
+      - name: Deploy functions
+        run: firebase deploy --only functions --project amdash-dev --non-interactive

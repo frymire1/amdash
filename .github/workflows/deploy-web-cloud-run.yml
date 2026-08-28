@@ -6,24 +6,25 @@ name: Deploy web app to Cloud Run
 # (shared across all 4 — see that file's own comment), pushes to
 # Artifact Registry, and deploys it to Cloud Run.
 #
-# This is the Firebase Hosting -> Cloud Run migration's deploy path.
-# During the staged rollout (see the migration plan) this is triggered
-# by hand per app as each one is verified; once physician/ems and admin
-# are proven out, THEIR redeploys move to being triggered automatically
-# from ci.yml's flutter-web-deploy job (push+e2e-gated) and
-# codemagic.yaml's flutter-deploy workflow respectively, the same way
-# their Firebase Hosting deploys used to be — this workflow stays around
-# as an on-demand manual redeploy tool for any of the 4 afterward
-# (mirrors codemagic.yaml's own manual-trigger-only ios-adhoc-distribute
-# workflows).
+# This is the Firebase Hosting -> Cloud Run migration's deploy path, and
+# all 4 apps have now migrated. physician/ems redeploy automatically
+# from ci.yml's flutter-web-deploy job instead (push+e2e-gated) — this
+# workflow is what that job's own steps were proven against first, and
+# it stays around afterward as an on-demand manual redeploy tool for
+# either of them too. admin and marketing have no automatic trigger at
+# all (mirrors marketing's own reasoning: infrequent enough that
+# auto-deploying on every push isn't worth it) — this workflow is their
+# only/permanent deploy path, same as codemagic.yaml's own
+# manual-trigger-only ios-adhoc-distribute workflows are for iOS builds.
 #
 # One-time GCP setup required before this can run (can't be done from
 # here — see the migration plan / PR description for the exact
 # commands): a `github-actions-web-deploy` service account, WIF-trusted
 # for this repo (same pool as flutter-android-e2e in ci.yml), granted
-# roles/run.admin + roles/artifactregistry.writer on the amdash-dev
-# project and roles/iam.serviceAccountUser on its default compute
-# service account (Cloud Run's default runtime identity).
+# roles/run.admin + roles/artifactregistry.writer + roles/logging.viewer
+# on the amdash-dev project and roles/iam.serviceAccountUser on its
+# default compute service account (Cloud Run's default runtime
+# identity).
 
 on:
   workflow_dispatch:

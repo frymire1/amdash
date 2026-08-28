@@ -9,19 +9,21 @@ name: CI
 # for everything else) that both fired on every push — merged into one so
 # a single push only shows one CI run instead of two unrelated ones.
 #
-# physician/ems/marketing web hosting migrated from Firebase Hosting to
-# Cloud Run (admin's turn is next — still Firebase Hosting via
-# codemagic.yaml for now) — see deploy/web/Dockerfile (the one shared
-# container image all 4 apps use) and deploy-web-cloud-run.yml (manual
-# per-app redeploy tool; also where this migration's own history/
-# reasoning is documented). marketing's deploy is deliberately NOT
-# automated here — same reasoning as when it was still Firebase
-# Hosting: the site changes rarely enough that auto-deploying on every
-# push wasn't worth it — trigger deploy-web-cloud-run.yml by hand
+# All 4 apps' web hosting migrated from Firebase Hosting to Cloud Run —
+# see deploy/web/Dockerfile (the one shared container image all 4 use)
+# and deploy-web-cloud-run.yml (manual per-app redeploy tool for any of
+# physician/ems/admin/marketing; also where this migration's own
+# history/reasoning is documented). marketing's deploy is deliberately
+# NOT automated here — the site changes rarely enough that
+# auto-deploying on every push wasn't worth it — trigger
+# deploy-web-cloud-run.yml by hand
 # (`gh workflow run deploy-web-cloud-run.yml -f app=marketing`) when it
-# actually changes. Physician/ems/admin's other deploys (functions,
-# firestore rules, admin hosting, mobile builds/distribution) remain
-# manual-trigger-only on Codemagic, unchanged — see codemagic.yaml.
+# actually changes. Functions and firestore rules/indexes also moved
+# off Codemagic to their own manual GitHub Actions workflows —
+# deploy-functions.yml, deploy-firestore-rules.yml — for the same
+# free-Linux-runner reason as everything else here. Only genuine
+# iOS/Xcode work (mobile builds/ad-hoc distribution) remains on
+# Codemagic now — see codemagic.yaml.
 #
 # Deliberately not on Codemagic: none of the jobs below need macOS, and
 # GitHub's Linux runners are free on the plans this repo uses, unlike
@@ -29,9 +31,8 @@ name: CI
 # history — that's exactly why its testing workflows were removed and
 # this file exists instead). iOS e2e stays off entirely — Xcode/signing
 # is the genuinely expensive, complex part regardless of which CI system
-# runs it; flutter-deploy and the ios-adhoc-distribute* workflows in
-# codemagic.yaml remain the way to get a real iOS build, manually, when
-# needed.
+# runs it; the ios-adhoc-distribute* workflows in codemagic.yaml remain
+# the way to get a real iOS build, manually, when needed.
 #
 # e2e doesn't gate a deploy the way this file's old ci.yml `deploy-marketing`
 # job did — flutter-web-e2e/flutter-android-e2e are a smoke test of
@@ -601,16 +602,17 @@ jobs:
   # directly. ems's web build is still never meant for real EMS crews
   # (they use the native app in the field) — deploying it here keeps it
   # up to date for the user's own manual testing/QA access, not as a
-  # marketed product surface. Admin's hosting, functions, and firestore
-  # rules/indexes stay manual-trigger-only on Codemagic (see
-  # codemagic.yaml's flutter-deploy workflow); marketing's deploy is
-  # manual too, via deploy-web-cloud-run.yml (see that file and ci.yml's
-  # own header comment) — this is the one auto-deploy left in this
-  # workflow. Migrated from Firebase Hosting to Cloud Run — see
-  # deploy-web-cloud-run.yml (same shared container image, same
-  # github-actions-web-deploy WIF identity) for the manual-redeploy
-  # version of this exact pattern, which is what this job's own steps
-  # below were proven against first.
+  # marketed product surface. admin's web hosting and functions/
+  # firestore rules deploy the same way now, just manually triggered
+  # instead of on every push — see deploy-web-cloud-run.yml
+  # (`-f app=admin`), deploy-functions.yml, deploy-firestore-rules.yml;
+  # marketing's deploy is manual too, via deploy-web-cloud-run.yml (see
+  # that file and ci.yml's own header comment) — this is the one
+  # auto-deploy left in this workflow. Migrated from Firebase Hosting to
+  # Cloud Run — see deploy-web-cloud-run.yml (same shared container
+  # image, same github-actions-web-deploy WIF identity) for the
+  # manual-redeploy version of this exact pattern, which is what this
+  # job's own steps below were proven against first.
   flutter-web-deploy:
     name: Deploy physician/EMS web to amdash-dev
     runs-on: ubuntu-latest

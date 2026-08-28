@@ -1,0 +1,32 @@
+name: Deploy Firestore rules
+
+# Manual-trigger-only — see deploy-functions.yml's own comment for the
+# full reasoning on why this moved off Codemagic and why auth reuses
+# FIREBASE_SERVICE_ACCOUNT_KEY rather than WIF; same reasoning applies
+# here unchanged. Deploys firestore.rules + firestore.indexes.json
+# together — firebase.json's own single `firestore` config block
+# treats them as one unit, and they're always meant to move together
+# (an index a new rule/query needs, or a rule protecting a field a new
+# index was added for), so splitting them into two separate manual
+# triggers wouldn't buy anything.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy firestore rules + indexes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Authenticate to Firebase
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+
+      - name: Deploy firestore rules + indexes
+        run: firebase deploy --only firestore:rules,firestore:indexes --project amdash-dev --non-interactive
