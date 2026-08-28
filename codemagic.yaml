@@ -149,20 +149,55 @@ workflows:
         # real build failure on flutter-deploy, previously working exactly
         # this way — an image-side change, not anything in this repo.
         script: npm install -g firebase-tools --force
+      # Docker is confirmed preinstalled on Codemagic's mac_mini_m2 images
+      # (per Codemagic's own docs); gcloud CLI is not documented either
+      # way, so install it explicitly via Homebrew rather than assume —
+      # cheap and idempotent if it does turn out to already be there.
+      - name: Install gcloud CLI
+        script: brew install google-cloud-sdk
       - name: Authenticate to Firebase
         script: |
           echo "$FIREBASE_SERVICE_ACCOUNT_KEY" > "$CM_BUILD_DIR/firebase-service-account.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$CM_BUILD_DIR/firebase-service-account.json" >> $CM_ENV
-      # Only admin's hosting + functions + firestore rules now —
-      # physician/ems hosting moved to GitHub Actions (see
-      # flutter-web-deploy in .github/workflows/ci.yml), gated on this
-      # push's own e2e passing there first. `marketing` hosting is
-      # deployed manually (not from either CI system, and not on every
-      # push — see ci.yml's own header comment) since it's not a Flutter
-      # app and has no reason to depend on Codemagic.
-      - name: Deploy to amdash-dev
+      # Codemagic has no Workload Identity Federation plumbing set up
+      # (unlike GitHub Actions — see ci.yml's flutter-web-deploy job),
+      # so gcloud/Docker auth here reuses this same key file rather than
+      # a WIF-issued short-lived token. firebase-adminsdk-fbsvc (this
+      # key's underlying service account — the one Firebase Console's
+      # own "generate new private key" flow creates) already has
+      # roles/run.admin + roles/iam.serviceAccountUser (confirmed via
+      # `gcloud projects get-iam-policy` — almost certainly granted
+      # automatically when Cloud Functions v2 first deployed, since v2
+      # functions run on Cloud Run under the hood and need exactly
+      # these); it only needed one additional one-time grant,
+      # roles/artifactregistry.writer, to also push web-hosting images.
+      - name: Authenticate gcloud CLI to the same service account
+        script: gcloud auth activate-service-account --key-file="$CM_BUILD_DIR/firebase-service-account.json"
+      - name: Configure Docker to push to Artifact Registry
+        script: gcloud auth configure-docker northamerica-northeast2-docker.pkg.dev --quiet
+      # Only admin's Cloud Run deploy + functions + firestore rules now —
+      # physician/ems/marketing web hosting all moved to Cloud Run too
+      # (see deploy/web/Dockerfile, the shared image all 4 apps use, and
+      # deploy-web-cloud-run.yml/ci.yml's flutter-web-deploy for how
+      # physician/ems/marketing deploy theirs). $CM_COMMIT is Codemagic's
+      # own built-in commit-SHA variable — same image-tagging convention
+      # ci.yml's flutter-web-deploy uses (${{ github.sha }} there).
+      - name: Build, push, and deploy admin to Cloud Run
         script: |
-          firebase deploy --only hosting:admin,functions,firestore:rules,firestore:indexes --project amdash-dev --non-interactive
+          set -e
+          IMAGE="northamerica-northeast2-docker.pkg.dev/amdash-dev/web-hosting/admin-web:$CM_COMMIT"
+          docker build -f deploy/web/Dockerfile --build-arg SRC_DIR="flutter/apps/admin/build/web" -t "$IMAGE" .
+          docker push "$IMAGE"
+          gcloud run deploy admin-web \
+            --image="$IMAGE" \
+            --region=northamerica-northeast2 \
+            --project=amdash-dev \
+            --allow-unauthenticated \
+            --min-instances=0 \
+            --quiet
+      - name: Deploy functions + firestore rules to amdash-dev
+        script: |
+          firebase deploy --only functions,firestore:rules,firestore:indexes --project amdash-dev --non-interactive
 
   # Manual-trigger utility workflow. Builds a development-signed IPA
   # (installable on any device already registered on the account) and
