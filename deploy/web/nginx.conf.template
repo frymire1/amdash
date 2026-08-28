@@ -39,7 +39,15 @@ server {
   # those Flutter filenames — and marketing's own unhashed
   # manifest.json/favicon.ico — in a year-long immutable cache, exactly
   # the staleness bug this whole rule exists to avoid.
-  location ~* -[0-9a-zA-Z]{8,}\.(?:js|css|png|jpg|jpeg|gif|svg|webp|woff2?|ttf|eot|ico|json|wasm)$ {
+  #
+  # The pattern is quoted, unlike the try_files args above — confirmed
+  # for real this isn't optional: nginx's config tokenizer treats an
+  # unquoted `{` as starting a block even mid-regex, so the bare
+  # `{8,}` quantifier crashed nginx at startup with "unknown directive
+  # \"8,}...\"" (it read `location ~* -[0-9a-zA-Z]{` as the location's
+  # own opening brace, then choked trying to parse the regex remainder
+  # as a directive name). Quoting the whole pattern is the standard fix.
+  location ~* "-[0-9a-zA-Z]{8,}\.(?:js|css|png|jpg|jpeg|gif|svg|webp|woff2?|ttf|eot|ico|json|wasm)$" {
     add_header Cache-Control "public, max-age=31536000, immutable" always;
   }
 }
