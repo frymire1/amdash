@@ -107,7 +107,20 @@ jobs:
       - name: Configure Docker to push to Artifact Registry
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
-      # Idempotent — created on first run, a no-op every run after.
+      # The `create` fallback here is aspirational, not load-bearing:
+      # github-actions-web-deploy only has roles/artifactregistry.writer
+      # (push/pull to an existing repo), not the broader admin-ish role
+      # that includes artifactregistry.repositories.create — confirmed
+      # for real on the first run of this workflow
+      # (PERMISSION_DENIED on `create`, after `describe` correctly
+      # 404'd on the not-yet-created repo). That's deliberate, the same
+      # reasoning as kms.ts's key ring: repo creation is a one-time
+      # infra decision, not something a CI deploy identity should be
+      # able to do unsupervised. The repo itself is provisioned once,
+      # manually:
+      #   gcloud artifacts repositories create web-hosting \
+      #     --repository-format=docker \
+      #     --location=northamerica-northeast2 --project=amdash-dev
       - name: Ensure Artifact Registry repo exists
         run: |
           gcloud artifacts repositories describe "$ARTIFACT_REPO" \
