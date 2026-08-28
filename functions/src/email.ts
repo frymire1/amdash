@@ -15,9 +15,13 @@ const FROM_ADDRESS = 'AmDash <noreply@amdashtracking.com>';
 // same app as physicians, see physician/lib/router.dart's requiredRoles).
 // Mirrors the Dart-side AppUrls class
 // (flutter/packages/amdash_core/lib/src/app_urls.dart) — not worth a
-// shared file for 2 entries on the functions side.
+// shared file for 2 entries on the functions side. Both migrated from
+// Firebase Hosting to Cloud Run (default *.run.app URLs, confirmed live
+// before these were updated).
 function loginUrlForRole(role: AssignableRole): string {
-  return role === 'ems' ? 'https://amdash-ems-dev.web.app' : 'https://amdash-physician-dev.web.app';
+  return role === 'ems'
+    ? 'https://ems-web-577422583971.northamerica-northeast2.run.app'
+    : 'https://physician-web-577422583971.northamerica-northeast2.run.app';
 }
 
 // Email clients can't load local/repo files, so the logo has to be a

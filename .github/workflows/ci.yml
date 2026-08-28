@@ -4,20 +4,24 @@ name: CI
 # secrets scanning, marketing (Angular) test/lint/build, functions
 # (TypeScript build + vitest coverage), and Flutter analyze/unit-test
 # (+ coverage gate) on every push; e2e (Chrome + Firebase Test Lab
-# Android) and physician/ems web hosting deploy on master only. This used
+# Android) and physician/ems web deploy on master only. This used
 # to be two separate workflow files (`ci.yml` for marketing, `flutter-ci.yml`
 # for everything else) that both fired on every push — merged into one so
 # a single push only shows one CI run instead of two unrelated ones.
 #
-# marketing's hosting deploy is deliberately NOT automated here (it used
-# to be, as a `deploy-marketing` job gated on this file's own test/lint/
-# build jobs) — the marketing site changes rarely enough that auto-deploying
-# it on every push (even push that doesn't touch marketing/) wasn't worth
-# keeping. Deploy it manually when it actually changes:
-#   cd marketing && npm run build && firebase deploy --only hosting:marketing --project amdash-dev
-# Physician/ems/admin's other deploys (functions, firestore rules, admin
-# hosting, mobile builds/distribution) remain manual-trigger-only on
-# Codemagic, unchanged — see codemagic.yaml.
+# physician/ems/marketing web hosting migrated from Firebase Hosting to
+# Cloud Run (admin's turn is next — still Firebase Hosting via
+# codemagic.yaml for now) — see deploy/web/Dockerfile (the one shared
+# container image all 4 apps use) and deploy-web-cloud-run.yml (manual
+# per-app redeploy tool; also where this migration's own history/
+# reasoning is documented). marketing's deploy is deliberately NOT
+# automated here — same reasoning as when it was still Firebase
+# Hosting: the site changes rarely enough that auto-deploying on every
+# push wasn't worth it — trigger deploy-web-cloud-run.yml by hand
+# (`gh workflow run deploy-web-cloud-run.yml -f app=marketing`) when it
+# actually changes. Physician/ems/admin's other deploys (functions,
+# firestore rules, admin hosting, mobile builds/distribution) remain
+# manual-trigger-only on Codemagic, unchanged — see codemagic.yaml.
 #
 # Deliberately not on Codemagic: none of the jobs below need macOS, and
 # GitHub's Linux runners are free on the plans this repo uses, unlike
@@ -32,14 +36,18 @@ name: CI
 # e2e doesn't gate a deploy the way this file's old ci.yml `deploy-marketing`
 # job did — flutter-web-e2e/flutter-android-e2e are a smoke test of
 # whatever's currently live on amdash-dev, not a pre-deploy check, with
-# one exception: flutter-web-deploy below deploys physician/ems hosting
-# automatically once this exact push's own e2e has passed here.
+# one exception: flutter-web-deploy below deploys physician/ems to
+# Cloud Run automatically once this exact push's own e2e has passed here.
 #
 # Required repo secrets (GitHub -> Settings -> Secrets and variables ->
 # Actions):
 #   - GITGUARDIAN_API_KEY — GitGuardian dashboard-issued key (scoped to
 #     "scan").
-#   - FIREBASE_SERVICE_ACCOUNT_KEY — used by flutter-web-deploy below.
+#   - FIREBASE_SERVICE_ACCOUNT_KEY — used by flutter-web-e2e/
+#     flutter-android-e2e's Admin SDK-based test-account
+#     seeding/teardown (see scripts/lib/firebase-admin-cli.mjs) — no
+#     longer used for hosting deploys now that those are on Cloud Run
+#     via WIF (see flutter-web-deploy below and deploy-web-cloud-run.yml).
 #
 # flutter-android-e2e authenticates to Google Cloud via Workload Identity
 # Federation, not a service account key — this org has
@@ -587,22 +595,34 @@ jobs:
           node run-ems-patrol-test.mjs --teardown --account-json="$RUNNER_TEMP/ems-account.json" || true
         working-directory: scripts
 
-  # Deploys physician/ems web hosting to amdash-dev once this exact push
-  # has genuinely passed e2e on real infrastructure (Chrome + Firebase
-  # Test Lab) — a green-e2e gate GitHub Actions can enforce directly.
-  # ems's web build is still never meant for real EMS crews (they use the
-  # native app in the field) — deploying it here keeps it up to date for
-  # the user's own manual testing/QA access, not as a marketed product
-  # surface. Admin's hosting, functions, and firestore rules/indexes stay
-  # manual-trigger-only on Codemagic (see codemagic.yaml's flutter-deploy
-  # workflow); marketing's hosting deploy is manual too (see the
-  # file-level comment above) — this is the one auto-deploy left in this
-  # workflow.
+  # Deploys physician/ems web to Cloud Run (amdash-dev) once this exact
+  # push has genuinely passed e2e on real infrastructure (Chrome +
+  # Firebase Test Lab) — a green-e2e gate GitHub Actions can enforce
+  # directly. ems's web build is still never meant for real EMS crews
+  # (they use the native app in the field) — deploying it here keeps it
+  # up to date for the user's own manual testing/QA access, not as a
+  # marketed product surface. Admin's hosting, functions, and firestore
+  # rules/indexes stay manual-trigger-only on Codemagic (see
+  # codemagic.yaml's flutter-deploy workflow); marketing's deploy is
+  # manual too, via deploy-web-cloud-run.yml (see that file and ci.yml's
+  # own header comment) — this is the one auto-deploy left in this
+  # workflow. Migrated from Firebase Hosting to Cloud Run — see
+  # deploy-web-cloud-run.yml (same shared container image, same
+  # github-actions-web-deploy WIF identity) for the manual-redeploy
+  # version of this exact pattern, which is what this job's own steps
+  # below were proven against first.
   flutter-web-deploy:
     name: Deploy physician/EMS web to amdash-dev
     runs-on: ubuntu-latest
     needs: [flutter-web-e2e, flutter-android-e2e]
     if: github.ref == 'refs/heads/master'
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      REGION: northamerica-northeast2
+      PROJECT_ID: amdash-dev
+      ARTIFACT_REPO: web-hosting
     steps:
       - uses: actions/checkout@v4
 
@@ -619,15 +639,34 @@ jobs:
             (cd "apps/$app" && flutter build web --release)
           done
 
-      - name: Install Firebase CLI
-        run: npm install -g firebase-tools
+      # Same WIF pattern flutter-android-e2e uses above (same pool,
+      # different service account, scoped only to Cloud Run +
+      # Artifact Registry deploys — see deploy-web-cloud-run.yml's own
+      # comment for the exact grants and why it's a separate identity
+      # from codemagic-testlab).
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/577422583971/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
+          service_account: 'github-actions-web-deploy@amdash-dev.iam.gserviceaccount.com'
 
-      # Used by `firebase deploy` below — see this file's own header
-      # comment for the required secret.
-      - name: Authenticate to Firebase
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker to push to Artifact Registry
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Build, push, and deploy physician + ems to Cloud Run
         run: |
-          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
-          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
-
-      - name: Deploy physician/ems hosting to amdash-dev
-        run: firebase deploy --only hosting:physician,hosting:ems --project amdash-dev --non-interactive
+          set -e
+          for app in physician ems; do
+            IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${app}-web:${{ github.sha }}"
+            docker build -f deploy/web/Dockerfile --build-arg SRC_DIR="flutter/apps/${app}/build/web" -t "$IMAGE" .
+            docker push "$IMAGE"
+            gcloud run deploy "${app}-web" \
+              --image="$IMAGE" \
+              --region="$REGION" \
+              --project="$PROJECT_ID" \
+              --allow-unauthenticated \
+              --min-instances=0 \
+              --quiet
+          done

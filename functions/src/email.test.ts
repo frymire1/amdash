@@ -45,16 +45,20 @@ describe('sendWelcomeEmail', () => {
   it('points an EMS account at the EMS app login URL', async () => {
     await sendWelcomeEmail({ email: 'a@example.com', firstName: 'Jordan', role: 'ems' });
     const html = mockSend.mock.calls[0][0].html as string;
-    expect(html).toContain('https://amdash-ems-dev.web.app');
+    expect(html).toContain('https://ems-web-577422583971.northamerica-northeast2.run.app');
   });
 
   it('points a physician or nurse account at the physician app login URL', async () => {
     await sendWelcomeEmail({ email: 'a@example.com', firstName: 'Jordan', role: 'physician' });
-    expect((mockSend.mock.calls[0][0].html as string)).toContain('https://amdash-physician-dev.web.app');
+    expect((mockSend.mock.calls[0][0].html as string)).toContain(
+      'https://physician-web-577422583971.northamerica-northeast2.run.app',
+    );
 
     mockSend.mockClear();
     await sendWelcomeEmail({ email: 'a@example.com', firstName: 'Jordan', role: 'nurse' });
-    expect((mockSend.mock.calls[0][0].html as string)).toContain('https://amdash-physician-dev.web.app');
+    expect((mockSend.mock.calls[0][0].html as string)).toContain(
+      'https://physician-web-577422583971.northamerica-northeast2.run.app',
+    );
   });
 
   it('is best-effort: logs and does not throw when Resend reports an API-level error', async () => {
