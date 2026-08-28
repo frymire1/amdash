@@ -43,6 +43,7 @@ class UserProfile {
 
   factory UserProfile.fromFirestore(Map<String, Object?> data) {
     final rawRoles = data['role'];
+    final rawFcmTokens = data['fcmTokens'];
     return UserProfile(
       firstName: data['firstName'] as String?,
       lastName: data['lastName'] as String?,
@@ -57,8 +58,13 @@ class UserProfile {
       organizationId: data['organizationId'] as String?,
       newPatientAlertsExpiresAt:
           data['newPatientAlertsExpiresAt'] as Timestamp?,
-      fcmTokens: (data['fcmTokens'] as List?)?.whereType<String>().toList() ??
-          const [],
+      // `is List` check, not `as List?` — matches `role`'s handling above;
+      // confirmed via a real test that the old unsafe cast throws instead
+      // of defaulting to empty on a malformed value, unlike every other
+      // field in this factory.
+      fcmTokens: rawFcmTokens is List
+          ? rawFcmTokens.whereType<String>().toList()
+          : const [],
     );
   }
 

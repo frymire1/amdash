@@ -1,6 +1,6 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../firebase/firebase_providers.dart';
 import '../models/vitals_history_entry.dart';
 
 /// A live listener on `patients/{patientId}/vitalsHistory`, newest first.
@@ -18,7 +18,8 @@ import '../models/vitals_history_entry.dart';
 /// viewed patient's history open for the rest of the session.
 final vitalsHistoryProvider = StreamProvider.autoDispose
     .family<List<VitalsHistoryEntry>, String>((ref, patientId) {
-      return FirebaseFirestore.instance
+      return ref
+          .watch(firestoreProvider)
           .collection('patients')
           .doc(patientId)
           .collection('vitalsHistory')

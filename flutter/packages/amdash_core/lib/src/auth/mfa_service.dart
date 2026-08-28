@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../firebase/firebase_providers.dart';
 import 'auth_service.dart';
 
 /// Thrown by [MfaService]'s mutating methods when Firebase refuses an
@@ -63,8 +64,18 @@ class MfaService {
     return _guardRecentLogin(() async {
       final user = _auth.currentUser;
       if (user == null) throw StateError('No signed-in user to enroll MFA for.');
+      // coverage:ignore-start
+      // Real platform-channel calls (Firebase's actual TOTP-enrollment
+      // backend round trip) — confirmed for real that
+      // TotpMultiFactorGenerator.generateSecret throws immediately in a
+      // plain Dart VM test (no platform bindings for any real target),
+      // same category as fhir_export_service.dart's FileSaver call. No DI
+      // seam fixes this — there's no fake-implementation package for it,
+      // and unlike FirebaseFirestore.instance it isn't even a singleton
+      // getter this package controls, it's a static SDK method.
       final session = await user.multiFactor.getSession();
       return TotpMultiFactorGenerator.generateSecret(session);
+      // coverage:ignore-end
     });
   }
 
@@ -78,8 +89,13 @@ class MfaService {
     return _guardRecentLogin(() async {
       final user = _auth.currentUser;
       if (user == null) throw StateError('No signed-in user to enroll MFA for.');
+      // coverage:ignore-start
+      // Same platform-channel limitation as beginEnrollment's own
+      // coverage:ignore block above — TotpMultiFactorGenerator's static
+      // methods aren't reachable in a Dart VM test.
       final assertion = await TotpMultiFactorGenerator.getAssertionForEnrollment(secret, code);
       await user.multiFactor.enroll(assertion, displayName: 'Authenticator app');
+      // coverage:ignore-end
     });
   }
 
@@ -106,7 +122,7 @@ class MfaService {
 }
 
 final mfaServiceProvider = Provider<MfaService>((ref) {
-  return MfaService(FirebaseAuth.instance);
+  return MfaService(ref.watch(firebaseAuthProvider));
 });
 
 /// The enrolled-factors list for the current user — the one thing

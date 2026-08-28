@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../firebase/firebase_providers.dart';
 import '../models/user_profile.dart';
 import 'auth_service.dart';
 
@@ -53,7 +54,7 @@ class UserProfileService {
 }
 
 final userProfileServiceProvider = Provider<UserProfileService>((ref) {
-  return UserProfileService(FirebaseFirestore.instance);
+  return UserProfileService(ref.watch(firestoreProvider));
 });
 
 /// Mirrors `UserProfileService.profile`/`loading` signals: re-subscribes
@@ -92,7 +93,8 @@ final userProfileProvider = StreamProvider<UserProfile?>((ref) async* {
   // plain `.where((s) => !s.metadata.isFromCache)` then blocks forever
   // (confirmed the hard way: this exact bug, on this exact line, minus
   // `includeMetadataChanges: true`, broke fresh sign-in outright).
-  yield* FirebaseFirestore.instance
+  yield* ref
+      .watch(firestoreProvider)
       .collection('users')
       .doc(user.uid)
       .snapshots(includeMetadataChanges: true)

@@ -3,6 +3,7 @@ export 'src/auth/auth_service.dart';
 export 'src/auth/idle_timeout_wrapper.dart';
 export 'src/auth/mfa_service.dart';
 export 'src/auth/user_profile_service.dart';
+export 'src/firebase/firebase_providers.dart';
 export 'src/guards/app_guards.dart';
 export 'src/hospitals/hospital_service.dart';
 export 'src/models/account_status.dart';

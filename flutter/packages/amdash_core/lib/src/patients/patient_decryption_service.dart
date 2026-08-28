@@ -3,11 +3,8 @@ import 'dart:async';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../firebase/firebase_providers.dart';
 import '../models/patient.dart';
-
-/// Every callable Cloud Function this hits runs in this region — must
-/// match `REGION` in `functions/src/shared.ts`.
-const _functionsRegion = 'northamerica-northeast2';
 
 /// A resolved `name`/`healthcareNumber` pair for one patient — either
 /// value may be null if that specific field wasn't returned (patient not
@@ -67,7 +64,7 @@ class PatientDecryptionService {
 }
 
 final patientDecryptionServiceProvider = Provider<PatientDecryptionService>((ref) {
-  return PatientDecryptionService(FirebaseFunctions.instanceFor(region: _functionsRegion));
+  return PatientDecryptionService(ref.watch(firebaseFunctionsProvider));
 });
 
 /// In-memory cache of decrypted patient fields, keyed by patient id —

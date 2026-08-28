@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../auth/user_profile_service.dart';
+import '../firebase/firebase_providers.dart';
 import '../models/hospital.dart';
 import '../models/user_profile.dart';
 
@@ -19,7 +20,7 @@ final hospitalsProvider = StreamProvider<List<Hospital>>((ref) async* {
     return;
   }
 
-  final firestore = FirebaseFirestore.instance;
+  final firestore = ref.watch(firestoreProvider);
   Query<Map<String, Object?>> query = firestore
       .collection('hospitals')
       .orderBy('name');

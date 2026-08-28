@@ -5,6 +5,8 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../firebase/firebase_providers.dart';
+
 /// Calls the `exportPatientFhirBundle` callable (functions/src/patients.ts)
 /// and saves the returned FHIR R4 Bundle to disk as pretty-printed JSON —
 /// shared by physician (read-only patient view) and EMS (right after
@@ -14,10 +16,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// (org opted in, patient actually completed, same-org caller) — this is
 /// just the thin client-side wrapper plus the local save step, not a
 /// second copy of that gating logic.
-///
-/// Every relevant Cloud Function in this app runs in this region — must
-/// match `REGION` in `functions/src/shared.ts`.
-const _functionsRegion = 'northamerica-northeast2';
 
 /// Thrown by [exportPatientFhirBundle] instead of letting a raw
 /// [FirebaseFunctionsException] leak to the UI layer — callers only need
@@ -84,6 +82,18 @@ Future<FhirExportResult> exportPatientFhirBundle(FirebaseFunctions functions, St
   final json = const JsonEncoder.withIndent('  ').convert(bundle);
   final bytes = Uint8List.fromList(utf8.encode(json));
 
+  // coverage:ignore-start
+  // FileSaver.instance.saveFile is a real plugin call (platform channel on
+  // mobile/desktop, browser APIs on web) — confirmed for real that it
+  // throws `UnsupportedError: Functionality only available on macOS` when
+  // called from a plain Dart VM unit test (no platform bindings for any
+  // supported target), not something a DI seam like firestoreProvider's
+  // can fix, since there's no fake-implementation package for it the way
+  // fake_cloud_firestore exists for Firestore. Everything above this line
+  // (the callable call, the retry loop, JSON encoding, error handling) is
+  // fully covered; this block and the two lines it depends on are the
+  // one genuine platform-glue gap in this file, matching TESTING.md's
+  // exclusion philosophy — documented, not silent.
   final filePath = await FileSaver.instance.saveFile(
     name: '$patientId-fhir-export',
     bytes: bytes,
@@ -94,6 +104,7 @@ Future<FhirExportResult> exportPatientFhirBundle(FirebaseFunctions functions, St
   final exportResult = FhirExportResult(filePath: filePath, bundle: bundle);
   debugLastExportResult = exportResult;
   return exportResult;
+  // coverage:ignore-end
 }
 
 // Retries specifically the "not yet completed" precondition a few times —
@@ -118,8 +129,9 @@ Future<Map<Object?, Object?>> _callWithCompletionRetry(HttpsCallable callable, S
     }
   }
   // Unreachable — the loop above always either returns or rethrows on its
-  // final attempt.
-  throw StateError('unreachable');
+  // final attempt (maxAttempts is a fixed literal above, not something a
+  // caller can somehow set to 0), so control can never fall through here.
+  throw StateError('unreachable'); // coverage:ignore-line
 }
 
 /// Pulls the most recent value for a given LOINC-coded vital straight out
@@ -159,7 +171,7 @@ String _messageFor(FirebaseFunctionsException error) {
 }
 
 final fhirExportFunctionsProvider = Provider<FirebaseFunctions>((ref) {
-  return FirebaseFunctions.instanceFor(region: _functionsRegion);
+  return ref.watch(firebaseFunctionsProvider);
 });
 
 /// LOINC code for heart rate — must match `LOINC.heartRate` in

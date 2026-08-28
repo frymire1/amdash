@@ -3,12 +3,9 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../firebase/firebase_providers.dart';
 import '../models/account_status.dart';
 import 'reload_page.dart';
-
-/// Every callable Cloud Function this app hits runs in this region — must
-/// match `REGION` in `functions/src/shared.ts`.
-const _functionsRegion = 'northamerica-northeast2';
 
 /// Mirrors `libs/auth/src/lib/services/auth.service.ts`: wraps Firebase
 /// Auth plus the two public (no-auth-required) callables that drive the
@@ -18,10 +15,11 @@ const _functionsRegion = 'northamerica-northeast2';
 /// (via the `setInitialPassword` callable) is the only way a brand-new
 /// account gets its first password.
 class AuthService {
-  AuthService(this._auth, this._functions);
+  AuthService(this._auth, this._functions, this._firestore);
 
   final FirebaseAuth _auth;
   final FirebaseFunctions _functions;
+  final FirebaseFirestore _firestore;
 
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
@@ -64,9 +62,8 @@ class AuthService {
   // primary goal of signing out.
   Future<void> _clearLocalCache() async {
     try {
-      final firestore = FirebaseFirestore.instance;
-      await firestore.terminate();
-      await firestore.clearPersistence();
+      await _firestore.terminate();
+      await _firestore.clearPersistence();
     } catch (_) {}
   }
 
@@ -132,8 +129,9 @@ class AuthService {
 
 final authServiceProvider = Provider<AuthService>((ref) {
   return AuthService(
-    FirebaseAuth.instance,
-    FirebaseFunctions.instanceFor(region: _functionsRegion),
+    ref.watch(firebaseAuthProvider),
+    ref.watch(firebaseFunctionsProvider),
+    ref.watch(firestoreProvider),
   );
 });
 

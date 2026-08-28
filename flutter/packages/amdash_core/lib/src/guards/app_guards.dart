@@ -21,7 +21,10 @@ import '../models/user_profile.dart';
 /// pass `requireWorkLocation: true` for apps where `workLocationGuard`
 /// also applies (physician/nurse only).
 class AppRouteGuard {
-  const AppRouteGuard._();
+  // Every member here is static — this class is never meant to be
+  // instantiated at all, so this constructor (existing only to make the
+  // class non-instantiable from outside) is never actually called.
+  const AppRouteGuard._(); // coverage:ignore-line
 
   static String? redirect({
     required Ref ref,

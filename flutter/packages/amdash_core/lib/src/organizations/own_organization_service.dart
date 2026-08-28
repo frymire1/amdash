@@ -1,7 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../auth/user_profile_service.dart';
+import '../firebase/firebase_providers.dart';
 import '../models/organization.dart';
 
 /// A live listener on the caller's own `organizations/{organizationId}` —
@@ -21,7 +21,7 @@ final ownOrganizationProvider = StreamProvider<Organization?>((ref) {
     return Stream.value(null);
   }
 
-  return FirebaseFirestore.instance.collection('organizations').doc(organizationId).snapshots().map((doc) {
+  return ref.watch(firestoreProvider).collection('organizations').doc(organizationId).snapshots().map((doc) {
     final data = doc.data();
     return data == null ? null : Organization.fromFirestore(doc.id, data);
   });

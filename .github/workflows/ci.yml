@@ -203,7 +203,7 @@ jobs:
         uses: VeryGoodOpenSource/very_good_coverage@v3
         with:
           path: flutter/packages/amdash_core/coverage/lcov.info
-          min_coverage: 4
+          min_coverage: 24
 
   functions-build:
     name: Functions build (tsc)
