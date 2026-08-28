@@ -7,6 +7,18 @@ server {
   root /usr/share/nginx/html;
   index index.html;
 
+  # Default: always revalidate. Safe baseline for every file this
+  # config doesn't explicitly override below — nginx's own ETag/
+  # Last-Modified still lets an unchanged file come back as a cheap 304
+  # instead of a full re-download, so this isn't "no caching", just
+  # "never trust a filename alone to mean the content can't have
+  # changed" (see the immutable-cache exception below for why that
+  # distinction matters here specifically). `location` blocks below
+  # that don't set their own add_header inherit this one; the one that
+  # does replaces it entirely for matching requests — that's nginx's
+  # documented add_header inheritance behavior, not an oversight.
+  add_header Cache-Control "no-cache" always;
+
   # SPA fallback: any path that isn't a real file falls back to
   # index.html so client-side routing (go_router in the Flutter apps,
   # Angular's router in marketing) can handle it — matches
@@ -15,18 +27,19 @@ server {
     try_files $uri $uri/ /index.html;
   }
 
-  # index.html references this specific build's content-hashed asset
-  # filenames (main.<hash>.js, etc.) — caching it risks serving a stale
-  # build after the next deploy points those hashes elsewhere. Firebase
-  # Hosting handles this distinction automatically; a raw static file
-  # server doesn't, so it's explicit here.
-  location = /index.html {
-    add_header Cache-Control "no-cache";
-  }
-
-  # Everything else in a Flutter/Angular production build is
-  # content-hashed and therefore safe to cache indefinitely.
-  location ~* \.(?:js|css|png|jpg|jpeg|gif|svg|webp|woff2?|ttf|eot|ico|json|wasm)$ {
-    add_header Cache-Control "public, max-age=31536000, immutable";
+  # The one safe exception: filenames a build tool actually
+  # content-hashed (Angular emits e.g. main-<hash>.js, styles-<hash>.css
+  # — matched below by the trailing hash-looking segment). Confirmed for
+  # real that Flutter's own web build output does NOT follow this
+  # convention — main.dart.js, flutter.js, flutter_bootstrap.js,
+  # flutter_service_worker.js keep the exact same filename on every
+  # deploy — so it correctly falls through to the no-cache default
+  # above instead of matching here. An earlier version of this file
+  # keyed off file extension alone (any .js/.css/etc.), which caught
+  # those Flutter filenames — and marketing's own unhashed
+  # manifest.json/favicon.ico — in a year-long immutable cache, exactly
+  # the staleness bug this whole rule exists to avoid.
+  location ~* -[0-9a-zA-Z]{8,}\.(?:js|css|png|jpg|jpeg|gif|svg|webp|woff2?|ttf|eot|ico|json|wasm)$ {
+    add_header Cache-Control "public, max-age=31536000, immutable" always;
   }
 }
