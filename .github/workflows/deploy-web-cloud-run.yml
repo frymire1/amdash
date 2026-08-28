@@ -152,3 +152,17 @@ jobs:
             --allow-unauthenticated \
             --min-instances=0 \
             --quiet
+
+      # gcloud run deploy's own failure message is just "container
+      # failed to start and listen on $PORT" — the actual crash reason
+      # (e.g. an nginx config test failure) only shows up in Cloud
+      # Logging, not in this job's own output otherwise.
+      - name: Dump Cloud Run revision logs on failure
+        if: failure()
+        run: |
+          gcloud logging read \
+            "resource.type=cloud_run_revision AND resource.labels.service_name=${{ inputs.app }}-web" \
+            --project="$PROJECT_ID" \
+            --freshness=10m \
+            --limit=100 \
+            --format="value(timestamp,severity,textPayload)"
