@@ -1,0 +1,141 @@
+name: Deploy web app to Cloud Run
+
+# Manual-trigger-only (Actions tab -> this workflow -> Run workflow, or
+# `gh workflow run deploy-web-cloud-run.yml -f app=marketing`). Builds
+# one of the 4 static web apps, packages it with deploy/web/Dockerfile
+# (shared across all 4 — see that file's own comment), pushes to
+# Artifact Registry, and deploys it to Cloud Run.
+#
+# This is the Firebase Hosting -> Cloud Run migration's deploy path.
+# During the staged rollout (see the migration plan) this is triggered
+# by hand per app as each one is verified; once physician/ems and admin
+# are proven out, THEIR redeploys move to being triggered automatically
+# from ci.yml's flutter-web-deploy job (push+e2e-gated) and
+# codemagic.yaml's flutter-deploy workflow respectively, the same way
+# their Firebase Hosting deploys used to be — this workflow stays around
+# as an on-demand manual redeploy tool for any of the 4 afterward
+# (mirrors codemagic.yaml's own manual-trigger-only ios-adhoc-distribute
+# workflows).
+#
+# One-time GCP setup required before this can run (can't be done from
+# here — see the migration plan / PR description for the exact
+# commands): a `github-actions-web-deploy` service account, WIF-trusted
+# for this repo (same pool as flutter-android-e2e in ci.yml), granted
+# roles/run.admin + roles/artifactregistry.writer on the amdash-dev
+# project and roles/iam.serviceAccountUser on its default compute
+# service account (Cloud Run's default runtime identity).
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: Which app to build and deploy
+        required: true
+        type: choice
+        options:
+          - physician
+          - ems
+          - admin
+          - marketing
+
+# WEB_DEPLOY_SA is the dedicated service account created for this
+# workflow (see the file-level comment above) — distinct from
+# codemagic-testlab, which stays scoped to Test Lab only, so an audit
+# of either service account's grants shows exactly one purpose per
+# identity rather than an unrelated grab-bag.
+env:
+  REGION: northamerica-northeast2
+  PROJECT_ID: amdash-dev
+  ARTIFACT_REPO: web-hosting
+  WEB_DEPLOY_SA: github-actions-web-deploy@amdash-dev.iam.gserviceaccount.com
+
+jobs:
+  deploy:
+    name: Build + deploy ${{ inputs.app }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Only the selected app's toolchain gets set up/built — Flutter
+      # for physician/ems/admin, Node+Angular for marketing.
+      - uses: subosito/flutter-action@v2
+        if: inputs.app != 'marketing'
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-node@v4
+        if: inputs.app == 'marketing'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: marketing/package-lock.json
+
+      - name: Build Flutter web app
+        if: inputs.app != 'marketing'
+        run: |
+          set -e
+          cd "flutter/apps/${{ inputs.app }}"
+          flutter build web --release
+          echo "SRC_DIR=flutter/apps/${{ inputs.app }}/build/web" >> "$GITHUB_ENV"
+
+      - name: Build marketing (Angular)
+        if: inputs.app == 'marketing'
+        run: |
+          set -e
+          cd marketing
+          npm ci
+          npm run build
+          echo "SRC_DIR=marketing/dist/browser" >> "$GITHUB_ENV"
+
+      # google-github-actions/auth sets up Application Default
+      # Credentials via WIF from the short-lived OIDC token GitHub
+      # issues for this run — see ci.yml's flutter-android-e2e job for
+      # the identical pattern this mirrors (same pool/provider,
+      # different service account).
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/577422583971/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
+          service_account: ${{ env.WEB_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker to push to Artifact Registry
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      # Idempotent — created on first run, a no-op every run after.
+      - name: Ensure Artifact Registry repo exists
+        run: |
+          gcloud artifacts repositories describe "$ARTIFACT_REPO" \
+            --location="$REGION" --project="$PROJECT_ID" \
+            || gcloud artifacts repositories create "$ARTIFACT_REPO" \
+                 --repository-format=docker --location="$REGION" \
+                 --project="$PROJECT_ID"
+
+      - name: Build and push image
+        run: |
+          set -e
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${{ inputs.app }}-web:${{ github.sha }}"
+          docker build -f deploy/web/Dockerfile --build-arg SRC_DIR="$SRC_DIR" -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      # min-instances=0: scale-to-zero, matching this project's current
+      # low-traffic dev/QA usage — occasional cold start (~1-3s) on the
+      # first hit after idle, near-$0 cost otherwise. Bump later with a
+      # one-line change if these become steadier-traffic production
+      # apps. allow-unauthenticated: these are public sites, same as
+      # Firebase Hosting served them.
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "${{ inputs.app }}-web" \
+            --image="$IMAGE" \
+            --region="$REGION" \
+            --project="$PROJECT_ID" \
+            --allow-unauthenticated \
+            --min-instances=0 \
+            --quiet

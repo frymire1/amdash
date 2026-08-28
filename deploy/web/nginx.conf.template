@@ -1,0 +1,32 @@
+# Templated by nginx:alpine's own envsubst-on-startup behavior (see
+# Dockerfile alongside this file) — ${PORT} becomes whatever Cloud Run
+# actually assigned this instance.
+server {
+  listen ${PORT};
+  server_name _;
+  root /usr/share/nginx/html;
+  index index.html;
+
+  # SPA fallback: any path that isn't a real file falls back to
+  # index.html so client-side routing (go_router in the Flutter apps,
+  # Angular's router in marketing) can handle it — matches
+  # firebase.json's per-target rewrite rule exactly.
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+
+  # index.html references this specific build's content-hashed asset
+  # filenames (main.<hash>.js, etc.) — caching it risks serving a stale
+  # build after the next deploy points those hashes elsewhere. Firebase
+  # Hosting handles this distinction automatically; a raw static file
+  # server doesn't, so it's explicit here.
+  location = /index.html {
+    add_header Cache-Control "no-cache";
+  }
+
+  # Everything else in a Flutter/Angular production build is
+  # content-hashed and therefore safe to cache indefinitely.
+  location ~* \.(?:js|css|png|jpg|jpeg|gif|svg|webp|woff2?|ttf|eot|ico|json|wasm)$ {
+    add_header Cache-Control "public, max-age=31536000, immutable";
+  }
+}
