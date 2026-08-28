@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://amdash-marketing-dev.web.app/sitemap.xml
+Sitemap: https://marketing-web-577422583971.northamerica-northeast2.run.app/sitemap.xml

@@ -24,8 +24,10 @@ function loginUrlForRole(role: AssignableRole): string {
 // publicly reachable URL — reusing the mark already deployed as the
 // marketing site's apple-touch-icon.png (the same finalized Arctic Cyan
 // mark used for the app icons/splash screens) rather than duplicating the
-// image or setting up a separate CDN asset just for email.
-const LOGO_URL = 'https://amdash-marketing-dev.web.app/apple-touch-icon.png';
+// image or setting up a separate CDN asset just for email. marketing has
+// migrated from Firebase Hosting to Cloud Run (default *.run.app URL,
+// confirmed live including this exact asset before this URL was updated).
+const LOGO_URL = 'https://marketing-web-577422583971.northamerica-northeast2.run.app/apple-touch-icon.png';
 
 // Email HTML has to be written for the lowest common denominator of
 // rendering engines (Outlook's is Word's, not a browser's) — table-based
