@@ -64,7 +64,18 @@ final directionsCacheProvider = NotifierProvider<DirectionsCacheController, Map<
 /// that decides *when* to call this lives in the widget/component itself,
 /// see `PatientViewer`'s `_maybeRequestDirections`).
 class DirectionsService {
-  DirectionsService() : _functions = FirebaseFunctions.instanceFor(region: _functionsRegion);
+  // Optional param purely as a testability seam (mirrors amdash_core's
+  // firebaseFunctionsProvider rationale) — this isn't wired through
+  // Riverpod at all (constructed directly as a widget field in
+  // PatientViewer, not via a provider), so there's no ref to route
+  // through instead. The real call site (PatientViewer) still just does
+  // `DirectionsService()`, unchanged. The `??` fallback itself is never
+  // exercised by a test — confirmed for real that merely constructing
+  // `FirebaseFunctions.instanceFor(...)` throws `[core/no-app]` without a
+  // real `Firebase.initializeApp()` having run, which no plain
+  // `flutter test` does.
+  DirectionsService([FirebaseFunctions? functions])
+    : _functions = functions ?? FirebaseFunctions.instanceFor(region: _functionsRegion); // coverage:ignore-line
 
   final FirebaseFunctions _functions;
 

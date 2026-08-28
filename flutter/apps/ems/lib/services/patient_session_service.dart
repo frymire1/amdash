@@ -1,5 +1,4 @@
 import 'package:amdash_core/amdash_core.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../classes/uploaded_patient.dart';
@@ -30,7 +29,8 @@ final _rawUploadedPatientsProvider = StreamProvider<List<UploadedPatient>>((ref)
     return;
   }
 
-  final query = FirebaseFirestore.instance
+  final query = ref
+      .watch(firestoreProvider)
       .collection('patients')
       .where('organizationId', isEqualTo: profile!.organizationId)
       .where('status', isEqualTo: 'active')

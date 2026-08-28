@@ -1,5 +1,4 @@
 import 'package:amdash_core/amdash_core.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// Mirrors `apps/admin/src/app/services/organization.service.ts`: an
@@ -9,7 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// stays scoped to the caller's own org via the Cloud Functions it calls,
 /// never a direct client query here.
 final organizationsProvider = StreamProvider<List<Organization>>((ref) {
-  return FirebaseFirestore.instance
+  return ref
+      .watch(firestoreProvider)
       .collection('organizations')
       .orderBy('name')
       .snapshots()

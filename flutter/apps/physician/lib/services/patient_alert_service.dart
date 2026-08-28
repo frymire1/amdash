@@ -57,6 +57,14 @@ class PatientAlertService {
   }
 }
 
+// A local seam (not amdash_core's firebase_providers.dart — see this
+// file's own doc comment for why firebase_messaging deliberately isn't a
+// shared-package dependency) — same testability rationale as every seam
+// there: FirebaseMessaging.instance can't be swapped by a test directly.
+// Not private: a test needs to override it, same as every other seam in
+// this repo.
+final firebaseMessagingProvider = Provider<FirebaseMessaging>((ref) => FirebaseMessaging.instance);
+
 final patientAlertServiceProvider = Provider<PatientAlertService>((ref) {
-  return PatientAlertService(FirebaseMessaging.instance, ref.watch(userProfileServiceProvider));
+  return PatientAlertService(ref.watch(firebaseMessagingProvider), ref.watch(userProfileServiceProvider));
 });

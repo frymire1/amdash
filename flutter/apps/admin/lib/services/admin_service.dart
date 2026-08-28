@@ -5,10 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../classes/audit_log_entry.dart';
 import '../classes/managed_user.dart';
 
-/// Every callable Cloud Function this app hits runs in this region — must
-/// match `REGION` in `functions/src/shared.ts`.
-const _functionsRegion = 'northamerica-northeast2';
-
 /// Mirrors `apps/admin/src/app/services/admin.service.ts`: thin wrappers
 /// around the 8 admin-authored Cloud Functions (`functions/src/admin.ts`).
 /// Every mutation here goes through a callable rather than a direct
@@ -207,5 +203,5 @@ class AdminService {
 }
 
 final adminServiceProvider = Provider<AdminService>((ref) {
-  return AdminService(FirebaseFunctions.instanceFor(region: _functionsRegion));
+  return AdminService(ref.watch(firebaseFunctionsProvider));
 });

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -19,11 +20,18 @@ const emsFixReportSignal = 'ems-fix';
 /// Must be a top-level (or static) function — this is what
 /// `FlutterForegroundTask.startService(callback: ...)` runs to install the
 /// handler in the dedicated background isolate the foreground service
-/// keeps alive.
+/// keeps alive. Never called directly by a test — it's the real isolate
+/// entry point, only ever invoked by the OS/plugin at real runtime (same
+/// exclusion category TESTING.md already gives main.dart), and calling it
+/// would construct `EmsTrackingTaskHandler()` with no args, which throws
+/// `[core/no-app]` the same way DirectionsService's/this class's own `??`
+/// fallback does (see EmsTrackingTaskHandler's own comment).
+// coverage:ignore-start
 @pragma('vm:entry-point')
 void emsTrackingTaskCallback() {
   FlutterForegroundTask.setTaskHandler(EmsTrackingTaskHandler());
 }
+// coverage:ignore-end
 
 /// Runs in its own isolate, kept alive by Android's foreground-service
 /// mechanism — this, not a main-isolate `Timer`, is what actually
@@ -35,13 +43,49 @@ void emsTrackingTaskCallback() {
 /// than read from shared Dart state, since a foreground-service isolate on
 /// Android is a fully separate process-level isolate with no shared heap.
 class EmsTrackingTaskHandler extends TaskHandler {
-  final Set<String> _trackedPatientIds = {};
-  bool _firebaseReady = false;
+  // Both params exist purely as testability seams — this class is
+  // instantiated by the plugin itself via emsTrackingTaskCallback()
+  // above, not through Riverpod, so there's no ref to route through
+  // instead. The real call site is unchanged: still just
+  // `EmsTrackingTaskHandler()`. [firebaseReady] lets a test skip past
+  // _ensureFirebase()'s real Firebase.initializeApp call (genuine
+  // isolate-bootstrap glue, see that method's own comment) so that
+  // everything *downstream* of it — onStart, and nearly all of
+  // _publishAllTracked — stays testable; without this, the very first
+  // line either method reaches would throw in a plain VM test (no
+  // platform channel for Firebase.initializeApp to complete against),
+  // making almost this entire class untestable over one bootstrap call.
+  // The `functions` param's own `??` fallback is never exercised by a
+  // test for the identical reason DirectionsService's twin fallback
+  // isn't (see that file's own comment) — confirmed merely constructing
+  // FirebaseFunctions.instanceFor(...) throws [core/no-app] without a
+  // real Firebase.initializeApp() having run.
+  EmsTrackingTaskHandler({FirebaseFunctions? functions, @visibleForTesting bool firebaseReady = false})
+    : _functions = functions ?? FirebaseFunctions.instanceFor(region: functionsRegion), // coverage:ignore-line
+      // Not `this._firebaseReady` — an initializing formal takes the
+      // field's own (private) name, which a test in a different library
+      // could never pass by name at all.
+      // ignore: prefer_initializing_formals
+      _firebaseReady = firebaseReady;
 
+  final FirebaseFunctions _functions;
+  final Set<String> _trackedPatientIds = {};
+  bool _firebaseReady;
+
+  // Firebase.initializeApp is genuine isolate-bootstrap glue — same
+  // category TESTING.md already excludes main.dart's own call for
+  // (covered by e2e running the real isolate instead). Nothing to fake
+  // it with here either: unlike Firestore/Auth/Functions, there's no
+  // overridable seam for "is Firebase already initialized in this
+  // isolate" that a unit test could substitute a fake for — hence
+  // [firebaseReady] above, letting a test skip this method's body
+  // entirely rather than the method itself becoming untestable.
   Future<void> _ensureFirebase() async {
     if (_firebaseReady) return;
+    // coverage:ignore-start
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
     _firebaseReady = true;
+    // coverage:ignore-end
   }
 
   @override
@@ -79,10 +123,9 @@ class EmsTrackingTaskHandler extends TaskHandler {
     // status chip stays "live" (see EmsTrackingController._onTaskData).
     FlutterForegroundTask.sendDataToMain(emsFixReportSignal);
 
-    final functions = FirebaseFunctions.instanceFor(region: functionsRegion);
     for (final patientId in _trackedPatientIds.toList()) {
       try {
-        await functions.httpsCallable('publishEmsLocation').call<Object?>({
+        await _functions.httpsCallable('publishEmsLocation').call<Object?>({
           'patientId': patientId,
           'latitude': position.latitude,
           'longitude': position.longitude,

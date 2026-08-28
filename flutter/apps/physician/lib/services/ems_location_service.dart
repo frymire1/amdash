@@ -74,10 +74,29 @@ class EmsLocationController extends Notifier<EmsLocationState> {
 
   @override
   EmsLocationState build() {
+    // Deliberately not `fireImmediately: true` — a `state =` write made
+    // synchronously while this same build() call is still executing is
+    // always overwritten by whatever build() itself returns (confirmed
+    // empirically: a Notifier's build() return value is unconditionally
+    // its new state, regardless of any interim `state =` assignment made
+    // during that same call). That's harmless for the has-organization
+    // branch below (its reset-to-empty write just duplicates build()'s
+    // own default return), but it silently swallowed the no-organization
+    // branch's `hasLoadedOnce: true` — a real, confirmed bug: a signed-in
+    // user with no organizationId (already resolved, e.g. after
+    // navigating back to a screen that watches this provider) would get
+    // stuck reporting EmsTrackingStatus.loading forever, never the
+    // documented-as-intentional "no org, nothing to show" answer. Fixed
+    // by having build() itself synchronously compute and *return* the
+    // correct starting state via _rebuild below, instead of relying on a
+    // fireImmediately callback to assign it after the fact; ref.listen
+    // here (without fireImmediately) then only ever fires for genuine
+    // *later* changes, safely outside build(), where `state =` (via
+    // _resubscribe) behaves normally — same as _onSnapshot/_recompute's
+    // own writes always have.
     ref.listen<AsyncValue<UserProfile?>>(
       userProfileProvider,
       (previous, next) => _resubscribe(next.valueOrNull?.organizationId),
-      fireImmediately: true,
     );
 
     ref.onDispose(() {
@@ -85,21 +104,27 @@ class EmsLocationController extends Notifier<EmsLocationState> {
       _staleTimer?.cancel();
     });
 
-    return const EmsLocationState();
+    return _rebuild(ref.read(userProfileProvider).valueOrNull?.organizationId);
   }
 
   void _resubscribe(String? organizationId) {
+    state = _rebuild(organizationId);
+  }
+
+  // Cancels any previous subscription/timer, resets the carried-forward
+  // fix map, and returns the correct EmsLocationState for [organizationId]
+  // — used both for the very first, synchronous subscribe (via build()'s
+  // own return value) and every later resubscribe (via _resubscribe
+  // assigning the result to `state`).
+  EmsLocationState _rebuild(String? organizationId) {
     _subscription?.cancel();
     _staleTimer?.cancel();
     _latest = {};
 
     if (organizationId == null) {
       // No org to query — that *is* the answer, not still-loading.
-      state = const EmsLocationState(hasLoadedOnce: true);
-      return;
+      return const EmsLocationState(hasLoadedOnce: true);
     }
-
-    state = const EmsLocationState();
 
     // A collection group query — patients/{patientId}/location/current is
     // a subcollection, not its own top-level collection (see
@@ -118,7 +143,13 @@ class EmsLocationController extends Notifier<EmsLocationState> {
     // nothing this controller could usefully do to recover on its own;
     // the tracking chip just silently stays at whatever it last knew,
     // same failure mode as a transient network drop.
-    _subscription = FirebaseFirestore.instance
+    //
+    // ref.read, not ref.watch, even in the build()-called case above —
+    // firestoreProvider is a static DI seam (see firebase_providers.dart)
+    // that only ever changes via an explicit test override, never at
+    // runtime, so there's nothing to reactively re-subscribe to.
+    _subscription = ref
+        .read(firestoreProvider)
         .collectionGroup('location')
         .where('organizationId', isEqualTo: organizationId)
         .where('active', isEqualTo: true)
@@ -126,6 +157,7 @@ class EmsLocationController extends Notifier<EmsLocationState> {
         .listen(_onSnapshot, onError: (_) {});
 
     _staleTimer = Timer.periodic(const Duration(seconds: 5), (_) => _recompute());
+    return const EmsLocationState();
   }
 
   void _onSnapshot(QuerySnapshot<Map<String, Object?>> snapshot) {

@@ -21,7 +21,12 @@ import 'widgets/nav_bar.dart';
 /// all — admin skips that entirely, unlike physician.
 const _adminOnlyPaths = {'/users', '/settings', '/audit-log'};
 
-String? _adminRedirect(Ref ref, GoRouterState state) {
+// Not private — a separate test file needs to reach this (Dart privacy is
+// library/file-scoped, so a leading underscore would make it permanently
+// untestable from admin/test/router_test.dart regardless of import). Purely
+// a testability seam; nothing outside this file's own appRouterProvider
+// calls it in practice.
+String? adminRedirect(Ref ref, GoRouterState state) {
   final authState = ref.read(authStateProvider);
   if (authState.isLoading) return null;
 
@@ -83,7 +88,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: '/login',
     refreshListenable: refreshNotifier,
-    redirect: (context, state) => _adminRedirect(ref, state),
+    redirect: (context, state) => adminRedirect(ref, state),
     routes: [
       GoRoute(
         path: '/login',

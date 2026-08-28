@@ -78,6 +78,14 @@ dev_dependencies:
   mocktail: ^1.0.4
   fake_cloud_firestore: ^4.1.0
   firebase_auth_mocks: ^0.15.2
+  # EMS-only: already transitive dependencies (via geolocator/
+  # flutter_foreground_task), pinned directly here since test code
+  # imports them directly — see TESTING.md for the
+  # MockPlatformInterfaceMixin pattern this enables (faking
+  # GeolocatorPlatform/FlutterForegroundTaskPlatform instead of the real
+  # platform channels, which don't exist in a plain `flutter test` run).
+  plugin_platform_interface: ^2.1.8
+  geolocator_platform_interface: ^4.2.8
 
 # Read by patrol_cli — package_name feeds the PATROL_APP_PACKAGE_NAME
 # dart-define and `patrol test`'s own instrumentation-component

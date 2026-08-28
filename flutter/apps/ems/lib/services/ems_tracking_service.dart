@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:amdash_core/amdash_core.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -75,14 +76,18 @@ class EmsTrackingController extends Notifier<Set<String>> {
 
   @override
   Set<String> build() {
-    _functions = FirebaseFunctions.instanceFor(region: functionsRegion);
+    _functions = ref.watch(firebaseFunctionsProvider);
     // Android's tracking isolate reports its fixes back here (see
     // emsFixReportSignal); harmless no-op on other platforms, which record
     // fixes directly in-isolate.
     FlutterForegroundTask.addTaskDataCallback(_onTaskData);
     ref.onDispose(() {
+      // _webTimers is only ever populated by _activate's kIsWeb branch
+      // (unreachable in a plain `flutter test` run — see that branch's
+      // own comment), so this loop body never actually runs here; kept
+      // as real disposal logic for the web build, not dead code.
       for (final timer in _webTimers.values) {
-        timer.cancel();
+        timer.cancel(); // coverage:ignore-line
       }
       _iosPositionSubscription?.cancel();
       FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
@@ -119,7 +124,13 @@ class EmsTrackingController extends Notifier<Set<String>> {
     if (kIsWeb) {
       // Browsers expose neither a services toggle nor a stable permission
       // query separate from a prompt, so only freshness is meaningful.
-      return _isFixFresh ? EmsTrackingHealth.online : EmsTrackingHealth.noSignal;
+      // kIsWeb is a hard compile-time constant — confirmed for real it's
+      // always `false` in a plain `flutter test` run (Dart VM, not a web
+      // build), so this branch is structurally unreachable from here;
+      // covered by EMS's web build under Chrome e2e instead (this app's
+      // web target exists for exactly that, not production use — see
+      // TESTING.md).
+      return _isFixFresh ? EmsTrackingHealth.online : EmsTrackingHealth.noSignal; // coverage:ignore-line
     }
     if (!await Geolocator.isLocationServiceEnabled()) return EmsTrackingHealth.locationOff;
     final permission = await Geolocator.checkPermission();
@@ -189,12 +200,17 @@ class EmsTrackingController extends Notifier<Set<String>> {
     final prefs = await _prefsInstance();
     await prefs.setString('$_storageKeyPrefix$patientId', '1');
 
+    // kIsWeb is always false in a plain `flutter test` run (see
+    // evaluateHealth's identical note) — this whole block is covered by
+    // EMS's web build under Chrome e2e instead.
+    // coverage:ignore-start
     if (kIsWeb) {
       _webTimers[patientId] = Timer.periodic(_updateInterval, (_) {
         _publishCurrentPosition(patientId).catchError((_) {});
       });
       return;
     }
+    // coverage:ignore-end
 
     if (_isIOS) {
       _ensureIOSPositionStream();
@@ -211,10 +227,13 @@ class EmsTrackingController extends Notifier<Set<String>> {
     final prefs = await _prefsInstance();
     await prefs.remove('$_storageKeyPrefix$patientId');
 
+    // See _activate's identical kIsWeb note just above.
+    // coverage:ignore-start
     if (kIsWeb) {
       _webTimers.remove(patientId)?.cancel();
       return;
     }
+    // coverage:ignore-end
 
     if (_isIOS) {
       if (state.isEmpty) {

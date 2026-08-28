@@ -179,14 +179,9 @@ jobs:
         working-directory: flutter
 
       # --coverage on all four so lcov.info is always produced/uploaded as
-      # an artifact-free build log signal, even for physician/ems/admin,
-      # which (as of this step's addition) only have placeholder tests and
-      # so get an *empty* lcov.info — real coverage collection starts the
-      # moment each app gets its first real test, without another workflow
-      # change. Only amdash_core is actually gated below (see TESTING.md's
-      # backfill roadmap for why the other three aren't yet: gating an
-      # empty lcov.info is either a no-op that looks like enforcement or an
-      # outright tool error, neither of which is honest).
+      # an artifact-free build log signal. All four are gated below now —
+      # ems/physician/admin gained real Stage B tests alongside
+      # amdash_core's own Stage A backfill (see TESTING.md's roadmap).
       - name: Run widget/unit tests
         run: |
           set -e
@@ -195,15 +190,38 @@ jobs:
           done
         working-directory: flutter
 
-      # See TESTING.md for the current threshold and the plan to ratchet
-      # it up (and add the other three packages here) as they gain real
-      # tests. min_coverage is a floor set to what's actually measured
-      # today, not a guess.
+      # See TESTING.md for the current thresholds and the plan to ratchet
+      # them up as more of each app's own widgets/screens get covered.
+      # min_coverage is a floor set to what's actually measured today, not
+      # a guess — ems/physician/admin's own numbers only reflect the
+      # files their tests actually load (Dart's coverage collector only
+      # instruments files reached via the test run's import graph), not
+      # each app's full lib/ tree, since none of their test suites import
+      # router.dart (the one file that would transitively pull every
+      # screen/widget in) — see TESTING.md's own note on this.
       - name: Enforce amdash_core coverage threshold
         uses: VeryGoodOpenSource/very_good_coverage@v3
         with:
           path: flutter/packages/amdash_core/coverage/lcov.info
           min_coverage: 24
+
+      - name: Enforce ems coverage threshold
+        uses: VeryGoodOpenSource/very_good_coverage@v3
+        with:
+          path: flutter/apps/ems/coverage/lcov.info
+          min_coverage: 95
+
+      - name: Enforce physician coverage threshold
+        uses: VeryGoodOpenSource/very_good_coverage@v3
+        with:
+          path: flutter/apps/physician/coverage/lcov.info
+          min_coverage: 100
+
+      - name: Enforce admin coverage threshold
+        uses: VeryGoodOpenSource/very_good_coverage@v3
+        with:
+          path: flutter/apps/admin/coverage/lcov.info
+          min_coverage: 12
 
   functions-build:
     name: Functions build (tsc)

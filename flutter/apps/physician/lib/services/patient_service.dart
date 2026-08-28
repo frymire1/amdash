@@ -1,5 +1,4 @@
 import 'package:amdash_core/amdash_core.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// Mirrors `apps/physician/src/app/services/patient.service.ts`:
@@ -30,7 +29,8 @@ final _rawPhysicianPatientsProvider = StreamProvider<List<Patient>>((ref) async*
     return;
   }
 
-  final query = FirebaseFirestore.instance
+  final query = ref
+      .watch(firestoreProvider)
       .collection('patients')
       .where('organizationId', isEqualTo: organizationId)
       .where('status', isEqualTo: 'active')

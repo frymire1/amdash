@@ -1,12 +1,10 @@
 import 'dart:async';
 
+import 'package:amdash_core/amdash_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-/// Must match REGION in functions/src/shared.ts.
-const _functionsRegion = 'northamerica-northeast2';
 
 /// Raw values straight off the upload form — mirrors the shape
 /// `patientForm.getRawValue()` produces in
@@ -342,8 +340,8 @@ class PatientSaveException implements Exception {
 
 final patientUploadServiceProvider = Provider<PatientUploadService>((ref) {
   return PatientUploadService(
-    FirebaseFirestore.instance,
-    FirebaseFunctions.instanceFor(region: _functionsRegion),
-    FirebaseAuth.instance,
+    ref.watch(firestoreProvider),
+    ref.watch(firebaseFunctionsProvider),
+    ref.watch(firebaseAuthProvider),
   );
 });
