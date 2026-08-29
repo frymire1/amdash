@@ -131,21 +131,35 @@ describe('checkAccountStatus', () => {
 });
 
 describe('setInitialPassword', () => {
-  it('throws invalid-argument for a missing email, missing password, or too-short password', async () => {
+  it('throws invalid-argument for a missing email or missing password', async () => {
     await expect(
-      setInitialPassword.run(fakeCallableRequest({ email: '', password: 'longenough' })),
+      setInitialPassword.run(fakeCallableRequest({ email: '', password: 'Longenough1!' })),
     ).rejects.toThrow();
     await expect(setInitialPassword.run(fakeCallableRequest({ email: 'a@example.com', password: '' }))).rejects.toThrow();
+  });
+
+  // Mirrors login_screen.dart's own 4 client-side checklist items — the
+  // client-side checklist is only a UX guide, not the actual enforcement
+  // boundary, since this is a public, unauthenticated callable a request
+  // could reach directly, bypassing the Flutter UI (and its checklist)
+  // entirely.
+  it.each([
+    ['too short overall', 'Short1!'],
+    ['no uppercase letter', 'longenough1!'],
+    ['no number', 'Longenough!'],
+    ['no special character', 'Longenough1'],
+  ])('rejects a password that does not meet the complexity requirements: %s', async (_label, password) => {
     await expect(
-      setInitialPassword.run(fakeCallableRequest({ email: 'a@example.com', password: 'abc' })),
-    ).rejects.toThrow('at least 6 characters');
+      setInitialPassword.run(fakeCallableRequest({ email: 'a@example.com', password })),
+    ).rejects.toThrow('at least 8 characters');
+    expect(mockUpdateUser).not.toHaveBeenCalled();
   });
 
   it('refuses an account that already has a password — this is a first-password-only flow', async () => {
     mockGetUserByEmail.mockResolvedValue({ uid: 'uid-1', providerData: [{ providerId: 'password' }] });
 
     await expect(
-      setInitialPassword.run(fakeCallableRequest({ email: 'a@example.com', password: 'longenough' })),
+      setInitialPassword.run(fakeCallableRequest({ email: 'a@example.com', password: 'Longenough1!' })),
     ).rejects.toThrow('This account already has a password.');
     expect(mockUpdateUser).not.toHaveBeenCalled();
   });
@@ -154,10 +168,10 @@ describe('setInitialPassword', () => {
     mockGetUserByEmail.mockResolvedValue({ uid: 'uid-1', email: 'a@example.com', providerData: [] });
 
     const result = await setInitialPassword.run(
-      fakeCallableRequest({ email: 'a@example.com', password: 'longenough' }),
+      fakeCallableRequest({ email: 'a@example.com', password: 'Longenough1!' }),
     );
 
-    expect(mockUpdateUser).toHaveBeenCalledWith('uid-1', { password: 'longenough' });
+    expect(mockUpdateUser).toHaveBeenCalledWith('uid-1', { password: 'Longenough1!' });
     expect(result).toEqual({ email: 'a@example.com' });
   });
 });
@@ -194,6 +208,23 @@ describe('requestPasswordReset', () => {
     expect(mockSendPasswordResetEmail).toHaveBeenCalledWith(
       expect.objectContaining({ firstName: 'Jordan' }),
     );
+  });
+
+  // Regression test for a real account-enumeration gap: this used to call
+  // findUserByEmail, which throws a distinguishing 'not-found' error for an
+  // unregistered address — letting anyone tell which emails have accounts
+  // just by watching whether "Forgot password?" succeeds or fails. It must
+  // now return the exact same generic response either way, and do no
+  // actual work (no link minted, no email sent) for an address with no
+  // account.
+  it('a non-existent account gets the same generic response, silently, with no email sent', async () => {
+    mockGetUserByEmail.mockRejectedValue(new Error('no user'));
+
+    const result = await requestPasswordReset.run(fakeCallableRequest({ email: 'nobody@example.com' }));
+
+    expect(result).toEqual({ email: 'nobody@example.com' });
+    expect(mockGeneratePasswordResetLink).not.toHaveBeenCalled();
+    expect(mockSendPasswordResetEmail).not.toHaveBeenCalled();
   });
 });
 

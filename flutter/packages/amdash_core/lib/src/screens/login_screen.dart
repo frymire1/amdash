@@ -16,6 +16,14 @@ import '../theme/app_theme.dart';
 /// can never have an enrolled factor yet, so that step never sees this).
 enum _LoginStep { email, notActivated, setPassword, signIn, mfaChallenge }
 
+// Deliberately permissive (not a full RFC 5322 pattern, which routinely
+// rejects real addresses) — just enough to catch obviously-malformed input
+// (no @, no domain, stray whitespace) before it reaches
+// checkAccountStatus/requestPasswordReset. The server is still the actual
+// authority on whether an address is real; this is a UX guard, not a
+// security boundary.
+final _emailPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+
 /// Shared across every app (mirrors `libs/auth`'s NX-shared `LoginComponent`)
 /// — [appName] is the only per-app customization (e.g. `'AmDash — EMS'`).
 class LoginScreen extends ConsumerStatefulWidget {
@@ -73,6 +81,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _submitEmail() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) return;
+    if (!_emailPattern.hasMatch(email)) {
+      setState(() => _errorMessage = 'Enter a valid email address.');
+      return;
+    }
 
     setState(() {
       _submitting = true;

@@ -61,6 +61,23 @@ export const checkAccountStatus = onCall<CheckAccountStatusRequest>({ region: RE
   }
 });
 
+// Mirrors login_screen.dart's own _hasMinLength/_hasUppercase/_hasNumber/
+// _hasSpecialChar checks exactly — that client-side checklist is only a UX
+// guide, not an actual enforcement boundary, since setInitialPassword is a
+// public, unauthenticated callable: anything bypassing the Flutter UI
+// entirely (a direct HTTP call) could otherwise set an arbitrarily weak
+// password. Keep both in sync if either changes.
+const PASSWORD_MIN_LENGTH = 8;
+
+function passwordMeetsComplexityRequirements(password: string): boolean {
+  return (
+    password.length >= PASSWORD_MIN_LENGTH &&
+    /[A-Z]/.test(password) &&
+    /[0-9]/.test(password) &&
+    /[^A-Za-z0-9]/.test(password)
+  );
+}
+
 // Deliberately callable without being signed in — the whole point is to let
 // someone set their FIRST password before they've ever authenticated. This
 // is safe only because of the check below: it flatly refuses to touch any
@@ -70,8 +87,12 @@ export const checkAccountStatus = onCall<CheckAccountStatusRequest>({ region: RE
 // same as if this function didn't exist.
 export const setInitialPassword = onCall<SetInitialPasswordRequest>({ region: REGION }, async (request) => {
   const { email, password } = request.data;
-  if (!email || !password || password.length < 6) {
-    throw new HttpsError('invalid-argument', 'A valid email and a password of at least 6 characters are required.');
+  if (!email || !password || !passwordMeetsComplexityRequirements(password)) {
+    throw new HttpsError(
+      'invalid-argument',
+      'A valid email and a password of at least 8 characters, including an uppercase letter, a number, and a ' +
+        'special character, are required.'
+    );
   }
 
   const user = await findUserByEmail(email);
@@ -105,6 +126,17 @@ async function firstNameFor(uid: string): Promise<string> {
 // on us, via the same Resend setup the welcome email uses. No
 // actionCodeSettings passed — the link still lands on Firebase's own
 // hosted reset-password page, unchanged from today's behavior.
+//
+// Deliberately does NOT use findUserByEmail — that helper throws a
+// distinguishing 'not-found' error for an unregistered address, which is
+// exactly right for checkAccountStatus's own email-first login flow (the
+// whole point there is telling the client whether an account exists) but
+// wrong here: "Forgot password?" throwing a different result for a real
+// vs. fake email is a textbook account-enumeration side channel, and one a
+// visitor doesn't already need to trigger the way they do for
+// checkAccountStatus. Always returns the same generic { email } response
+// either way — a real account gets its email exactly as before; a
+// non-existent one silently no-ops.
 export const requestPasswordReset = onCall<CheckAccountStatusRequest>(
   { region: REGION, secrets: [RESEND_API_KEY] },
   async (request) => {
@@ -113,7 +145,13 @@ export const requestPasswordReset = onCall<CheckAccountStatusRequest>(
       throw new HttpsError('invalid-argument', 'A valid email is required.');
     }
 
-    const user = await findUserByEmail(email);
+    let user;
+    try {
+      user = await getAuth().getUserByEmail(email);
+    } catch {
+      return { email };
+    }
+
     const firstName = await firstNameFor(user.uid);
     const resetUrl = await getAuth().generatePasswordResetLink(email);
     await sendPasswordResetEmail({ email, firstName, resetUrl });

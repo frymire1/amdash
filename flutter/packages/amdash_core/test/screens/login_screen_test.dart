@@ -90,6 +90,14 @@ void main() {
       verifyNever(() => authService.checkAccountStatus(any()));
     });
 
+    testWidgets('a malformed email shows a validation error and never calls checkAccountStatus', (tester) async {
+      await goToEmailStep(tester);
+      await submitEmail(tester, 'not-an-email');
+
+      expect(find.text('Enter a valid email address.'), findsOneWidget);
+      verifyNever(() => authService.checkAccountStatus(any()));
+    });
+
     testWidgets('submitting via the keyboard (onSubmitted) works the same as tapping Continue', (tester) async {
       when(
         () => authService.checkAccountStatus('jordan@example.com'),
