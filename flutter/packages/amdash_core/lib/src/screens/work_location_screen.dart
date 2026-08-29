@@ -29,13 +29,21 @@ class _WorkLocationScreenState extends ConsumerState<WorkLocationScreen> {
     setState(() => _touched = true);
     if (!hospitalNames.contains(_typedValue)) return;
 
+    // Checked before entering the loading state, not after — this route is
+    // only reachable once already signed in (AppRouteGuard's
+    // requireWorkLocation), so a null uid here shouldn't happen in
+    // practice, but checking first avoids a real latent bug either way:
+    // setting _submitting=true and then returning early (as this used to,
+    // before the uid check) skips the try/finally that would ever reset
+    // it, permanently disabling the button behind a spinner with no error
+    // shown and no way to retry.
+    final uid = ref.read(authServiceProvider).currentUser?.uid;
+    if (uid == null) return;
+
     setState(() {
       _submitting = true;
       _errorMessage = null;
     });
-
-    final uid = ref.read(authServiceProvider).currentUser?.uid;
-    if (uid == null) return;
 
     try {
       // Firestore never rejects a write blocked by a dropped connection —

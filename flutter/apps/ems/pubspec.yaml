@@ -86,6 +86,13 @@ dev_dependencies:
   # platform channels, which don't exist in a plain `flutter test` run).
   plugin_platform_interface: ^2.1.8
   geolocator_platform_interface: ^4.2.8
+  # Widget-testing only (Stage C1) — already a transitive dependency (via
+  # amdash_core), pinned directly here since flutter_test_config.dart
+  # imports it directly for the GoogleFonts.allowRuntimeFetching guard
+  # (see TESTING.md). go_router is already a regular dependency above, so
+  # test/support/pump_app.dart can import it directly without any change
+  # here.
+  google_fonts: ^6.2.1
 
 # Read by patrol_cli — package_name feeds the PATROL_APP_PACKAGE_NAME
 # dart-define and `patrol test`'s own instrumentation-component

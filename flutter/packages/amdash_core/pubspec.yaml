@@ -30,6 +30,15 @@ dependencies:
   # Matches physician's own pin — for AuthService's post-sign-out reload
   # (see reload_page_web.dart).
   web: ^1.1.0
+  # idle_timeout_wrapper.dart's clock.now() indirection — already a
+  # transitive dependency (fake_async pulls it in), pinned directly here
+  # since it's now imported by real lib/ code, not just tests. DateTime.now()
+  # itself can't be intercepted via Zone (confirmed empirically — a
+  # tester.pump(Duration(minutes: 15)) never moves it), so there's no way to
+  # deterministically test the 15-minute-idle-timeout branch without this
+  # seam; production behavior is unchanged (the unoverridden `clock` global
+  # just calls real DateTime.now()).
+  clock: ^1.1.2
 
 dev_dependencies:
   flutter_test:
@@ -45,6 +54,11 @@ dev_dependencies:
   mocktail: ^1.0.4
   fake_cloud_firestore: ^4.1.0
   firebase_auth_mocks: ^0.15.2
+  # Widget-testing only (Stage C1) — both already transitive dependencies
+  # (via url_launcher), pinned directly here since test code imports them
+  # directly for the MockPlatformInterfaceMixin pattern (see TESTING.md).
+  plugin_platform_interface: ^2.1.8
+  url_launcher_platform_interface: ^2.3.2
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

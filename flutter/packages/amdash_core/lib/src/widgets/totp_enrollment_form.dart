@@ -195,10 +195,18 @@ class _TotpEnrollmentFormState extends ConsumerState<TotpEnrollmentForm> {
               : const Text('Confirm'),
         ),
         TextButton(
-          onPressed: () => setState(() {
-            _secret = null;
-            _qrCodeUrl = null;
-          }),
+          onPressed: () {
+            // Clears the stale secret/QR (so `build` immediately falls
+            // back to the loading branch, not a frozen old code) and
+            // actually re-fetches — without calling _begin() here, this
+            // button did nothing but blank the screen down to a bare "Try
+            // again" prompt, silently failing to honor its own label.
+            setState(() {
+              _secret = null;
+              _qrCodeUrl = null;
+            });
+            _begin();
+          },
           child: const Text('Generate a new code'),
         ),
       ],

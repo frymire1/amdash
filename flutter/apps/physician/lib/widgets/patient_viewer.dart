@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:amdash_core/amdash_core.dart';
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -45,7 +46,7 @@ const _routeWidth = 6;
 /// and kicking off a Directions fetch, are genuine reactions to a *change*
 /// and stay as `ref.listen`-driven imperative side effects.
 class PatientViewer extends ConsumerStatefulWidget {
-  const PatientViewer({required this.patient, this.leading, super.key});
+  const PatientViewer({required this.patient, this.leading, this.directionsService, super.key});
 
   final Patient? patient;
 
@@ -55,12 +56,24 @@ class PatientViewer extends ConsumerStatefulWidget {
   /// "Patient List" button without overlapping the name.
   final Widget? leading;
 
+  /// Optional testability seam, mirroring [DirectionsService]'s own
+  /// `FirebaseFunctions?` constructor param — the real call site never
+  /// passes this (always defaults to a real `DirectionsService()`).
+  /// Without it, a widget test has no way to reach
+  /// `_maybeRequestDirections`'s success path at all: `DirectionsService()`
+  /// itself constructs a real `FirebaseFunctions.instanceFor(...)`, which
+  /// throws `[core/no-app]` the instant this widget mounts unless a real
+  /// `Firebase.initializeApp()` has run (confirmed by `DirectionsService`'s
+  /// own doc comment) — every `PatientViewer` test, not just directions-
+  /// specific ones, needs this seam to construct the widget at all.
+  final DirectionsService? directionsService;
+
   @override
   ConsumerState<PatientViewer> createState() => _PatientViewerState();
 }
 
 class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProviderStateMixin {
-  final DirectionsService _directionsService = DirectionsService();
+  late final DirectionsService _directionsService = widget.directionsService ?? DirectionsService();
 
   GoogleMapController? _mapController;
   Ticker? _ticker;
@@ -121,7 +134,7 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
     final durationMs = location.updatedAtMs - startMs;
 
     _ticker = createTicker((_) {
-      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      final nowMs = clock.now().millisecondsSinceEpoch;
       final t = ((nowMs - startMs) / durationMs).clamp(0.0, 1.0);
       final lerped = LatLng(startLat + (endLat - startLat) * t, startLng + (endLng - startLng) * t);
       setState(() => _tickerPosition = lerped);
@@ -139,7 +152,7 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
     final cacheNotifier = ref.read(directionsCacheProvider.notifier);
     final existing = cacheNotifier.entryFor(patientId);
 
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final nowMs = clock.now().millisecondsSinceEpoch;
     final dueByTime = existing == null || nowMs - existing.requestedAtMs >= _directionsRefreshMs;
     final dueByDistance = existing == null ||
         distanceMeters(

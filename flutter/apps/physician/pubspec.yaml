@@ -37,6 +37,15 @@ dependencies:
 
   amdash_core:
     path: ../../packages/amdash_core
+  # patient_viewer.dart's clock.now() indirection — already a transitive
+  # dependency (fake_async pulls it in), pinned directly here since it's
+  # imported by real lib/ code now, not just tests. DateTime.now() itself
+  # can't be intercepted via Zone (same finding as amdash_core's
+  # idle_timeout_wrapper.dart), so there'd be no seam-free way to
+  # deterministically test the glide-animation ticker or the directions-
+  # refresh throttle without this; production behavior is unchanged (the
+  # unoverridden `clock` global just calls real DateTime.now()).
+  clock: ^1.1.2
   firebase_core: ^4.1.1
   firebase_auth: ^6.1.1
   cloud_firestore: ^6.0.3
@@ -85,6 +94,17 @@ dev_dependencies:
   mocktail: ^1.0.4
   fake_cloud_firestore: ^4.1.0
   firebase_auth_mocks: ^0.15.2
+  # Widget-testing only (Stage C1, patient_viewer.dart) — both already
+  # transitive dependencies (via google_maps_flutter), pinned directly here
+  # since test code imports them directly for the MockPlatformInterfaceMixin
+  # pattern (see TESTING.md).
+  google_maps_flutter_platform_interface: ^2.16.0
+  plugin_platform_interface: ^2.1.8
+  # Widget-testing only (Stage C1) — already a transitive dependency (via
+  # amdash_core), pinned directly here since flutter_test_config.dart
+  # imports it directly for the GoogleFonts.allowRuntimeFetching guard
+  # (see TESTING.md).
+  google_fonts: ^6.2.1
 
 # Read by patrol_cli — package_name feeds the PATROL_APP_PACKAGE_NAME
 # dart-define and `patrol test`'s own instrumentation-component

@@ -60,48 +60,80 @@ Future<String?> showReauthPasswordDialog(
   String title = 'Confirm your password',
   String message = 'For your security, please re-enter your password to continue.',
 }) {
-  final controller = TextEditingController();
-  var obscure = true;
   return showDialog<String>(
     context: context,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setState) => AlertDialog(
-        title: Text(title),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(message),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              obscureText: obscure,
-              decoration: InputDecoration(
-                labelText: 'Password',
-                suffixIcon: IconButton(
-                  icon: Icon(obscure ? Icons.visibility_off : Icons.visibility),
-                  onPressed: () => setState(() => obscure = !obscure),
-                ),
+    builder: (context) => _ReauthPasswordDialog(title: title, message: message),
+  );
+}
+
+// A real StatefulWidget (not a closure-scoped TextEditingController manually
+// disposed via showDialog's own .whenComplete, which this used to be) —
+// confirmed for real via a widget test that the old shape disposed the
+// controller the instant Navigator.pop() resolves the returned Future,
+// which is *before* the dialog's own exit transition finishes animating
+// (the route is merely "popped", not yet removed from the tree) — the
+// still-animating TextField then throws "A TextEditingController was used
+// after being disposed" on the very next frame. A State's own dispose()
+// only runs once its element is actually removed from the tree, i.e. after
+// the exit transition completes, which is what this needs.
+class _ReauthPasswordDialog extends StatefulWidget {
+  const _ReauthPasswordDialog({required this.title, required this.message});
+
+  final String title;
+  final String message;
+
+  @override
+  State<_ReauthPasswordDialog> createState() => _ReauthPasswordDialogState();
+}
+
+class _ReauthPasswordDialogState extends State<_ReauthPasswordDialog> {
+  final _controller = TextEditingController();
+  var _obscure = true;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(widget.message),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            obscureText: _obscure,
+            decoration: InputDecoration(
+              labelText: 'Password',
+              suffixIcon: IconButton(
+                icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
+                onPressed: () => setState(() => _obscure = !_obscure),
               ),
-              onSubmitted: (value) => value.isEmpty ? null : Navigator.of(context).pop(value),
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final value = controller.text;
-              if (value.isNotEmpty) Navigator.of(context).pop(value);
-            },
-            child: const Text('Continue'),
+            onSubmitted: (value) => value.isEmpty ? null : Navigator.of(context).pop(value),
           ),
         ],
       ),
-    ),
-  ).whenComplete(controller.dispose);
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final value = _controller.text;
+            if (value.isNotEmpty) Navigator.of(context).pop(value);
+          },
+          child: const Text('Continue'),
+        ),
+      ],
+    );
+  }
 }

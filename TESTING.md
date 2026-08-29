@@ -142,7 +142,173 @@ any of them, matching this repo's existing no-build_runner convention):
   constructor's own declaration line — confirmed via `const
   FhirExportResult(...)` in a test leaving that line at `DA:...,0`
   despite being "constructed." Drop the `const` in the test call if the
-  constructor's own line needs to show as covered.
+  constructor's own line needs to show as covered. **This generalizes to
+  every `const` widget constructor, confirmed via a direct A/B across
+  Stage C1's own suite**: a widget constructed *only* via `const`
+  everywhere in the codebase never shows its constructor line as hit, no
+  matter how many real widget tests pump and assert against it; a widget
+  with even one non-const call site (often just because a constructor
+  arg happens to be a runtime variable, not a literal) does. Not worth
+  chasing — don't drop a `const` purely to flip an lcov line; see
+  `TESTING.md`'s own coverage-table note for the aggregate-percentage
+  impact instead.
+- **The widget-test harness** (`test/support/pump_app.dart` in
+  `amdash_core`/`ems`/`physician` — each package/app needs its own copy;
+  a `test/` directory isn't part of a package's public `lib/`, so it
+  can't be imported cross-package even within this monorepo): `pumpApp(tester,
+  child, {overrides, brightness, routes, initialLocation})` wraps `child`
+  in `ProviderScope(overrides: ...)` + either a plain `MaterialApp(theme:
+  ..., home: Scaffold(body: child))` (no `routes` given) or
+  `MaterialApp.router(...)` with a real minimal `GoRouter` (only needed
+  for widgets calling `context.go`/`.push`/`.pop` — `context.go` resolves
+  `GoRouter.of(context)` off the tree, no seam to fake it). `routes`'
+  hardcoded `'/'` route renders a keyed sentinel (`pumpAppHomeKey`) so a
+  test can assert "navigation reached home" via `find.byKey` — mount the
+  widget under test at some *other* path via `initialLocation` when it
+  itself needs real routing, not at `'/'`. `Scaffold(body: child)` is
+  required even in the no-`routes` branch — a bare `MaterialApp(home:
+  child)` has no `Material` ancestor, which throws for anything using an
+  `InkWell`/`IconButton`/etc. (confirmed via a real failure testing
+  `PatientInfoChip`'s trend-icon button). Provider-override convention:
+  override the *specific* provider(s) a widget directly watches/reads via
+  `ProviderScope(overrides: [...])`, same as the service-level convention
+  above, not by rebuilding a fake Firestore/Auth graph underneath — for a
+  `Notifier`-backed provider that a test needs to mutate *after* mounting
+  (to trigger a `ref.listen`-driven side effect, which only fires on a
+  genuine state *change*, not the initial value), define a small fake
+  `Notifier` subclass overriding `build()` to return the seeded initial
+  state, with a public method exposing `state = ...` for the test to call
+  later (see `_FakeEmsLocationController` in `patient_viewer_test.dart`).
+- **`GoogleFonts.config.allowRuntimeFetching = false`** (in each
+  package/app's own `test/flutter_test_config.dart`, Flutter's
+  auto-discovered suite-wide setup hook) is required before any widget
+  test that renders the real theme (`buildLightTheme()`/`buildDarkTheme()`
+  call `GoogleFonts.outfit(...)`) — otherwise that's a real network call
+  inside `flutter test`. Confirmed via a throwaway probe test that this
+  setting alone is sufficient (no bundled font asset needed) —
+  `tester.takeException()` stayed `null` pumping the real theme with it
+  set.
+- **Never `pumpAndSettle()` while anything on screen has a genuinely
+  perpetual ticker** — an indeterminate `CircularProgressIndicator`
+  (`AnimationController(...)..repeat()` under the hood, same as any
+  other "pulsing"/"spinning" widget) never stops scheduling frames on its
+  own, so `pumpAndSettle()` loops until its own timeout regardless of
+  whether the *visible* state has actually stabilized. This bit multiple
+  files this stage (`mfa_security_card.dart`'s reauth flow,
+  `nav_bar.dart`'s logout, `mfa_setup_screen.dart`'s resend/check
+  spinners, `totp_enrollment_form.dart`'s confirm spinner,
+  `work_location_screen.dart`'s save spinner, `patient_viewer.dart`'s
+  loading-blur overlay) — the fix is always the same: bounded
+  `tester.pump(duration)` calls instead, and if the test specifically
+  needs to *observe* the loading state (not just survive it), hold the
+  mocked async call open with a `Completer` rather than racing an
+  instantly-resolving mock against a single `pump()`.
+- **`find.byType(X)` searches the *whole* tree, not just the widget under
+  test** — confirmed via a real failure that every `MaterialApp` (even
+  wrapping a plain `home:` route) mounts Flutter's own
+  `Navigator`/`_ModalScope` machinery, which includes its own
+  `AnimatedBuilder` (over a `restorationScopeId` `ValueNotifier`,
+  unrelated to whatever the widget under test animates). An unscoped
+  `find.byType(AnimatedBuilder)` always finds that ambient one too; scope
+  with `find.descendant(of: find.byType(WidgetUnderTest), matching:
+  find.byType(AnimatedBuilder))` instead.
+- **`mocktail`'s `.thenThrow(x)` makes the mocked method throw
+  *synchronously* when called — `.thenAnswer((_) async => throw x)`
+  rejects the returned Future *asynchronously* instead, matching what a
+  real `async`-bodied method actually does.** These are not
+  interchangeable for a method invoked directly (unawaited) from
+  `initState()`: a real async method's implementation can never throw
+  synchronously (Dart wraps even a throw-before-the-first-`await` into
+  the returned Future), so its rejection always surfaces via a
+  microtask, safely after the widget's synchronous build/mount phase has
+  already unwound. `.thenThrow` skips that — the synchronous throw
+  reaches code like `showDialog(...)` while the element is still
+  mid-mount, throwing "dependOnInheritedWidgetOfExactType... called
+  before initState() completed" (confirmed via a real failure in
+  `totp_enrollment_form_test.dart`). Use `.thenThrow` freely for a
+  method invoked from a button tap or other post-mount event handler
+  (timing-safe either way); use `.thenAnswer((_) async => throw x)` for
+  anything reachable from `initState()`.
+- **`GoogleMapsFlutterPlatform`** (from `google_maps_flutter_platform_interface`,
+  physician's `test/support/mock_google_maps.dart`) follows the same
+  `PlatformInterface`/`MockPlatformInterfaceMixin` pattern as
+  `GeolocatorPlatform`/`UrlLauncherPlatform` — confirmed via source that
+  `GoogleMap` calls `GoogleMapsFlutterPlatform.instance.buildViewWithConfiguration(...)`
+  to render itself. `installMockGoogleMaps()` stubs just that call (→ a
+  keyed placeholder widget), sufficient for most tests since
+  `_mapController?.foo(...)` is null-safe everywhere real code uses it.
+  A test that specifically needs a *connected* `GoogleMapController`
+  (e.g. to reach `onMapCreated`'s own body, or to verify an
+  `animateCamera`/`animateCameraWithConfiguration` call) needs
+  `connectGoogleMap(tester, mock)` too — confirmed via a throwaway probe
+  that nothing fires `onMapCreated` on its own against a mocked platform
+  (unlike a real device, where the native view delivers it
+  asynchronously); `connectGoogleMap` captures the platform's own
+  `onPlatformViewCreated` callback and invokes it manually, after first
+  stubbing all 11 event streams and 9 `update*()`/`animateCamera*()`
+  calls `GoogleMapController.init()`/`._connectStreams()` unconditionally
+  touch on connect (confirmed via `controller.dart` source — an
+  unstubbed `Mock`'s `null` default blows up against each one's
+  non-nullable `Stream`/`Future` return type). Note
+  `GoogleMapController.animateCamera(...)` itself calls
+  `animateCameraWithConfiguration`, not `animateCamera`, on the platform
+  instance — confirmed via a real failure stubbing only the latter.
+- **`DateTime.now()` cannot be intercepted via `Zone`, at all** —
+  confirmed via a throwaway probe test that advancing
+  `flutter_test`'s own fake `Timer`/frame clock via `tester.pump(Duration(...))`
+  never moves it (unlike `Timer`/`Future.delayed`, which *are*
+  Zone-mediated). Any logic gated on real elapsed time — `idle_timeout_wrapper.dart`'s
+  15-minute idle check, `patient_viewer.dart`'s glide-animation ticker
+  and directions-refresh throttle — is otherwise untestable without
+  either waiting out real wall-clock time (never do this) or racing the
+  test's own execution speed against real timestamps (flaky). The fix
+  used throughout this stage: route the call through `package:clock`'s
+  `clock.now()` instead (already a transitive dependency via
+  `fake_async`, pinned directly once real `lib/` code imports it
+  directly) — the unoverridden `clock` global just calls real
+  `DateTime.now()`, so this changes nothing about production behavior —
+  then drive it deterministically in tests via `withClock(Clock(() =>
+  currentFakeTime), () async { ... })`, mutating `currentFakeTime`
+  between `tester.pump(...)` calls as needed. `Clock.fixed(dateTime)` is
+  enough for tests that only need one fixed "now"; a mutable closure is
+  needed for anything that reads the clock more than once across a
+  test's own timeline (e.g. simulating a glide animation's own
+  in-progress state).
+- **A widget deep in a long `SingleChildScrollView` can sit below the
+  default 800×600 test viewport's fold** — `tester.tap(...)`/
+  `tester.ensureVisible(...)` both silently compute an offset outside the
+  actual render tree in that case (a `warnIfMissed` warning, not a hard
+  failure, so it's easy to miss); always `await
+  tester.ensureVisible(finder)` immediately before tapping anything that
+  might not be the first field on a long form (`patient_upload_screen.dart`'s
+  submit button, `mfa_setup_screen.dart`'s Confirm button,
+  `patient_viewer.dart`'s Expand-map button all needed this).
+- **fl_chart's `LineTouchData` needs a touch landing within
+  `touchSpotThreshold` (default `10`) of an actual data point, in the
+  chart's own x-axis *data* units — not pixels, and not "anywhere in the
+  plot area."** `vitals_trend_dialog.dart` uses elapsed milliseconds as
+  its x-axis unit; tapping the chart's visual center missed both test
+  data points by ~30 minutes (a threshold of 10ms against an hour-wide
+  span). Tap near an actual data point's rendered position instead (e.g.
+  the plot area's own left edge for the first entry) — and account for
+  `leftTitles`' own `reservedSize` eating into the widget's bounding
+  rect before the actual plot area starts. A held gesture
+  (`tester.startGesture` + a short `pump` + `.up()`) reached fl_chart's
+  touch handling reliably; a bare `tester.tapAt(...)` did not, in this
+  version.
+- **A widget's field initializer that constructs a real SDK object
+  directly (not through a Riverpod provider) has no override seam at
+  all** — `PatientViewer`'s own `final DirectionsService _directionsService
+  = DirectionsService();` meant *every* `PatientViewer` widget test, not
+  just directions-specific ones, would crash on mount (`DirectionsService()`'s
+  default constructor eagerly builds a real `FirebaseFunctions.instanceFor(...)`,
+  which throws `[core/no-app]` without a live Firebase app — see the
+  Firebase-SDK-preconditions note above). Fixed by adding an optional
+  constructor parameter (`PatientViewer({..., this.directionsService})`)
+  used as `widget.directionsService ?? DirectionsService()` — the real
+  call sites never pass it (unchanged production behavior), but a test
+  now can. The same pattern `DirectionsService`'s own constructor already
+  used for `FirebaseFunctions?`, just one layer up at the widget level.
 - **`MockPlatformInterfaceMixin`** (from `plugin_platform_interface`,
   already a transitive dependency of `geolocator`/`flutter_foreground_task`,
   pinned directly in `ems/pubspec.yaml` since test code imports it
@@ -303,36 +469,35 @@ this repo grouped by caller, which produced a confusingly-named
 | Package | Gated in CI? | Threshold | Real coverage today |
 |---|---|---|---|
 | `functions/` | Yes (vitest self-enforces) | 100% per metric | 100%/100%/100%/100% (stmts/branch/funcs/lines) |
-| `amdash_core` | Yes (`very_good_coverage`) | 24% | 24.13% (374/1550 lines) |
-| `ems` | Yes (`very_good_coverage`) | 95% | 95.86% (255/266 lines) |
-| `physician` | Yes (`very_good_coverage`) | 100% | 100.00% (112/112 lines) |
+| `amdash_core` | Yes (`very_good_coverage`) | 95% | 97.49% (1517/1556 lines) |
+| `ems` | Yes (`very_good_coverage`) | 97% | 98.30% (636/647 lines) |
+| `physician` | Yes (`very_good_coverage`) | 100% | 100.00% (285/285 lines) |
 | `admin` | Yes (`very_good_coverage`) | 12% | 12.42% (142/1143 lines) |
 
 Thresholds are a floor, not a target — raise them as the backfill below
 lands. Don't lower a threshold to make a change pass; fix the regression
 or get real agreement first.
 
-**Why `ems`/`physician`/`admin`'s own numbers look so different from each
-other (and from `amdash_core`'s), even though all three had a comparable
-amount of real testing effort put in**: Dart's coverage collector only
-instruments files actually reached by the test run's import graph, not
-each app's whole `lib/` tree. `amdash_core`'s tests all import
-`package:amdash_core/amdash_core.dart` — a single barrel file that
-re-exports everything, including its own untested screens/widgets, so
-they show up in `lcov.info` as real 0-hit entries (hence 24%, not close
-to 100%, despite Stage A's own files being genuinely 100%). None of
-`ems`/`physician`/`admin`'s test suites import their own `router.dart`
-(the one file that would transitively pull every screen/widget in), so
-those files are simply *absent* from `lcov.info` rather than present at
-0% — `physician` lands at a clean 100% because its 6 instrumented files
-(everything Stage B touched) are all fully covered; `admin`'s
-`router_test.dart` *does* import `router.dart` (needed to reach
-`adminRedirect`), which transitively pulls in every admin screen/widget,
-so `admin`'s 12.42% is the more `amdash_core`-like number, counting all
-of that untested Stage C surface explicitly. None of this is a gap to
-paper over — every Stage B file itself is at a genuine 100% (confirmed
-per-file via `lcov.info`, not by trusting the aggregate); it's purely an
-artifact of which files each app's tests happen to load.
+**Why `admin`'s own number still looks so different from the other
+three, even though all four had a comparable amount of real testing
+effort put into what's actually in scope so far**: Dart's coverage
+collector only instruments files actually reached by the test run's
+import graph, not each app's whole `lib/` tree. As of Stage C1,
+`amdash_core`'s own widgets/screens/`idle_timeout_wrapper.dart` are
+genuinely tested (not just imported-but-untested), and `ems`/`physician`
+each gained real widget-level tests for their highest-value screens
+(`ems`'s patient-upload flow, `physician`'s map/patient-viewer) — that's
+why all three now sit at 95%+. `admin`'s test suite, by contrast, still
+doesn't import its own `router.dart` (the one file that would
+transitively pull every admin screen/widget in) *except* via
+`router_test.dart` (needed to reach `adminRedirect`), which drags in
+every untested admin screen/widget as real 0-hit entries — hence
+`admin`'s 12.42%, the one number still reflecting a genuine backlog
+rather than a coverage-tool artifact. None of this is a gap to paper
+over for the other three: every file each stage touched is at a genuine
+100% *or* has its remaining gap fully accounted for (confirmed per-file
+via `lcov.info`, never by trusting the aggregate alone) — see each
+package's own remaining-gap note in the roadmap below.
 
 ## Backfill roadmap (highest-value/lowest-effort first)
 
@@ -346,9 +511,11 @@ conventions section above), not silently excluded from the count.
 - [x] `kms.ts`, `audit.ts`, `auth.ts`, `email.ts`, `patient-data.ts`,
       `ems.ts`, `physician.ts`, `admin.ts`, `fhir.ts`
 
-**Dart** (Stage A — `amdash_core` services/guards/models — and Stage B —
-`ems`/`physician`/`admin` app-specific services — both done; only widgets
-across all 4 packages remain, see below):
+**Dart** (Stage A — `amdash_core` services/guards/models — Stage B —
+`ems`/`physician`/`admin` app-specific services — and Stage C1 —
+`amdash_core`'s own widgets/screens plus `ems`'s patient-upload flow and
+`physician`'s map/patient-viewer — all done; the rest of
+`ems`/`physician`/`admin`'s widgets remain, see below):
 - [x] `amdash_core`: `isProvidedValue`/`numOrNull`/`bloodPressurePart`,
       `Patient`/`PatientVitals`/`PatientField.fromFirestore`
 - [x] `amdash_core` services: `AuthService`, `UserProfileService`,
@@ -372,10 +539,43 @@ across all 4 packages remain, see below):
       these caught a real bug (`fcmTokens` used an unsafe cast that threw
       on a non-List value, unlike `role`'s existing safe `is List` check
       one field above it; fixed to match)
-- [ ] `amdash_core`/`ems`/`physician`/`admin` widgets (via
-      `WidgetTester` + the same provider overrides) — lowest priority;
-      the Patrol e2e suite already exercises these end-to-end, so this
-      tier is about fast local feedback, not closing a real coverage gap
+- [x] `amdash_core` widgets/screens + `auth/idle_timeout_wrapper.dart`
+      (Stage C1 — via `WidgetTester` + a new `test/support/pump_app.dart`
+      harness, see the new mocking-convention notes below) — all 18
+      files, genuinely 100% except the documented `const`-constructor
+      coverage-tool artifact. Found and fixed real bugs along the way:
+      `dialogs.dart`'s `showReauthPasswordDialog` disposed its
+      `TextEditingController` before the dialog's own exit transition
+      finished (refactored to a proper `StatefulWidget` owning it);
+      `mfa_security_card.dart`'s reauth-retry path re-showed the "Change
+      authenticator app?" confirmation instead of retrying just the
+      unenroll step (split into `_unenrollAndProceed`, mirroring
+      `TotpEnrollmentForm`'s own `_reauthenticateThenRetry` pattern);
+      `totp_enrollment_form.dart`'s "Generate a new code" button cleared
+      the old code but never actually re-fetched one; `work_location_screen.dart`
+      could get permanently stuck showing a spinner if `_onSubmit` ran
+      with no signed-in user.
+- [x] `ems`'s patient-upload flow and `physician`'s map/patient-viewer
+      (Stage C1, by explicit request — the two highest-value/highest-risk
+      screens in the whole widget tier, done ahead of the rest of
+      `ems`/`physician`/`admin`'s widgets below): `ems/lib/widgets/location_tracking_section.dart`,
+      `ems/lib/screens/patient_upload_screen.dart`,
+      `physician/lib/widgets/patient_viewer.dart` — all three at a
+      genuine 100%. Required two small, real testability fixes to
+      `patient_viewer.dart` itself (both safe, zero production-behavior
+      change): `PatientViewer` gained an optional `directionsService`
+      constructor param (mirroring `DirectionsService`'s own existing
+      `FirebaseFunctions?` seam) — without it, *every* `PatientViewer`
+      test would crash on mount, since the field's real
+      `DirectionsService()` default throws `[core/no-app]` without a
+      live Firebase app; and its glide-animation ticker / directions-
+      refresh throttle switched from `DateTime.now()` to `clock.now()`
+      (see the new mocking-convention note below) so both are
+      deterministically testable instead of racing real wall-clock time.
+- [ ] The rest of `ems`/`physician`/`admin`'s widgets (Stage C2+) — lowest
+      remaining priority; the Patrol e2e suite already exercises these
+      end-to-end, so this tier is about fast local feedback, not closing
+      a real coverage gap
 - [x] `ems`/`physician`/`admin` app-specific services (Stage B) —
       `ems`: `PatientUploadService`, `patient_session_service.dart`'s
       `uploadedPatientsProvider`, `EmsTrackingController`,
@@ -399,15 +599,25 @@ across all 4 packages remain, see below):
       `AppRouteGuard.redirect` (Stage A); a dedicated test would just
       re-test that guard through an extra layer of indirection.
 
-`amdash_core`'s own package-wide number (24.13%) is lower than "Stage A
-done" sounds like it should be because Stage A explicitly excluded that
-package's own widgets/screens/theme (the still-unchecked item above) —
-every service/guard/model file in Stage A's scope is individually at a
-genuine 100%, confirmed by parsing `coverage/lcov.info` directly rather
-than trusting the aggregate percentage alone. See the coverage-table
-note above for why `ems`/`physician`/`admin`'s own numbers diverge from
-each other for a *different*, purely-mechanical reason (which files each
-app's test suite happens to import).
+`amdash_core`'s remaining ~2.5% gap (39 lines) is *not* a backlog — every
+one of them is the same well-known Dart/Flutter coverage-tool artifact:
+a `const` widget constructor invoked *only* via `const` call sites
+(everywhere in both `lib/` and every test file) gets folded away at
+compile time and never registers a runtime hit on its own declaration
+line, even though real widget tests genuinely construct and render that
+widget. Confirmed by direct A/B comparison within this same package:
+`GlassPanel`/`StatusPill` (which happen to also get constructed non-const
+somewhere) show their constructor line as covered; `AppBackground`/
+`PatientVitalsChips`/`IdleTimeoutWrapper`/etc. (constructed *only* via
+`const` everywhere) don't — despite every one of those widgets being
+pumped and asserted against by real tests. Don't chase this by
+deliberately dropping a `const` somewhere just to flip an lcov line; that
+would be optimizing the metric, not the actual test. `ems`'s remaining
+~1.7% gap is entirely `lib/firebase_options.dart` (generated, out of
+scope — see the exclusion list above; it just isn't gated the same way
+`min_coverage` is per-package rather than per-file). `admin`'s own
+number is the one genuine backlog left — see the coverage-table note
+above for why.
 
 ## Regulatory note
 

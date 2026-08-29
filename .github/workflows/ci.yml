@@ -199,17 +199,30 @@ jobs:
       # each app's full lib/ tree, since none of their test suites import
       # router.dart (the one file that would transitively pull every
       # screen/widget in) — see TESTING.md's own note on this.
+      #
+      # amdash_core/ems/physician all ratcheted up again for Stage C1
+      # (amdash_core's own widgets/screens + idle_timeout_wrapper.dart,
+      # plus ems's patient-upload flow and physician's map/patient-viewer
+      # by explicit request) — measured 97.49%/98.30%/100.00%
+      # respectively; each floor is set a couple points under its own
+      # measured value, not the literal number, so an incidental single-
+      # line regression elsewhere doesn't flip the gate red over noise.
+      # amdash_core's remaining gap is entirely the same well-known Dart
+      # coverage-tool artifact for `const` widget constructors invoked
+      # only via `const` call sites (documented in TESTING.md); ems's is
+      # entirely the pre-existing, out-of-scope generated
+      # firebase_options.dart.
       - name: Enforce amdash_core coverage threshold
         uses: VeryGoodOpenSource/very_good_coverage@v3
         with:
           path: flutter/packages/amdash_core/coverage/lcov.info
-          min_coverage: 24
+          min_coverage: 95
 
       - name: Enforce ems coverage threshold
         uses: VeryGoodOpenSource/very_good_coverage@v3
         with:
           path: flutter/apps/ems/coverage/lcov.info
-          min_coverage: 95
+          min_coverage: 97
 
       - name: Enforce physician coverage threshold
         uses: VeryGoodOpenSource/very_good_coverage@v3

@@ -34,4 +34,5 @@ export 'src/widgets/patient_detail_cards.dart';
 export 'src/widgets/patient_field_text.dart';
 export 'src/widgets/patient_vitals_chips.dart';
 export 'src/widgets/status_pill.dart';
+export 'src/widgets/totp_enrollment_form.dart';
 export 'src/widgets/vitals_trend_dialog.dart';

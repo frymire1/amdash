@@ -40,7 +40,19 @@ class _MfaSecurityCardState extends ConsumerState<MfaSecurityCard> {
       confirmLabel: 'Continue',
     );
     if (!confirmed || !mounted) return;
+    await _unenrollAndProceed();
+  }
 
+  // Split out from _startChange so a successful reauth (below) retries just
+  // the unenroll step, not the whole flow — confirmed via a widget test
+  // that calling _startChange() itself from the reauth-retry branch
+  // re-shows "Change authenticator app?" a second time, silently stalling
+  // the flow on a redundant confirmation the user already answered (a real
+  // bug: they type their password expecting to land on the new QR code,
+  // not another are-you-sure prompt). Mirrors TotpEnrollmentForm's own
+  // _reauthenticateThenRetry(retry), which already retries only the
+  // specific action rather than its caller's whole method.
+  Future<void> _unenrollAndProceed() async {
     setState(() {
       _unenrolling = true;
       _error = null;
@@ -60,7 +72,7 @@ class _MfaSecurityCardState extends ConsumerState<MfaSecurityCard> {
       if (password == null || !mounted) return;
       try {
         await ref.read(mfaServiceProvider).reauthenticate(password);
-        await _startChange();
+        await _unenrollAndProceed();
         return;
       } catch (error) {
         if (mounted) setState(() => _error = "Couldn't verify your password. Please try again.");

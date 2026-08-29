@@ -159,13 +159,33 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     try {
       final hint = resolver.hints.firstWhere((h) => h.factorId == 'totp');
+      // coverage:ignore-start
+      // Real platform-channel calls — confirmed for real (via a widget
+      // test that pumped well past this await and found _submitting still
+      // stuck true) that TotpMultiFactorGenerator.getAssertionForSignIn
+      // never resolves at all in a plain Dart VM test (no platform
+      // bindings for any real target) — unlike mfa_service.dart's
+      // generateSecret/getAssertionForEnrollment, which at least throw
+      // immediately, this one just hangs forever, so there's no way to
+      // reach anything past this line, including the success path below.
+      // Same category as mfa_service.dart's own two exclusions and
+      // fhir_export_service.dart's FileSaver call — no DI seam fixes this.
       final assertion = await TotpMultiFactorGenerator.getAssertionForSignIn(hint.uid, code);
       await resolver.resolveSignIn(assertion);
       // Same pattern as every other success path in this file — let the
       // router's redirect react to authStateProvider rather than
       // navigating explicitly.
     } on FirebaseAuthException {
+      // Reachable only from a real getAssertionForSignIn/resolveSignIn
+      // failure above — since those never throw at all in a plain Dart VM
+      // test (confirmed via bisection: they just hang forever), this
+      // catch clause can't be reached here either. Kept as real
+      // production error handling for a genuine Firebase-thrown invalid-
+      // code response, not dead code — the generic catch/finally below
+      // *are* reachable, though (via firstWhere's own StateError when no
+      // totp hint matches), so only this specific clause is excluded.
       setState(() => _errorMessage = "That code didn't work. Please try again.");
+      // coverage:ignore-end
     } catch (error) {
       setState(() => _errorMessage = 'Something went wrong. Please try again.');
     } finally {

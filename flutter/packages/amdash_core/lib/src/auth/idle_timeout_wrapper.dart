@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -36,7 +37,13 @@ class IdleTimeoutWrapper extends ConsumerStatefulWidget {
 
 class _IdleTimeoutWrapperState extends ConsumerState<IdleTimeoutWrapper> with WidgetsBindingObserver {
   Timer? _timer;
-  DateTime _lastActivity = DateTime.now();
+  // clock.now(), not DateTime.now() directly — DateTime.now() can't be
+  // intercepted via Zone (confirmed empirically: pumping a test's fake
+  // Timer clock forward never moves it), so there'd be no seam-free way to
+  // deterministically test the actual 15-minute-idle-timeout branch below.
+  // The unoverridden `clock` global just calls real DateTime.now(), so this
+  // changes nothing about production behavior.
+  DateTime _lastActivity = clock.now();
 
   @override
   void initState() {
@@ -63,7 +70,7 @@ class _IdleTimeoutWrapperState extends ConsumerState<IdleTimeoutWrapper> with Wi
   }
 
   void _registerActivity([PointerEvent? _]) {
-    _lastActivity = DateTime.now();
+    _lastActivity = clock.now();
   }
 
   bool _onKeyEvent(KeyEvent event) {
@@ -77,7 +84,7 @@ class _IdleTimeoutWrapperState extends ConsumerState<IdleTimeoutWrapper> with Wi
   }
 
   void _checkIdle() {
-    final elapsed = DateTime.now().difference(_lastActivity);
+    final elapsed = clock.now().difference(_lastActivity);
     if (elapsed >= idleTimeoutDuration) {
       if (ref.read(authServiceProvider).isAuthenticated) {
         ref.read(authServiceProvider).signOut();
