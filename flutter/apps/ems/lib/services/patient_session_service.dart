@@ -54,14 +54,32 @@ final _rawUploadedPatientsProvider = StreamProvider<List<UploadedPatient>>((ref)
 /// physician/lib/services/patient_service.dart's identical wrapper for the
 /// full rationale (kept in sync with that one). `UploadedPatient` wraps a
 /// `Patient`, so splicing happens through its `.patient` field.
+///
+/// Reads `.valueOrNull` rather than `AsyncValue.whenData(...)` —
+/// `_rawUploadedPatientsProvider` rebuilding (its own `userProfileProvider`
+/// dependency re-emitting, or just its live Firestore query listener
+/// resyncing after the app returns from the background, which redelivers
+/// the current snapshot even when nothing actually changed) leaves it
+/// `isLoading` but still `hasValue` — Riverpod carries the previous value
+/// forward across a dependency-triggered reload. `whenData`'s own `loading`
+/// branch ignored that and always returned a bare, valueless
+/// `AsyncLoading()`, which flashed every screen watching this provider back
+/// to a loading spinner on every app resume, even though the list hadn't
+/// changed. Reading `.valueOrNull` instead keeps showing the last-known
+/// list (refreshing silently underneath) until real new data lands, and
+/// only falls through to a loading/error state when there's truly nothing
+/// to show yet.
 final uploadedPatientsProvider = Provider<AsyncValue<List<UploadedPatient>>>((ref) {
   final rawAsync = ref.watch(_rawUploadedPatientsProvider);
-  return rawAsync.whenData((uploaded) {
+  final uploaded = rawAsync.valueOrNull;
+  if (uploaded != null) {
     final resolved = withCachedDecryptedFields(ref, [for (final u in uploaded) u.patient]);
-    return [
+    return AsyncData([
       for (var i = 0; i < uploaded.length; i++) UploadedPatient(id: uploaded[i].id, patient: resolved[i]),
-    ];
-  });
+    ]);
+  }
+  if (rawAsync.hasError) return AsyncError(rawAsync.error!, rawAsync.stackTrace!);
+  return const AsyncLoading();
 });
 
 UploadedPatient? findUploadedPatient(List<UploadedPatient> patients, String id) {

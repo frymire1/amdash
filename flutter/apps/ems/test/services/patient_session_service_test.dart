@@ -89,6 +89,61 @@ void main() {
       final patients = (await _settled(container)).value!;
       expect(patients.map((u) => u.patient.name.plaintext), ['Newer Patient', 'Older Patient']);
     });
+
+    // Regression test for a real bug: minimizing then reopening the app
+    // flashed the screen back to a bare loading spinner even when nothing
+    // had actually changed — because the underlying userProfileProvider
+    // listener (or the patient query's own live Firestore listener)
+    // resyncing after backgrounding re-emits its current value as a *new*
+    // stream event, which rebuilds the private raw provider this one
+    // wraps. Riverpod carries the raw provider's previous value forward
+    // across that rebuild (`isLoading: true` but still `hasValue: true`),
+    // but the old `AsyncValue.whenData(...)` implementation discarded it
+    // anyway, producing a bare, valueless `AsyncLoading()` for the ~1s
+    // round trip until the new snapshot resolved. Asserts every state this
+    // provider emits across a reload keeps carrying the previous list.
+    test('reloading (e.g. the profile stream re-emitting) never regresses to a valueless loading state', () async {
+      const profile = UserProfile(role: [UserRole.ems], organizationId: 'org-1');
+      final profileController = StreamController<UserProfile?>();
+      addTearDown(profileController.close);
+      final container = ProviderContainer(
+        overrides: [
+          firestoreProvider.overrideWithValue(firestore),
+          userProfileProvider.overrideWith((ref) => profileController.stream),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final states = <AsyncValue<List<UploadedPatient>>>[];
+      Completer<void>? settled;
+      container.listen(uploadedPatientsProvider, (previous, next) {
+        states.add(next);
+        if (!next.isLoading) settled?.complete();
+      }, fireImmediately: true);
+
+      settled = Completer<void>();
+      profileController.add(profile);
+      await settled.future;
+      expect(states.last.value?.map((u) => u.patient.name.plaintext), ['Newer Patient', 'Older Patient']);
+
+      // Only states from here on are relevant to the regression — the
+      // provider's very first-ever state (before anything has loaded at
+      // all) is a legitimate, real `AsyncLoading()`, not the bug.
+      states.clear();
+
+      // Re-emits an equivalent (not necessarily identical-by-reference)
+      // profile — simulating the live listener resyncing after resume and
+      // redelivering its current value even though nothing actually
+      // changed, which is exactly what rebuilds the raw provider here.
+      settled = Completer<void>();
+      profileController.add(profile);
+      await settled.future;
+
+      for (final state in states) {
+        expect(state.hasValue, isTrue, reason: 'regressed to a valueless loading state: $state');
+      }
+      expect(states.last.value?.map((u) => u.patient.name.plaintext), ['Newer Patient', 'Older Patient']);
+    });
   });
 
   group('findUploadedPatient', () {

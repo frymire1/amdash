@@ -81,5 +81,56 @@ void main() {
       final patients = (await _settled(container)).value!;
       expect(patients.map((p) => p.name.plaintext), ['Newer Patient', 'Older Patient']);
     });
+
+    // Regression test for a real bug — see
+    // ems/test/services/patient_session_service_test.dart's identical case
+    // for the full rationale (kept in sync with that one): minimizing then
+    // reopening the app flashed the screen back to a bare loading spinner
+    // even when nothing had changed, because `AsyncValue.whenData(...)`
+    // discarded the raw provider's previous value on every
+    // dependency-triggered reload (e.g. the profile listener resyncing
+    // after backgrounding), not just on a genuine first load.
+    test('reloading (e.g. the profile stream re-emitting) never regresses to a valueless loading state', () async {
+      const profile = UserProfile(role: [UserRole.physician], organizationId: 'org-1');
+      final profileController = StreamController<UserProfile?>();
+      addTearDown(profileController.close);
+      final container = ProviderContainer(
+        overrides: [
+          firestoreProvider.overrideWithValue(firestore),
+          userProfileProvider.overrideWith((ref) => profileController.stream),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final states = <AsyncValue<List<Patient>>>[];
+      Completer<void>? settled;
+      container.listen(physicianPatientsProvider, (previous, next) {
+        states.add(next);
+        if (!next.isLoading) settled?.complete();
+      }, fireImmediately: true);
+
+      settled = Completer<void>();
+      profileController.add(profile);
+      await settled.future;
+      expect(states.last.value?.map((p) => p.name.plaintext), ['Newer Patient', 'Older Patient']);
+
+      // Only states from here on are relevant to the regression — the
+      // provider's very first-ever state (before anything has loaded at
+      // all) is a legitimate, real `AsyncLoading()`, not the bug.
+      states.clear();
+
+      // Re-emits an equivalent (not necessarily identical-by-reference)
+      // profile — simulating the live listener resyncing after resume and
+      // redelivering its current value even though nothing actually
+      // changed, which is exactly what rebuilds the raw provider here.
+      settled = Completer<void>();
+      profileController.add(profile);
+      await settled.future;
+
+      for (final state in states) {
+        expect(state.hasValue, isTrue, reason: 'regressed to a valueless loading state: $state');
+      }
+      expect(states.last.value?.map((p) => p.name.plaintext), ['Newer Patient', 'Older Patient']);
+    });
   });
 }

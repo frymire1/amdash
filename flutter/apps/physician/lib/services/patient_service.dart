@@ -52,7 +52,21 @@ final _rawPhysicianPatientsProvider = StreamProvider<List<Patient>>((ref) async*
 /// resolves to the exact same `AsyncValue<List<Patient>>` shape a
 /// `StreamProvider<List<Patient>>` would, so this is a drop-in swap —
 /// nothing downstream needed to change how it reads this provider.
+///
+/// Reads `.valueOrNull` rather than `AsyncValue.whenData(...)` — see
+/// `ems/lib/services/patient_session_service.dart`'s identical wrapper for
+/// the full rationale (kept in sync with that one). In short:
+/// `_rawPhysicianPatientsProvider` rebuilding (its own `userProfileProvider`
+/// dependency re-emitting, or just its live Firestore query listener
+/// resyncing after the app returns from the background) still carries its
+/// previous value forward while `isLoading`, but `whenData`'s `loading`
+/// branch discarded it regardless — flashing every screen watching this
+/// provider back to a spinner on every app resume, even when the list
+/// hadn't actually changed.
 final physicianPatientsProvider = Provider<AsyncValue<List<Patient>>>((ref) {
   final rawAsync = ref.watch(_rawPhysicianPatientsProvider);
-  return rawAsync.whenData((patients) => withCachedDecryptedFields(ref, patients));
+  final patients = rawAsync.valueOrNull;
+  if (patients != null) return AsyncData(withCachedDecryptedFields(ref, patients));
+  if (rawAsync.hasError) return AsyncError(rawAsync.error!, rawAsync.stackTrace!);
+  return const AsyncLoading();
 });
