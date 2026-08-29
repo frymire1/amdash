@@ -105,6 +105,13 @@ dev_dependencies:
   # imports it directly for the GoogleFonts.allowRuntimeFetching guard
   # (see TESTING.md).
   google_fonts: ^6.2.1
+  # Widget-testing only (Stage C2, user_settings_screen.dart) — already a
+  # transitive dependency (via amdash_core's themeModeProvider), pinned
+  # directly here since test code calls
+  # SharedPreferences.setMockInitialValues() directly to keep
+  # ThemeModeNotifier.build()'s fire-and-forget _load() from hitting a real,
+  # unmocked platform channel (see TESTING.md).
+  shared_preferences: ^2.3.3
 
 # Read by patrol_cli — package_name feeds the PATROL_APP_PACKAGE_NAME
 # dart-define and `patrol test`'s own instrumentation-component

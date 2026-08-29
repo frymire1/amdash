@@ -218,7 +218,9 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
                     ),
                     const SizedBox(width: 12),
                     SizedBox(
-                      width: 160,
+                      // 160 clipped the "All roles" option's own text —
+                      // confirmed via a real overflow.
+                      width: 210,
                       child: DropdownButtonFormField<UserRole?>(
                         initialValue: _roleFilter,
                         decoration: const InputDecoration(labelText: 'Role', isDense: true),
@@ -265,7 +267,9 @@ class _UsersTable extends StatelessWidget {
       columnWidths: const {
         0: FlexColumnWidth(2),
         1: FlexColumnWidth(2),
-        2: FixedColumnWidth(130),
+        // 130 clipped the "Suspended" pill's own uppercase, letter-spaced
+        // label — confirmed via a real overflow with a suspended user.
+        2: FixedColumnWidth(150),
         3: FlexColumnWidth(3),
         4: FixedColumnWidth(56),
       },

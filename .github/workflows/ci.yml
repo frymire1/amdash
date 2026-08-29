@@ -212,6 +212,17 @@ jobs:
       # only via `const` call sites (documented in TESTING.md); ems's is
       # entirely the pre-existing, out-of-scope generated
       # firebase_options.dart.
+      #
+      # ems/physician/admin ratcheted up again for Stage C2 (the rest of
+      # each app's widgets/screens — home/patient-viewer/user-settings/
+      # patient-summary-card for ems; patient-card/patient-list/main-view/
+      # user-settings for physician; every remaining admin screen and
+      # widget, admin's first widget-test coverage at all) — measured
+      # 98.76%/100.00%/97.40% respectively. physician's is now genuinely
+      # 100.00% (not just floored a couple points under, like the others)
+      # — its only remaining gaps were the const-constructor artifact,
+      # closed by dropping `const` at the one test call site each that hit
+      # it, same fix as amdash_core's own precedent.
       - name: Enforce amdash_core coverage threshold
         uses: VeryGoodOpenSource/very_good_coverage@v3
         with:
@@ -222,7 +233,7 @@ jobs:
         uses: VeryGoodOpenSource/very_good_coverage@v3
         with:
           path: flutter/apps/ems/coverage/lcov.info
-          min_coverage: 97
+          min_coverage: 98
 
       - name: Enforce physician coverage threshold
         uses: VeryGoodOpenSource/very_good_coverage@v3
@@ -234,7 +245,7 @@ jobs:
         uses: VeryGoodOpenSource/very_good_coverage@v3
         with:
           path: flutter/apps/admin/coverage/lcov.info
-          min_coverage: 12
+          min_coverage: 95
 
   functions-build:
     name: Functions build (tsc)

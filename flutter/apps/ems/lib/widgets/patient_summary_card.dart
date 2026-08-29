@@ -144,6 +144,17 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
       // amdash_core's debugLastExportResult — see its own doc comment —
       // for a test to check directly, since this card may well be gone
       // from the tree by the time any of this resolves.)
+      //
+      // coverage:ignore-start
+      // exportPatientFhirBundle can never actually return here in a plain
+      // `flutter test` run — its own success path ends by calling
+      // FileSaver.instance.saveFile, which throws UnsupportedError with no
+      // platform bindings available (see fhir_export_service.dart's own
+      // coverage:ignore block on that same call) — so even a fully mocked,
+      // successful callable response still lands in the generic catch
+      // below, never here. Confirmed empirically in
+      // patient_summary_card_test.dart's "successful callable response"
+      // case.
       final heartRate = latestObservationValue(result.bundle, loincHeartRate);
       if (mounted) {
         setState(
@@ -152,6 +163,7 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
               : '$patientDisplayName: FHIR record exported (heart rate: ${heartRate.toStringAsFixed(0)} bpm).',
         );
       }
+      // coverage:ignore-end
     } on FhirExportException catch (error) {
       if (mounted) setState(() => _exportError = error.message);
     } catch (error) {
@@ -275,6 +287,10 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
                       style: TextStyle(color: Theme.of(context).colorScheme.error),
                     ),
                   ],
+                  // coverage:ignore-start
+                  // _exportSuccessMessage can never actually be set in a
+                  // plain `flutter test` run — see _autoExportFhir's own
+                  // matching coverage:ignore block above.
                   if (_exportSuccessMessage != null) ...[
                     const SizedBox(height: 8),
                     Text(
@@ -283,6 +299,7 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
                       style: const TextStyle(color: AppColors.success),
                     ),
                   ],
+                  // coverage:ignore-end
                 ],
               ),
             ),
