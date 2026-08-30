@@ -7,10 +7,26 @@ import { CallerProfile } from './classes/caller-profile';
 import { CheckAccountStatusRequest } from './classes/check-account-status-request';
 import { SetInitialPasswordRequest } from './classes/set-initial-password-request';
 import { RESEND_API_KEY, sendPasswordResetEmail, sendVerificationEmail } from './email';
+import { enforceRateLimit } from './rate-limit';
+import type { CallableRequest } from 'firebase-functions/v2/https';
 
 initializeApp();
 
 export const REGION = 'northamerica-northeast2';
+
+// The three callables below are the only ones with no `request.auth` to gate
+// on at all, so a caller's IP is the only per-caller dimension rate-limiting
+// has to work with. Cloud Functions v2 runs on Cloud Run under the hood,
+// which already terminates the connection and populates `X-Forwarded-For`
+// before this code ever runs — `rawRequest.ip` (Express's own resolved
+// client IP) reflects that, not a raw socket address. Falls back to a
+// constant key rather than throwing if it's ever somehow empty: a shared
+// fallback bucket is a worse rate limit, not a broken one.
+function callerIp(request: CallableRequest): string {
+  return request.rawRequest.ip || 'unknown';
+}
+
+const ONE_HOUR_MS = 60 * 60 * 1000;
 
 // The one place every Cloud Function reads a caller's role/org — a single
 // `users/{uid}` read, reused by every requireAdmin/requireSuperAdmin/manual
@@ -52,6 +68,8 @@ export const checkAccountStatus = onCall<CheckAccountStatusRequest>({ region: RE
     throw new HttpsError('invalid-argument', 'A valid email is required.');
   }
 
+  await enforceRateLimit(`check:ip:${callerIp(request)}`, { maxAttempts: 20, windowMs: ONE_HOUR_MS });
+
   try {
     const user = await getAuth().getUserByEmail(email);
     const hasPassword = user.providerData.some((provider) => provider.providerId === 'password');
@@ -60,6 +78,23 @@ export const checkAccountStatus = onCall<CheckAccountStatusRequest>({ region: RE
     return { exists: false, hasPassword: false };
   }
 });
+
+// Mirrors login_screen.dart's own _hasMinLength/_hasUppercase/_hasNumber/
+// _hasSpecialChar checks exactly — that client-side checklist is only a UX
+// guide, not an actual enforcement boundary, since setInitialPassword is a
+// public, unauthenticated callable: anything bypassing the Flutter UI
+// entirely (a direct HTTP call) could otherwise set an arbitrarily weak
+// password. Keep both in sync if either changes.
+const PASSWORD_MIN_LENGTH = 8;
+
+function passwordMeetsComplexityRequirements(password: string): boolean {
+  return (
+    password.length >= PASSWORD_MIN_LENGTH &&
+    /[A-Z]/.test(password) &&
+    /[0-9]/.test(password) &&
+    /[^A-Za-z0-9]/.test(password)
+  );
+}
 
 // Deliberately callable without being signed in — the whole point is to let
 // someone set their FIRST password before they've ever authenticated. This
@@ -70,9 +105,16 @@ export const checkAccountStatus = onCall<CheckAccountStatusRequest>({ region: RE
 // same as if this function didn't exist.
 export const setInitialPassword = onCall<SetInitialPasswordRequest>({ region: REGION }, async (request) => {
   const { email, password } = request.data;
-  if (!email || !password || password.length < 6) {
-    throw new HttpsError('invalid-argument', 'A valid email and a password of at least 6 characters are required.');
+  if (!email || !password || !passwordMeetsComplexityRequirements(password)) {
+    throw new HttpsError(
+      'invalid-argument',
+      'A valid email and a password of at least 8 characters, including an uppercase letter, a number, and a ' +
+        'special character, are required.'
+    );
   }
+
+  await enforceRateLimit(`setpw:ip:${callerIp(request)}`, { maxAttempts: 5, windowMs: ONE_HOUR_MS });
+  await enforceRateLimit(`setpw:email:${email}`, { maxAttempts: 5, windowMs: ONE_HOUR_MS });
 
   const user = await findUserByEmail(email);
 
@@ -105,6 +147,17 @@ async function firstNameFor(uid: string): Promise<string> {
 // on us, via the same Resend setup the welcome email uses. No
 // actionCodeSettings passed — the link still lands on Firebase's own
 // hosted reset-password page, unchanged from today's behavior.
+//
+// Deliberately does NOT use findUserByEmail — that helper throws a
+// distinguishing 'not-found' error for an unregistered address, which is
+// exactly right for checkAccountStatus's own email-first login flow (the
+// whole point there is telling the client whether an account exists) but
+// wrong here: "Forgot password?" throwing a different result for a real
+// vs. fake email is a textbook account-enumeration side channel, and one a
+// visitor doesn't already need to trigger the way they do for
+// checkAccountStatus. Always returns the same generic { email } response
+// either way — a real account gets its email exactly as before; a
+// non-existent one silently no-ops.
 export const requestPasswordReset = onCall<CheckAccountStatusRequest>(
   { region: REGION, secrets: [RESEND_API_KEY] },
   async (request) => {
@@ -113,7 +166,23 @@ export const requestPasswordReset = onCall<CheckAccountStatusRequest>(
       throw new HttpsError('invalid-argument', 'A valid email is required.');
     }
 
-    const user = await findUserByEmail(email);
+    // Per-email first (tighter — this is the inbox-bombing vector: spamming
+    // one real address with reset emails) and per-IP second (looser —
+    // catches one caller sweeping many addresses). Both run before the
+    // existence check below, on purpose: skipping the per-email limit for
+    // addresses that don't exist would let a caller probe account existence
+    // at unlimited speed via timing/rate alone, even though the response
+    // body itself never distinguishes the two cases.
+    await enforceRateLimit(`reset:email:${email}`, { maxAttempts: 3, windowMs: ONE_HOUR_MS });
+    await enforceRateLimit(`reset:ip:${callerIp(request)}`, { maxAttempts: 20, windowMs: ONE_HOUR_MS });
+
+    let user;
+    try {
+      user = await getAuth().getUserByEmail(email);
+    } catch {
+      return { email };
+    }
+
     const firstName = await firstNameFor(user.uid);
     const resetUrl = await getAuth().generatePasswordResetLink(email);
     await sendPasswordResetEmail({ email, firstName, resetUrl });

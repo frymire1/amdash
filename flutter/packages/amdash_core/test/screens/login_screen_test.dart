@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:amdash_core/amdash_core.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -19,6 +20,22 @@ class _MockMultiFactorInfo extends Mock implements MultiFactorInfo {}
 class _MockFirebaseAuthException extends Mock implements FirebaseAuthException {}
 
 class _MockFirebaseAuthMultiFactorException extends Mock implements FirebaseAuthMultiFactorException {}
+
+// A Fake, not a Mock — its real (`@protected`) constructor can't be called
+// from outside the package, and `code` is a plain inherited field (from
+// FirebaseException), not a mockable virtual member mocktail's `when()` can
+// intercept cleanly. Fake + a constructor-set override sidesteps both.
+class _FakeFirebaseFunctionsException extends Fake implements FirebaseFunctionsException {
+  _FakeFirebaseFunctionsException(this.code);
+
+  @override
+  final String code;
+}
+
+// Shared by every "rate-limited" test below — mirrors exactly what the
+// cloud_functions client SDK surfaces when the server throws
+// HttpsError('resource-exhausted', ...) (see functions/src/rate-limit.ts).
+FirebaseFunctionsException _rateLimitException() => _FakeFirebaseFunctionsException('resource-exhausted');
 
 void main() {
   late _MockAuthService authService;
@@ -90,6 +107,14 @@ void main() {
       verifyNever(() => authService.checkAccountStatus(any()));
     });
 
+    testWidgets('a malformed email shows a validation error and never calls checkAccountStatus', (tester) async {
+      await goToEmailStep(tester);
+      await submitEmail(tester, 'not-an-email');
+
+      expect(find.text('Enter a valid email address.'), findsOneWidget);
+      verifyNever(() => authService.checkAccountStatus(any()));
+    });
+
     testWidgets('submitting via the keyboard (onSubmitted) works the same as tapping Continue', (tester) async {
       when(
         () => authService.checkAccountStatus('jordan@example.com'),
@@ -127,6 +152,18 @@ void main() {
 
       expect(find.text('Something went wrong. Please try again.'), findsOneWidget);
       expect(find.text('Sign in to continue'), findsOneWidget);
+    });
+
+    testWidgets('checkAccountStatus rate-limited shows a friendly rate-limit message, not the generic one', (
+      tester,
+    ) async {
+      when(() => authService.checkAccountStatus(any())).thenThrow(_rateLimitException());
+
+      await goToEmailStep(tester);
+      await submitEmail(tester, 'jordan@example.com');
+
+      expect(find.text("You've tried too many times. Please wait a while before trying again."), findsOneWidget);
+      expect(find.text('Something went wrong. Please try again.'), findsNothing);
     });
 
     testWidgets('exists without a password goes to the set-password step', (tester) async {
@@ -268,6 +305,19 @@ void main() {
       expect(find.text('Could not set your password. Please try again.'), findsOneWidget);
     });
 
+    testWidgets('claimPasswordlessAccount rate-limited shows a friendly rate-limit message', (tester) async {
+      when(() => authService.claimPasswordlessAccount(any(), any())).thenThrow(_rateLimitException());
+
+      await goToSetPassword(tester);
+      await tester.enterText(find.byType(TextField).first, 'Abcdefg1!');
+      await tester.enterText(find.byType(TextField).last, 'Abcdefg1!');
+      await tester.pump();
+      await tester.tap(find.text('Set Password'));
+      await tester.pumpAndSettle();
+
+      expect(find.text("You've tried too many times. Please wait a while before trying again."), findsOneWidget);
+    });
+
     testWidgets('Use a different email clears the password fields and returns to the email step', (tester) async {
       await goToSetPassword(tester);
       await tester.enterText(find.byType(TextField).first, 'Abcdefg1!');
@@ -392,6 +442,16 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Could not send a reset email for that address.'), findsOneWidget);
+    });
+
+    testWidgets('forgot password rate-limited shows a friendly rate-limit message', (tester) async {
+      when(() => authService.resetPassword(any())).thenThrow(_rateLimitException());
+
+      await goToSignIn(tester);
+      await tester.tap(find.text('Forgot password?'));
+      await tester.pumpAndSettle();
+
+      expect(find.text("You've tried too many times. Please wait a while before trying again."), findsOneWidget);
     });
 
     testWidgets('Use a different email clears the password field and returns to the email step', (tester) async {

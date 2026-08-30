@@ -1,3 +1,4 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,6 +16,30 @@ import '../theme/app_theme.dart';
 /// already-enrolled account (a brand-new account reaching `setPassword`
 /// can never have an enrolled factor yet, so that step never sees this).
 enum _LoginStep { email, notActivated, setPassword, signIn, mfaChallenge }
+
+// Deliberately permissive (not a full RFC 5322 pattern, which routinely
+// rejects real addresses) — just enough to catch obviously-malformed input
+// (no @, no domain, stray whitespace) before it reaches
+// checkAccountStatus/requestPasswordReset. The server is still the actual
+// authority on whether an address is real; this is a UX guard, not a
+// security boundary.
+final _emailPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+
+// checkAccountStatus/setInitialPassword/requestPasswordReset (the three
+// public callables this screen calls) are all rate-limited server-side
+// (see functions/src/rate-limit.ts) and reject an over-limit caller with an
+// HttpsError('resource-exhausted', ...) — the cloud_functions client SDK
+// surfaces that as a FirebaseFunctionsException with a matching `.code`.
+// Without this check, that error would fall into each call site's generic
+// catch-all below and show a misleading "Something went wrong" message,
+// when what actually happened is the caller tried too many times and
+// should wait, not retry immediately.
+String _friendlyErrorMessage(Object error, String fallback) {
+  if (error is FirebaseFunctionsException && error.code == 'resource-exhausted') {
+    return "You've tried too many times. Please wait a while before trying again.";
+  }
+  return fallback;
+}
 
 /// Shared across every app (mirrors `libs/auth`'s NX-shared `LoginComponent`)
 /// — [appName] is the only per-app customization (e.g. `'AmDash — EMS'`).
@@ -73,6 +98,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _submitEmail() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) return;
+    if (!_emailPattern.hasMatch(email)) {
+      setState(() => _errorMessage = 'Enter a valid email address.');
+      return;
+    }
 
     setState(() {
       _submitting = true;
@@ -91,7 +120,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         }
       });
     } catch (error) {
-      setState(() => _errorMessage = 'Something went wrong. Please try again.');
+      setState(() => _errorMessage = _friendlyErrorMessage(error, 'Something went wrong. Please try again.'));
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -112,7 +141,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // On success, authStateProvider picks up the new session and the
       // app's router redirect takes over — nothing further to do here.
     } catch (error) {
-      setState(() => _errorMessage = 'Could not set your password. Please try again.');
+      setState(
+        () => _errorMessage = _friendlyErrorMessage(error, 'Could not set your password. Please try again.'),
+      );
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -204,7 +235,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       await ref.read(authServiceProvider).resetPassword(_emailController.text.trim());
       setState(() => _resetMessage = 'Password reset email sent — check your inbox.');
     } catch (error) {
-      setState(() => _errorMessage = 'Could not send a reset email for that address.');
+      setState(
+        () => _errorMessage = _friendlyErrorMessage(error, 'Could not send a reset email for that address.'),
+      );
     } finally {
       if (mounted) setState(() => _resetSubmitting = false);
     }
