@@ -72,7 +72,131 @@ class PatientViewer extends ConsumerStatefulWidget {
   ConsumerState<PatientViewer> createState() => _PatientViewerState();
 }
 
-class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProviderStateMixin {
+class _PatientViewerState extends ConsumerState<PatientViewer> {
+  @override
+  Widget build(BuildContext context) {
+    final patient = widget.patient;
+
+    if (patient == null) {
+      return Column(
+        children: [
+          if (widget.leading != null) Padding(padding: const EdgeInsets.all(16), child: widget.leading),
+          const Expanded(
+            child: EmptyState(
+              graphic: EmptyStateGraphic.chartPulse,
+              title: 'Select a patient to view details',
+              centered: true,
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Only used here to decide whether the live map card should render at
+    // all — everything else it needs (hospitals, tracking status, the
+    // cached route, the glide animation) it reads and reacts to itself, so
+    // it stays correctly live both inline and in the pushed full-screen
+    // route (see _LiveMapCard's own doc comment for why).
+    final hasKnownLocation = emsTrackingInfo(ref, patient.id).location != null;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (widget.leading != null) ...[
+            Align(alignment: Alignment.centerLeft, child: widget.leading),
+            const SizedBox(height: 12),
+          ],
+          PatientFieldText(
+            patient.name,
+            notAddedText: 'Not added by EMS yet',
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          ),
+          Text.rich(
+            TextSpan(
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              children: [
+                if (isProvidedValue(patient.age))
+                  TextSpan(text: '${patient.age} years')
+                else ...[
+                  const TextSpan(text: 'Age: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const TextSpan(text: 'unknown'),
+                ],
+                const TextSpan(text: ' · '),
+                if (isProvidedValue(patient.gender))
+                  TextSpan(text: patient.gender)
+                else ...[
+                  const TextSpan(text: 'Gender: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const TextSpan(text: 'unknown'),
+                ],
+              ],
+            ),
+          ),
+          PatientFieldText(
+            patient.healthcareNumber,
+            prefix: 'Healthcare #: ',
+            notAddedText: 'Not added by EMS yet',
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 16),
+          PatientTextCard(title: 'Destination', text: patient.destination, notAddedText: 'Not added by EMS yet'),
+          const SizedBox(height: 12),
+          PatientVitalsCard(patient: patient),
+          const SizedBox(height: 12),
+          PatientTreatmentCard(patient: patient),
+          const SizedBox(height: 12),
+          if (isProvidedValue(patient.notes)) ...[
+            PatientTextCard(title: 'Patient Notes', text: patient.notes!),
+            const SizedBox(height: 12),
+          ],
+          if (hasKnownLocation)
+            _LiveMapCard(patient: patient, directionsService: widget.directionsService),
+        ],
+      ),
+    );
+  }
+}
+
+/// The map + live-position + ETA card — a fully self-contained,
+/// independently-reactive widget (not just a builder method) specifically
+/// so the "expand" button can push a *second, separate instance* of it into
+/// a full-screen route rather than reusing a single frozen widget snapshot.
+///
+/// The previous implementation built the map as a plain local variable and
+/// handed that one `GoogleMap` instance straight to the pushed route's
+/// `Scaffold(body: map)` — a widget object captured once, at the moment the
+/// button was tapped, that never rebuilt again: `PatientViewer`'s own
+/// `build()` kept producing fresh `GoogleMap`/marker/ETA widgets for the
+/// still-mounted (but now obscured) inline card, while the pushed route's
+/// closure kept referencing that original, frozen object forever. Confirmed
+/// via a real report: the expanded map never updated the vehicle's
+/// position, and never showed the ETA/distance text at all, since only the
+/// bare `GoogleMap` — not the card around it — was ever passed in.
+///
+/// Making this its own widget fixes both: each instance (inline or
+/// full-screen) independently `ref.watch`es the same live providers
+/// (`hospitalsProvider`, `emsLocationProvider`, `directionsCacheProvider`)
+/// and owns its own glide-animation ticker/map controller/directions-fetch
+/// guard, so a full-screen instance is exactly as live as the inline one —
+/// genuinely the same card, just presented full screen, not a stand-in.
+class _LiveMapCard extends ConsumerStatefulWidget {
+  const _LiveMapCard({required this.patient, this.directionsService, this.fullScreen = false});
+
+  final Patient patient;
+  final DirectionsService? directionsService;
+
+  /// True only for the instance pushed by [_openExpandedMap] — swaps the
+  /// fixed-height inline map box for one that fills the whole screen, and
+  /// drops the (now-redundant, and non-functional-while-already-expanded)
+  /// header row/expand button in favor of a real `AppBar`.
+  final bool fullScreen;
+
+  @override
+  ConsumerState<_LiveMapCard> createState() => _LiveMapCardState();
+}
+
+class _LiveMapCardState extends ConsumerState<_LiveMapCard> with TickerProviderStateMixin {
   late final DirectionsService _directionsService = widget.directionsService ?? DirectionsService();
 
   GoogleMapController? _mapController;
@@ -202,24 +326,21 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
     return LatLngBounds(southwest: LatLng(minLat, minLng), northeast: LatLng(maxLat, maxLng));
   }
 
+  void _openExpandedMap() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => _LiveMapCard(
+          patient: widget.patient,
+          directionsService: widget.directionsService,
+          fullScreen: true,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final patient = widget.patient;
-
-    if (patient == null) {
-      return Column(
-        children: [
-          if (widget.leading != null) Padding(padding: const EdgeInsets.all(16), child: widget.leading),
-          const Expanded(
-            child: EmptyState(
-              graphic: EmptyStateGraphic.chartPulse,
-              title: 'Select a patient to view details',
-              centered: true,
-            ),
-          ),
-        ],
-      );
-    }
 
     final hospitals = ref.watch(hospitalsProvider).valueOrNull ?? const [];
     Hospital? destinationHospital;
@@ -246,6 +367,9 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
     }
 
     final vehiclePosition = _tickerPosition ?? _locationLatLng(trackedLocation);
+    // Shouldn't happen given the parent's own hasKnownLocation gate, but
+    // stay defensive rather than force-unwrap a null straight into the map.
+    if (vehiclePosition == null) return const SizedBox.shrink();
 
     // Fetch for `stale` too, not just `active` — the last known *position*
     // already survives a page refresh (rebuilt from Firestore's own
@@ -264,87 +388,15 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
     // _maybeRequestDirections makes this a no-op once a request is already
     // in flight or a result already exists.
     final isTracked = trackingStatus == EmsTrackingStatus.active || trackingStatus == EmsTrackingStatus.stale;
-    if (patient.id != null && isTracked && vehiclePosition != null && destinationHospital != null && cachedRoute == null) {
+    if (patient.id != null && isTracked && destinationHospital != null && cachedRoute == null) {
       _maybeRequestDirections(patient.id!, vehiclePosition, destinationHospital);
     }
 
     final hospitalPosition = destinationHospital == null
         ? null
         : LatLng(destinationHospital.latitude, destinationHospital.longitude);
+    final directionsResult = cachedRoute?.result;
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (widget.leading != null) ...[
-            Align(alignment: Alignment.centerLeft, child: widget.leading),
-            const SizedBox(height: 12),
-          ],
-          PatientFieldText(
-            patient.name,
-            notAddedText: 'Not added by EMS yet',
-            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-          ),
-          Text.rich(
-            TextSpan(
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-              children: [
-                if (isProvidedValue(patient.age))
-                  TextSpan(text: '${patient.age} years')
-                else ...[
-                  const TextSpan(text: 'Age: ', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const TextSpan(text: 'unknown'),
-                ],
-                const TextSpan(text: ' · '),
-                if (isProvidedValue(patient.gender))
-                  TextSpan(text: patient.gender)
-                else ...[
-                  const TextSpan(text: 'Gender: ', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const TextSpan(text: 'unknown'),
-                ],
-              ],
-            ),
-          ),
-          PatientFieldText(
-            patient.healthcareNumber,
-            prefix: 'Healthcare #: ',
-            notAddedText: 'Not added by EMS yet',
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 16),
-          PatientTextCard(title: 'Destination', text: patient.destination, notAddedText: 'Not added by EMS yet'),
-          const SizedBox(height: 12),
-          PatientVitalsCard(patient: patient),
-          const SizedBox(height: 12),
-          PatientTreatmentCard(patient: patient),
-          const SizedBox(height: 12),
-          if (isProvidedValue(patient.notes)) ...[
-            PatientTextCard(title: 'Patient Notes', text: patient.notes!),
-            const SizedBox(height: 12),
-          ],
-          if (vehiclePosition != null)
-            _mapCard(
-              vehiclePosition,
-              hospitalPosition,
-              destinationHospital,
-              trackingStatus,
-              trackedLocation,
-              cachedRoute?.result,
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _mapCard(
-    LatLng vehiclePosition,
-    LatLng? hospitalPosition,
-    Hospital? destinationHospital,
-    EmsTrackingStatus trackingStatus,
-    ActiveLocation? trackedLocation,
-    DirectionsResult? directionsResult,
-  ) {
     final map = GoogleMap(
       initialCameraPosition: CameraPosition(target: vehiclePosition, zoom: 15),
       onMapCreated: (controller) {
@@ -386,95 +438,94 @@ class _PatientViewerState extends ConsumerState<PatientViewer> with TickerProvid
       },
     );
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    final mapBox = ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        decoration: BoxDecoration(border: Border.all(color: AppColors.trackingAccent, width: 2)),
+        child: Stack(
           children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Text('Current Location', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                ),
-                IconButton(
-                  onPressed: () => _openExpandedMap(map),
-                  icon: const Icon(Icons.open_in_full),
-                  tooltip: 'Expand map',
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Container(
-                height: 260,
-                decoration: BoxDecoration(border: Border.all(color: AppColors.trackingAccent, width: 2)),
-                child: Stack(
-                  children: [
-                    map,
-                    // Blur while a route is expected but not cached yet —
-                    // this patient has (or had) a known position and a
-                    // destination exists, so a route is fetchable, whether
-                    // they're currently active or stale (a stale patient's
-                    // last known position still survives, e.g. across a page
-                    // refresh — see _maybeRequestDirections). A never-tracked
-                    // patient's status never reaches active/stale at all, so
-                    // this never shows for them — no spinner spinning forever
-                    // waiting for a route that isn't coming. Only gates the
-                    // *first* load: once a route is cached, it's kept even
-                    // during later refreshes, so this never reappears.
-                    if (destinationHospital != null &&
-                        (trackingStatus == EmsTrackingStatus.active || trackingStatus == EmsTrackingStatus.stale) &&
-                        directionsResult == null)
-                      Positioned.fill(
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
-                          child: Container(
-                            color: Colors.black.withValues(alpha: 0.15),
-                            child: const Center(child: CircularProgressIndicator()),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: trackingStatus == EmsTrackingStatus.active
-                  ? Text(
-                      'Live position: ${vehiclePosition.latitude.toStringAsFixed(4)}, '
-                      '${vehiclePosition.longitude.toStringAsFixed(4)}',
-                      style: TextStyle(color: AppColors.trackingAccent, fontSize: 12),
-                    )
-                  : Text(
-                      'Last updated at: '
-                      '${DateFormat('h:mm:ss a').format(DateTime.fromMillisecondsSinceEpoch(trackedLocation!.updatedAtMs))}',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontSize: 12,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-            ),
-            if (directionsResult != null && destinationHospital != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  'ETA: ${directionsResult.durationText} · Distance: ${directionsResult.distanceText} '
-                  'to ${destinationHospital.name}',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+            Positioned.fill(child: map),
+            // Blur while a route is expected but not cached yet — this
+            // patient has (or had) a known position and a destination
+            // exists, so a route is fetchable, whether they're currently
+            // active or stale (a stale patient's last known position still
+            // survives, e.g. across a page refresh — see
+            // _maybeRequestDirections). A never-tracked patient's status
+            // never reaches active/stale at all, so this never shows for
+            // them — no spinner spinning forever waiting for a route that
+            // isn't coming. Only gates the *first* load: once a route is
+            // cached, it's kept even during later refreshes, so this never
+            // reappears.
+            if (destinationHospital != null &&
+                (trackingStatus == EmsTrackingStatus.active || trackingStatus == EmsTrackingStatus.stale) &&
+                directionsResult == null)
+              Positioned.fill(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+                  child: Container(
+                    color: Colors.black.withValues(alpha: 0.15),
+                    child: const Center(child: CircularProgressIndicator()),
+                  ),
                 ),
               ),
           ],
         ),
       ),
     );
-  }
 
-  void _openExpandedMap(Widget map) {
-    Navigator.of(context).push(MaterialPageRoute(builder: (context) => Scaffold(appBar: AppBar(), body: map)));
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (!widget.fullScreen) ...[
+          Row(
+            children: [
+              const Expanded(
+                child: Text('Current Location', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              ),
+              IconButton(onPressed: _openExpandedMap, icon: const Icon(Icons.open_in_full), tooltip: 'Expand map'),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+        widget.fullScreen ? Expanded(child: mapBox) : SizedBox(height: 260, child: mapBox),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: trackingStatus == EmsTrackingStatus.active
+              ? Text(
+                  'Live position: ${vehiclePosition.latitude.toStringAsFixed(4)}, '
+                  '${vehiclePosition.longitude.toStringAsFixed(4)}',
+                  style: TextStyle(color: AppColors.trackingAccent, fontSize: 12),
+                )
+              : Text(
+                  'Last updated at: '
+                  '${DateFormat('h:mm:ss a').format(DateTime.fromMillisecondsSinceEpoch(trackedLocation!.updatedAtMs))}',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+        ),
+        if (directionsResult != null && destinationHospital != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'ETA: ${directionsResult.durationText} · Distance: ${directionsResult.distanceText} '
+              'to ${destinationHospital.name}',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+      ],
+    );
+
+    if (widget.fullScreen) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Current Location')),
+        body: Padding(padding: const EdgeInsets.all(16), child: body),
+      );
+    }
+
+    return Card(child: Padding(padding: const EdgeInsets.all(16), child: body));
   }
 }

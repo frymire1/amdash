@@ -777,4 +777,75 @@ void main() {
     expect(find.byType(GoogleMap), findsOneWidget);
     expect(find.byType(AppBar), findsOneWidget);
   });
+
+  group('the expanded (full-screen) map', () {
+    // Regression tests for a real bug: expanding used to hand the pushed
+    // route a single frozen `GoogleMap` widget instance — built once, at
+    // the moment the button was tapped, and never the surrounding card —
+    // so it never showed the ETA at all, and never reflected a later
+    // position update either. Fixed by making the whole card (map + live-
+    // position text + ETA) its own self-contained, independently-reactive
+    // widget, so expanding mounts a *second, genuinely live* instance of
+    // it instead of reusing a frozen snapshot of just the map.
+    testWidgets('shows the ETA/distance text, which the old bare-map expansion never did', (tester) async {
+      await pumpViewer(
+        tester,
+        patient: _patient(destination: _hospital.name),
+        hospitals: const [_hospital],
+        emsState: EmsLocationState(
+          hasLoadedOnce: true,
+          info: {'patient-1': EmsTrackingInfo(status: EmsTrackingStatus.active, location: _fix(updatedAtMs: 1000))},
+        ),
+        cachedRoutes: {
+          'patient-1': DirectionsCacheEntry(result: _directionsResult(), requestedAtMs: 1000, origin: const LatLng(45.41, -75.69)),
+        },
+      );
+      await tester.pumpAndSettle();
+      // Confirms the inline card shows it first, same as before.
+      expect(find.textContaining('ETA: 12 mins'), findsOneWidget);
+
+      await tester.ensureVisible(find.byTooltip('Expand map'));
+      await tester.tap(find.byTooltip('Expand map'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('ETA: 12 mins · Distance: 5.2 km to Ottawa Civic'), findsOneWidget);
+    });
+
+    testWidgets('keeps updating the live position after a new fix arrives, which the old frozen expansion never did', (
+      tester,
+    ) async {
+      final controller = await pumpViewer(
+        tester,
+        patient: _patient(),
+        emsState: EmsLocationState(
+          hasLoadedOnce: true,
+          info: {'patient-1': EmsTrackingInfo(status: EmsTrackingStatus.active, location: _fix(updatedAtMs: 1000))},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byTooltip('Expand map'));
+      await tester.tap(find.byTooltip('Expand map'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Live position: 45.4100, -75.6900'), findsOneWidget);
+
+      // A fresh fix with no previous-fix-to-glide-from renders immediately
+      // (see the `_onLocationChanged` group above) — no ticker involved, so
+      // this is safe to `pumpAndSettle()` through.
+      controller.setState(
+        EmsLocationState(
+          hasLoadedOnce: true,
+          info: {
+            'patient-1': EmsTrackingInfo(
+              status: EmsTrackingStatus.active,
+              location: _fix(updatedAtMs: 2000, latitude: 45.5, longitude: -75.5),
+            ),
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Live position: 45.5000, -75.5000'), findsOneWidget);
+    });
+  });
 }
