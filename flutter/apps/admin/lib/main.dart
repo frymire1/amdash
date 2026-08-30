@@ -1,4 +1,5 @@
 import 'package:amdash_core/amdash_core.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,9 +7,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'firebase_options.dart';
 import 'router.dart';
 
+// See ems/lib/main.dart's identical constant for the rationale. No
+// Android/Apple debug-token wiring here — admin has no android/ios
+// directory at all (web-only), so there's no debug provider for one to
+// apply to.
+const _appCheckRecaptchaSiteKey = String.fromEnvironment('APP_CHECK_RECAPTCHA_SITE_KEY');
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Monitor mode only — see SECURITY.md.
+  await FirebaseAppCheck.instance.activate(providerWeb: ReCaptchaV3Provider(_appCheckRecaptchaSiteKey));
+
   runApp(const ProviderScope(child: AdminApp()));
 }
 

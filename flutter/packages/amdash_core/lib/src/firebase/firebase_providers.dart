@@ -1,9 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// The overridable seams for this package's 3 Firebase SDK singletons.
+/// The overridable seams for this package's 4 Firebase SDK singletons.
 /// Several providers (`hospitalsProvider`, `ownOrganizationProvider`,
 /// `vitalsHistoryProvider`, `userProfileProvider`, and one stream inside
 /// `auth_service.dart`) used to call `FirebaseFirestore.instance` directly
@@ -32,3 +33,12 @@ const _functionsRegion = 'northamerica-northeast2';
 
 final firebaseFunctionsProvider =
     Provider<FirebaseFunctions>((ref) => FirebaseFunctions.instanceFor(region: _functionsRegion));
+
+/// `FirebaseAppCheck.instance.activate(...)` itself is a boot-time side
+/// effect called once from each app's `main.dart` (before this provider or
+/// anything else in the widget tree exists), not something read here — this
+/// exists purely so any future widget/service that needs to inspect App
+/// Check status (e.g. `getToken`/`onTokenChange`) has the same overridable
+/// DI seam as the 3 providers above, instead of reaching for
+/// `FirebaseAppCheck.instance` directly.
+final firebaseAppCheckProvider = Provider<FirebaseAppCheck>((ref) => FirebaseAppCheck.instance);

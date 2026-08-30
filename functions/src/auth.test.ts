@@ -14,6 +14,7 @@ const {
   mockCollection,
   mockSendPasswordResetEmail,
   mockSendVerificationEmail,
+  mockEnforceRateLimit,
 } = vi.hoisted(() => ({
   mockInitializeApp: vi.fn(),
   mockGetUserByEmail: vi.fn(),
@@ -25,6 +26,12 @@ const {
   mockCollection: vi.fn(() => ({ doc: mockDoc })),
   mockSendPasswordResetEmail: vi.fn(),
   mockSendVerificationEmail: vi.fn(),
+  // rate-limit.ts has its own dedicated test file covering its internals
+  // (window math, transaction semantics, key hashing) — mocked away here,
+  // same as email.ts below, so these tests stay focused on auth.ts's own
+  // logic and don't need a Firestore transaction mock on top of everything
+  // else already being stubbed.
+  mockEnforceRateLimit: vi.fn(),
 }));
 
 vi.mock('firebase-admin/app', () => ({ initializeApp: mockInitializeApp }));
@@ -45,6 +52,8 @@ vi.mock('./email', () => ({
   sendPasswordResetEmail: mockSendPasswordResetEmail,
   sendVerificationEmail: mockSendVerificationEmail,
 }));
+
+vi.mock('./rate-limit', () => ({ enforceRateLimit: mockEnforceRateLimit }));
 
 import {
   checkAccountStatus,
@@ -128,6 +137,26 @@ describe('checkAccountStatus', () => {
     const result = await checkAccountStatus.run(fakeCallableRequest({ email: 'nobody@example.com' }));
     expect(result).toEqual({ exists: false, hasPassword: false });
   });
+
+  it('rate-limits per caller IP before doing any lookup', async () => {
+    mockGetUserByEmail.mockResolvedValue({ providerData: [] });
+
+    await checkAccountStatus.run(fakeCallableRequest({ email: 'a@example.com' }));
+
+    expect(mockEnforceRateLimit).toHaveBeenCalledWith(expect.stringContaining('check:ip:'), {
+      maxAttempts: 20,
+      windowMs: 60 * 60 * 1000,
+    });
+  });
+
+  it('propagates a rate-limit rejection instead of performing the lookup', async () => {
+    mockEnforceRateLimit.mockRejectedValue(new Error('Too many attempts. Please try again later.'));
+
+    await expect(checkAccountStatus.run(fakeCallableRequest({ email: 'a@example.com' }))).rejects.toThrow(
+      'Too many attempts',
+    );
+    expect(mockGetUserByEmail).not.toHaveBeenCalled();
+  });
 });
 
 describe('setInitialPassword', () => {
@@ -173,6 +202,30 @@ describe('setInitialPassword', () => {
 
     expect(mockUpdateUser).toHaveBeenCalledWith('uid-1', { password: 'Longenough1!' });
     expect(result).toEqual({ email: 'a@example.com' });
+  });
+
+  it('rate-limits per caller IP and per target email before touching the account', async () => {
+    mockGetUserByEmail.mockResolvedValue({ uid: 'uid-1', email: 'a@example.com', providerData: [] });
+
+    await setInitialPassword.run(fakeCallableRequest({ email: 'a@example.com', password: 'Longenough1!' }));
+
+    expect(mockEnforceRateLimit).toHaveBeenCalledWith(expect.stringContaining('setpw:ip:'), {
+      maxAttempts: 5,
+      windowMs: 60 * 60 * 1000,
+    });
+    expect(mockEnforceRateLimit).toHaveBeenCalledWith('setpw:email:a@example.com', {
+      maxAttempts: 5,
+      windowMs: 60 * 60 * 1000,
+    });
+  });
+
+  it('propagates a rate-limit rejection instead of setting a password', async () => {
+    mockEnforceRateLimit.mockRejectedValue(new Error('Too many attempts. Please try again later.'));
+
+    await expect(
+      setInitialPassword.run(fakeCallableRequest({ email: 'a@example.com', password: 'Longenough1!' })),
+    ).rejects.toThrow('Too many attempts');
+    expect(mockUpdateUser).not.toHaveBeenCalled();
   });
 });
 
@@ -224,6 +277,30 @@ describe('requestPasswordReset', () => {
 
     expect(result).toEqual({ email: 'nobody@example.com' });
     expect(mockGeneratePasswordResetLink).not.toHaveBeenCalled();
+    expect(mockSendPasswordResetEmail).not.toHaveBeenCalled();
+  });
+
+  it('rate-limits per target email and per caller IP, even for a non-existent account', async () => {
+    mockGetUserByEmail.mockRejectedValue(new Error('no user'));
+
+    await requestPasswordReset.run(fakeCallableRequest({ email: 'nobody@example.com' }));
+
+    expect(mockEnforceRateLimit).toHaveBeenCalledWith('reset:email:nobody@example.com', {
+      maxAttempts: 3,
+      windowMs: 60 * 60 * 1000,
+    });
+    expect(mockEnforceRateLimit).toHaveBeenCalledWith(expect.stringContaining('reset:ip:'), {
+      maxAttempts: 20,
+      windowMs: 60 * 60 * 1000,
+    });
+  });
+
+  it('propagates a rate-limit rejection instead of sending anything', async () => {
+    mockEnforceRateLimit.mockRejectedValue(new Error('Too many attempts. Please try again later.'));
+
+    await expect(requestPasswordReset.run(fakeCallableRequest({ email: 'a@example.com' }))).rejects.toThrow(
+      'Too many attempts',
+    );
     expect(mockSendPasswordResetEmail).not.toHaveBeenCalled();
   });
 });

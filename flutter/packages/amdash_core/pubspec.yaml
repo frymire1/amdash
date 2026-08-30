@@ -39,6 +39,7 @@ dependencies:
   # seam; production behavior is unchanged (the unoverridden `clock` global
   # just calls real DateTime.now()).
   clock: ^1.1.2
+  firebase_app_check: ^0.4.7
 
 dev_dependencies:
   flutter_test:

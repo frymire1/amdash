@@ -49,6 +49,18 @@ name: CI
 #     seeding/teardown (see scripts/lib/firebase-admin-cli.mjs) — no
 #     longer used for hosting deploys now that those are on Cloud Run
 #     via WIF (see flutter-web-deploy below and deploy-web-cloud-run.yml).
+#   - FIREBASE_APPCHECK_DEBUG_TOKEN — a debug token registered by hand in
+#     Firebase Console -> App Check -> (app) -> Manage debug tokens, passed
+#     as a --dart-define to flutter-android-e2e's physician/ems `patrol
+#     build android` steps so App Check's debug provider (see
+#     flutter/apps/{physician,ems}/lib/main.dart) can mint a real token
+#     during that job instead of falling back to an unregistered
+#     auto-generated one. Not needed by flutter-web-e2e — the web platform
+#     always uses the reCAPTCHA provider, never the debug one, regardless
+#     of build mode. App Check is monitor-mode only right now (see
+#     SECURITY.md), so nothing actually rejects requests yet even without
+#     this secret set — it's here so the eventual enforcement flip doesn't
+#     break this job on the day it happens.
 #
 # flutter-android-e2e authenticates to Google Cloud via Workload Identity
 # Federation, not a service account key — this org has
@@ -527,7 +539,8 @@ jobs:
             --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
             --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")" \
             --dart-define SMOKE_HOSPITAL="$(jq -r .hospitalName "$ACCOUNT")" \
-            --dart-define SMOKE_PATIENT_NAME="$(jq -r .patientName "$ACCOUNT")"
+            --dart-define SMOKE_PATIENT_NAME="$(jq -r .patientName "$ACCOUNT")" \
+            --dart-define FIREBASE_APPCHECK_DEBUG_TOKEN="${{ secrets.FIREBASE_APPCHECK_DEBUG_TOKEN }}"
           # tee'd to a file (not just relying on the job log) so the next
           # DEBUG step can grep the GCS bucket path back out of it — see
           # that step's own comment for why. That next step runs via
@@ -579,7 +592,8 @@ jobs:
           cd flutter/apps/ems
           patrol build android --target patrol_test/ems_test.dart \
             --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
-            --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")"
+            --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")" \
+            --dart-define FIREBASE_APPCHECK_DEBUG_TOKEN="${{ secrets.FIREBASE_APPCHECK_DEBUG_TOKEN }}"
           # --grant-permissions=none (gcloud *beta* only — the stable
           # `gcloud firebase test android run` has no equivalent flag at
           # all): without it, Test Lab pre-grants ACCESS_FINE_LOCATION/

@@ -7,10 +7,26 @@ import { CallerProfile } from './classes/caller-profile';
 import { CheckAccountStatusRequest } from './classes/check-account-status-request';
 import { SetInitialPasswordRequest } from './classes/set-initial-password-request';
 import { RESEND_API_KEY, sendPasswordResetEmail, sendVerificationEmail } from './email';
+import { enforceRateLimit } from './rate-limit';
+import type { CallableRequest } from 'firebase-functions/v2/https';
 
 initializeApp();
 
 export const REGION = 'northamerica-northeast2';
+
+// The three callables below are the only ones with no `request.auth` to gate
+// on at all, so a caller's IP is the only per-caller dimension rate-limiting
+// has to work with. Cloud Functions v2 runs on Cloud Run under the hood,
+// which already terminates the connection and populates `X-Forwarded-For`
+// before this code ever runs — `rawRequest.ip` (Express's own resolved
+// client IP) reflects that, not a raw socket address. Falls back to a
+// constant key rather than throwing if it's ever somehow empty: a shared
+// fallback bucket is a worse rate limit, not a broken one.
+function callerIp(request: CallableRequest): string {
+  return request.rawRequest.ip || 'unknown';
+}
+
+const ONE_HOUR_MS = 60 * 60 * 1000;
 
 // The one place every Cloud Function reads a caller's role/org — a single
 // `users/{uid}` read, reused by every requireAdmin/requireSuperAdmin/manual
@@ -51,6 +67,8 @@ export const checkAccountStatus = onCall<CheckAccountStatusRequest>({ region: RE
   if (!email) {
     throw new HttpsError('invalid-argument', 'A valid email is required.');
   }
+
+  await enforceRateLimit(`check:ip:${callerIp(request)}`, { maxAttempts: 20, windowMs: ONE_HOUR_MS });
 
   try {
     const user = await getAuth().getUserByEmail(email);
@@ -94,6 +112,9 @@ export const setInitialPassword = onCall<SetInitialPasswordRequest>({ region: RE
         'special character, are required.'
     );
   }
+
+  await enforceRateLimit(`setpw:ip:${callerIp(request)}`, { maxAttempts: 5, windowMs: ONE_HOUR_MS });
+  await enforceRateLimit(`setpw:email:${email}`, { maxAttempts: 5, windowMs: ONE_HOUR_MS });
 
   const user = await findUserByEmail(email);
 
@@ -144,6 +165,16 @@ export const requestPasswordReset = onCall<CheckAccountStatusRequest>(
     if (!email) {
       throw new HttpsError('invalid-argument', 'A valid email is required.');
     }
+
+    // Per-email first (tighter — this is the inbox-bombing vector: spamming
+    // one real address with reset emails) and per-IP second (looser —
+    // catches one caller sweeping many addresses). Both run before the
+    // existence check below, on purpose: skipping the per-email limit for
+    // addresses that don't exist would let a caller probe account existence
+    // at unlimited speed via timing/rate alone, even though the response
+    // body itself never distinguishes the two cases.
+    await enforceRateLimit(`reset:email:${email}`, { maxAttempts: 3, windowMs: ONE_HOUR_MS });
+    await enforceRateLimit(`reset:ip:${callerIp(request)}`, { maxAttempts: 20, windowMs: ONE_HOUR_MS });
 
     let user;
     try {

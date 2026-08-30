@@ -187,5 +187,14 @@ service cloud.firestore {
     match /auditLog/{entryId} {
       allow read, write: if false;
     }
+
+    // The public-callable rate limiter's own bookkeeping (functions/src/
+    // rate-limit.ts) — Admin SDK only, same as auditLog above. No client,
+    // including a signed-in one, has any legitimate reason to read or write
+    // this: it's internal counters keyed by a hash of an email/IP, not
+    // anything a user's own account owns.
+    match /_rateLimits/{entryId} {
+      allow read, write: if false;
+    }
   }
 }
