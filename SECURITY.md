@@ -9,18 +9,24 @@ coverage.
 
 ## Google/Firebase products in use, and their HIPAA BAA status
 
-Google publishes a specific list of "covered products" its Business
-Associate Agreement (BAA) actually applies to — using an *uncovered* product
-for PHI is a real HIPAA violation regardless of Google's general security
-posture, so this table is the load-bearing reference for that boundary, not
-a formality. Sourced by fetching Google's current list live rather than
-relying on possibly-stale prior knowledge; re-verify against
+**No BAA is currently in place, at all, for any product — see the note at
+the end of this section for why.** Google publishes a specific list of
+"covered products" its Business Associate Agreement (BAA) actually applies
+to — using an *uncovered* product for PHI is a real HIPAA violation
+regardless of Google's general security posture, so the "covered?" column
+below is the load-bearing reference for that boundary. But covered-product
+eligibility and an actually-executed BAA are two different things: **every
+row in this table describes what would be true if AmDash had a signed BAA,
+not AmDash's actual current legal HIPAA status, which is "no BAA, no HIPAA
+protection from Google, regardless of which products are in use."** Sourced
+by fetching Google's current covered-products list live rather than relying
+on possibly-stale prior knowledge; re-verify against
 [cloud.google.com/terms/service-terms](https://cloud.google.com/terms/service-terms)
 before trusting an old copy of this file.
 
 | Product | HIPAA covered? | PHI touches it? |
 |---|---|---|
-| Identity Platform | Yes | Yes — auth records (email, uid) |
+| Identity Platform | Yes (**confirmed active**) | Yes — auth records (email, uid) |
 | ~~Firebase Authentication~~ (plain) | **No** | superseded — see below |
 | Cloud Firestore | Yes | Yes — patient records, vitals, location |
 | Cloud KMS | Yes | Indirectly — wraps the encryption keys protecting PII fields (never sees plaintext) |
@@ -34,10 +40,35 @@ before trusting an old copy of this file.
 Identity Platform is.** They're the same underlying service; upgrading is a
 one-click Firebase Console action (Authentication → Settings → "Upgrade to
 Identity Platform") with zero code changes to any `AuthService` method, and
-the free tier (50,000 MAU) comfortably covers AmDash's actual usage. **This
-upgrade is a manual console step, done outside of source control — check the
-Firebase Console directly for current status; this file only records that
-it's required, not a live signal of whether it's happened yet.**
+the free tier (50,000 MAU) comfortably covers AmDash's actual usage.
+
+**Confirmed currently active** (verified 2026-08-31 via a live Firebase
+Console screenshot — the Authentication page reads "Authentication with
+Identity Platform" rather than showing the upgrade prompt). The exact date
+this was actually turned on isn't known — it may well predate this file —
+so treat 2026-08-31 as "confirmed no later than," not "upgraded on." This
+was a manual console step either way, done outside of source control, so
+there's no commit/PR to point to for exactly when it happened.
+
+Enabling the product is necessary but not sufficient for actual HIPAA
+protection on its own — it only matters paired with an accepted Business
+Associate Amendment (BAA), a separate step done by a super-admin in the
+**Google Admin console** (admin.google.com, not Firebase/Cloud Console):
+Account → Account settings → Legal and compliance → Security and Privacy
+Additional Terms → accept the HIPAA BAA.
+
+**Blocked, not just pending: AmDash has no legal business entity yet.** A
+BAA is a legal contract between two parties — Google and a HIPAA-regulated
+"covered entity" or "business associate" — and there is currently nothing
+on AmDash's side capable of being a party to that contract. This isn't an
+engineering task or a console setting; it needs incorporation (and
+whatever entity structure a lawyer recommends for a healthcare-adjacent
+product) to happen first. Every "HIPAA covered" designation in the table
+above is describing product *eligibility*, not AmDash's actual legal
+status today — treat it that way in any conversation with an auditor,
+investor, or customer: **the honest current answer to "is AmDash HIPAA
+compliant" is no, pending incorporation and a signed BAA, not "yes" or
+"almost."** Update this note the moment that changes.
 
 App Check and FCM being uncovered is fine specifically *because* neither
 ever carries PHI — the same reasoning already applied deliberately elsewhere
@@ -236,6 +267,10 @@ address, a textbook account-enumeration side channel.
 
 ## Explicitly not done yet
 
+- **The HIPAA BAA itself — blocked on incorporation, not an engineering
+  task.** See the note in the covered-products section above. Until this
+  is signed, none of this file's other hardening work makes AmDash
+  actually HIPAA compliant, only closer to ready for the day it can be.
 - **App Check enforcement** — still monitor mode everywhere (see above);
   flipping it per-service is a deliberate future step once the metrics
   dashboard confirms real traffic is covered.
