@@ -14,6 +14,7 @@ import 'package:ems/firebase_options.dart';
 import 'package:ems/main.dart';
 import 'package:ems/screens/home_screen.dart';
 import 'package:ems/screens/patient_upload_screen.dart';
+import 'package:ems/widgets/patient_summary_card.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -99,13 +100,28 @@ void main() {
     // settleLocationPrompts call had already returned).
     await settleLocationPrompts($);
     await tapKey($, 'patient_upload_submit');
+    // Scoped to the home screen's own PatientSummaryCard, not a bare
+    // find.text(patientName) — _onSubmit's success path (patient_upload_
+    // screen.dart) navigates away via context.go('/') without first
+    // clearing the Name field's controller, so for a moment both the
+    // outgoing PatientUploadScreen's still-filled TextField (an
+    // EditableText, which find.text() also matches) and the new card on
+    // HomeScreen show the same text. Same class of bug, same fix, as
+    // admin's user_flow_test.dart hospital-creation assertion — see that
+    // file's own comment ("Confirmed via a real GHA failure ('Found 2
+    // widgets')") for the precedent; hit for real here too, on Android
+    // Test Lab specifically (2026-08-31 CI run).
+    final patientCard = find.descendant(
+      of: find.byType(PatientSummaryCard),
+      matching: find.text(patientName),
+    );
     await pumpUntil(
       $,
-      () => find.text(patientName).evaluate().isNotEmpty,
+      () => patientCard.evaluate().isNotEmpty,
       maxIterations: 40,
     );
     expect(
-      find.text(patientName),
+      patientCard,
       findsOneWidget,
       reason: 'patient should appear on the home screen after upload',
     );
