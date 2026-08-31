@@ -732,10 +732,10 @@ jobs:
             echo
           done
 
-      # The failure-state leg — a physician-role account's first sign-in
-      # attempt through the EMS app, which should genuinely set a
-      # password/enroll MFA (neither checks role) and then land on
-      # AccessDeniedScreen. See ems/patrol_test/wrong_app_login_test.dart's
+      # The failure-state leg — a physician-role account attempting to
+      # sign into the EMS app, rejected right after email (checkAccountStatus's
+      # own roleAllowed field — see functions/src/auth.ts), before a
+      # password is ever relevant. See ems/patrol_test/wrong_app_login_test.dart's
       # own header comment.
       - name: Build + run ems wrong-app Test Lab suite (Android)
         run: |
@@ -744,7 +744,6 @@ jobs:
           cd flutter/apps/ems
           patrol build android --target patrol_test/wrong_app_login_test.dart \
             --dart-define SMOKE_EMAIL="$(jq -r .wrongAppUserEmail "$ACCOUNT")" \
-            --dart-define SMOKE_NEW_PASSWORD="$(jq -r .newUserPassword "$ACCOUNT")" \
             --dart-define FIREBASE_APPCHECK_DEBUG_TOKEN="${{ secrets.FIREBASE_APPCHECK_DEBUG_TOKEN }}"
           gcloud firebase test android run \
             --type instrumentation \

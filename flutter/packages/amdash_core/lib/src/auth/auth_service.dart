@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../firebase/firebase_providers.dart';
 import '../models/account_status.dart';
+import '../models/user_profile.dart';
 import 'reload_page.dart';
 
 /// Mirrors `libs/auth/src/lib/services/auth.service.ts`: wraps Firebase
@@ -27,10 +28,16 @@ class AuthService {
 
   bool get isAuthenticated => _auth.currentUser != null;
 
-  Future<AccountStatus> checkAccountStatus(String email) async {
+  // [allowedRoles] lets the login screen catch "right account, wrong app"
+  // immediately after the caller identifies themselves by email — see
+  // functions/src/classes/check-account-status-request.ts's own doc
+  // comment for why this is checked server-side rather than trusted from
+  // the client. Empty (the default) skips that check entirely.
+  Future<AccountStatus> checkAccountStatus(String email, {List<UserRole> allowedRoles = const []}) async {
     final callable = _functions.httpsCallable('checkAccountStatus');
     final result = await callable.call<Map<Object?, Object?>>({
       'email': email,
+      'allowedRoles': [for (final role in allowedRoles) role.wireValue],
     });
     return AccountStatus.fromJson(result.data);
   }

@@ -2,20 +2,25 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../app_urls.dart';
 import '../auth/auth_service.dart';
+import '../models/user_profile.dart';
 import '../theme/app_theme.dart';
 
 /// Mirrors `libs/auth/src/lib/login/login.component.ts`'s email-first flow:
 /// submitting an email decides server-side (via `checkAccountStatus`)
 /// whether this lands on "not activated" (no account — AmDash has no
-/// self-registration), "set a password" (an admin-created account with no
-/// password yet), or a normal password sign-in. `mfaChallenge` is newer
-/// than the Angular source this mirrors — reached only from `signIn` when
-/// Firebase itself throws `FirebaseAuthMultiFactorException` for an
-/// already-enrolled account (a brand-new account reaching `setPassword`
-/// can never have an enrolled factor yet, so that step never sees this).
-enum _LoginStep { email, notActivated, setPassword, signIn, mfaChallenge }
+/// self-registration), "wrong app" (a real account, but not one of
+/// [LoginScreen.allowedRoles] — see that field's own doc comment), "set a
+/// password" (an admin-created account with no password yet), or a normal
+/// password sign-in. `mfaChallenge` is newer than the Angular source this
+/// mirrors — reached only from `signIn` when Firebase itself throws
+/// `FirebaseAuthMultiFactorException` for an already-enrolled account (a
+/// brand-new account reaching `setPassword` can never have an enrolled
+/// factor yet, so that step never sees this).
+enum _LoginStep { email, notActivated, wrongApp, setPassword, signIn, mfaChallenge }
 
 // Deliberately permissive (not a full RFC 5322 pattern, which routinely
 // rejects real addresses) — just enough to catch obviously-malformed input
@@ -42,11 +47,22 @@ String _friendlyErrorMessage(Object error, String fallback) {
 }
 
 /// Shared across every app (mirrors `libs/auth`'s NX-shared `LoginComponent`)
-/// — [appName] is the only per-app customization (e.g. `'AmDash — EMS'`).
+/// — [appName] is the per-app display name (e.g. `'AmDash — EMS'`).
+///
+/// [allowedRoles] is the same list each app's own router guard already
+/// requires (`AppRouteGuard`'s `requiredRoles`, or admin's own
+/// `adminRedirect` — see each app's `router.dart`) — passed here too so
+/// `checkAccountStatus` can catch "right account, wrong app" immediately
+/// after the caller identifies themselves by email, landing on the
+/// `wrongApp` step instead of only finding out after setting a password
+/// and enrolling MFA, which is what happened before this existed (that
+/// guard tier still runs regardless, as the real enforcement boundary —
+/// this is purely a faster, kinder way to tell someone the same thing).
 class LoginScreen extends ConsumerStatefulWidget {
-  const LoginScreen({required this.appName, super.key});
+  const LoginScreen({required this.appName, required this.allowedRoles, super.key});
 
   final String appName;
+  final List<UserRole> allowedRoles;
 
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
@@ -65,6 +81,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _obscureConfirmPassword = true;
   String? _errorMessage;
   String? _resetMessage;
+
+  // Set only when _submitEmail lands on the wrongApp step — the account's
+  // actual role(s), straight from checkAccountStatus's own response, so
+  // that step's "try one of your other apps" list (matchingAppLinks) can
+  // suggest the right one(s) without needing a signed-in profile to read
+  // them from (there isn't one yet at this point in the flow).
+  List<UserRole> _wrongAppRoles = const [];
 
   // Set only when Firebase throws FirebaseAuthMultiFactorException from
   // _submitSignIn — carries the in-flight challenge until resolved.
@@ -109,10 +132,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
 
     try {
-      final status = await ref.read(authServiceProvider).checkAccountStatus(email);
+      final status = await ref.read(authServiceProvider).checkAccountStatus(email, allowedRoles: widget.allowedRoles);
       setState(() {
         if (!status.exists) {
           _step = _LoginStep.notActivated;
+        } else if (!status.roleAllowed) {
+          _wrongAppRoles = status.role;
+          _step = _LoginStep.wrongApp;
         } else if (status.hasPassword) {
           _step = _LoginStep.signIn;
         } else {
@@ -252,6 +278,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _confirmPasswordController.clear();
       _mfaCodeController.clear();
       _mfaResolver = null;
+      _wrongAppRoles = const [];
     });
   }
 
@@ -358,6 +385,31 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             'Your email, ${_emailController.text.trim()}, has not been activated by your admin. '
             'Contact your admin for further help.',
           ),
+          const SizedBox(height: 16),
+          OutlinedButton(
+            onPressed: _useDifferentEmail,
+            child: const Text('Use a different email'),
+          ),
+        ];
+      case _LoginStep.wrongApp:
+        final links = matchingAppLinks(_wrongAppRoles);
+        return [
+          const Text('Access denied', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          _errorText(context, "Your account doesn't have access to the ${widget.appName} app."),
+          if (links.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            const Text('Try one of your other apps:'),
+            const SizedBox(height: 8),
+            for (final link in links)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: OutlinedButton(
+                  onPressed: () => launchUrl(Uri.parse(link.url)),
+                  child: Text(link.label),
+                ),
+              ),
+          ],
           const SizedBox(height: 16),
           OutlinedButton(
             onPressed: _useDifferentEmail,

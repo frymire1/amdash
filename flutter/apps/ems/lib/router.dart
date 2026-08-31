@@ -27,7 +27,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/login',
         pageBuilder: (context, state) =>
-            fastFadePage(context, state, const AppBackground(child: LoginScreen(appName: 'AmDash — EMS'))),
+            fastFadePage(
+              context,
+              state,
+              const AppBackground(
+                child: LoginScreen(appName: 'AmDash — EMS', allowedRoles: [UserRole.ems]),
+              ),
+            ),
       ),
       GoRoute(
         path: '/access-denied',

@@ -12,10 +12,11 @@
 // and passwordless, not a seed script standing in for it.
 //
 // A third leg then covers the matching failure state: an admin-created
-// *ems*-role account attempting its first sign-in through the physician
-// app instead — should genuinely be able to set a password/enroll MFA
-// (neither checks role), then land on AccessDeniedScreen, never
-// MainViewScreen. See physician/patrol_test/wrong_app_login_test.dart.
+// *ems*-role account attempting to sign into the physician app instead —
+// rejected right after email (checkAccountStatus's own roleAllowed
+// field, see functions/src/auth.ts), before a password is ever relevant,
+// landing on AccessDeniedScreen, never MainViewScreen. See
+// physician/patrol_test/wrong_app_login_test.dart.
 //
 // All three legs run on Chrome (unlike run-ems-onboarding-e2e.mjs's
 // sibling, which needs a real Android device for its EMS legs) — mirrors
@@ -196,10 +197,10 @@ try {
     wrongAppExitCode = await runPatrolTest({
       appDir: PHYSICIAN_APP_DIR,
       target: 'patrol_test/wrong_app_login_test.dart',
-      dartDefines: {
-        SMOKE_EMAIL: WRONG_APP_USER_EMAIL,
-        SMOKE_NEW_PASSWORD: NEW_USER_PASSWORD,
-      },
+      // No SMOKE_NEW_PASSWORD — wrong_app_login_test.dart is rejected
+      // right after email, before a password is ever relevant (see its
+      // own header comment).
+      dartDefines: {SMOKE_EMAIL: WRONG_APP_USER_EMAIL},
     });
   } else {
     console.log('\n❌ Admin create-user step failed — skipping the wrong-app login step (account was never created).');

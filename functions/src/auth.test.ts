@@ -122,20 +122,86 @@ describe('checkAccountStatus', () => {
 
   it('reports exists: true, hasPassword: true for an account with a password provider', async () => {
     mockGetUserByEmail.mockResolvedValue({ providerData: [{ providerId: 'password' }] });
+    mockGet.mockResolvedValue({ data: () => ({ role: ['ems'] }) });
     const result = await checkAccountStatus.run(fakeCallableRequest({ email: 'a@example.com' }));
-    expect(result).toEqual({ exists: true, hasPassword: true });
+    expect(result).toEqual({ exists: true, hasPassword: true, roleAllowed: true, role: ['ems'] });
   });
 
   it('reports exists: true, hasPassword: false for an account with no password provider (e.g. admin-created)', async () => {
     mockGetUserByEmail.mockResolvedValue({ providerData: [] });
+    mockGet.mockResolvedValue({ data: () => ({ role: ['ems'] }) });
     const result = await checkAccountStatus.run(fakeCallableRequest({ email: 'a@example.com' }));
-    expect(result).toEqual({ exists: true, hasPassword: false });
+    expect(result).toEqual({ exists: true, hasPassword: false, roleAllowed: true, role: ['ems'] });
   });
 
   it('reports exists: false when no account is found at all', async () => {
     mockGetUserByEmail.mockRejectedValue(new Error('no user'));
     const result = await checkAccountStatus.run(fakeCallableRequest({ email: 'nobody@example.com' }));
-    expect(result).toEqual({ exists: false, hasPassword: false });
+    expect(result).toEqual({ exists: false, hasPassword: false, roleAllowed: false, role: [] });
+  });
+
+  describe('allowedRoles (wrong-app detection)', () => {
+    it('omitting allowedRoles reports roleAllowed: true regardless of the account\'s real role', async () => {
+      mockGetUserByEmail.mockResolvedValue({ providerData: [] });
+      mockGet.mockResolvedValue({ data: () => ({ role: ['ems'] }) });
+
+      const result = await checkAccountStatus.run(fakeCallableRequest({ email: 'a@example.com' }));
+
+      expect(result).toMatchObject({ roleAllowed: true, role: ['ems'] });
+    });
+
+    it('an account whose role overlaps allowedRoles reports roleAllowed: true', async () => {
+      mockGetUserByEmail.mockResolvedValue({ providerData: [] });
+      mockGet.mockResolvedValue({ data: () => ({ role: ['physician', 'nurse'] }) });
+
+      const result = await checkAccountStatus.run(
+        fakeCallableRequest({ email: 'a@example.com', allowedRoles: ['physician', 'nurse'] }),
+      );
+
+      expect(result).toMatchObject({ roleAllowed: true, role: ['physician', 'nurse'] });
+    });
+
+    it('an account whose role does not overlap allowedRoles reports roleAllowed: false, with its real role', async () => {
+      mockGetUserByEmail.mockResolvedValue({ providerData: [] });
+      mockGet.mockResolvedValue({ data: () => ({ role: ['physician'] }) });
+
+      const result = await checkAccountStatus.run(
+        fakeCallableRequest({ email: 'a@example.com', allowedRoles: ['ems'] }),
+      );
+
+      expect(result).toMatchObject({ roleAllowed: false, role: ['physician'] });
+    });
+
+    it('an account with no role field at all reports roleAllowed: false against any allowedRoles', async () => {
+      mockGetUserByEmail.mockResolvedValue({ providerData: [] });
+      mockGet.mockResolvedValue({ data: () => ({}) });
+
+      const result = await checkAccountStatus.run(
+        fakeCallableRequest({ email: 'a@example.com', allowedRoles: ['ems'] }),
+      );
+
+      expect(result).toMatchObject({ roleAllowed: false, role: [] });
+    });
+
+    it('a Firestore read failure with allowedRoles requested fails closed (roleAllowed: false)', async () => {
+      mockGetUserByEmail.mockResolvedValue({ providerData: [] });
+      mockGet.mockRejectedValue(new Error('firestore unavailable'));
+
+      const result = await checkAccountStatus.run(
+        fakeCallableRequest({ email: 'a@example.com', allowedRoles: ['ems'] }),
+      );
+
+      expect(result).toMatchObject({ roleAllowed: false, role: [] });
+    });
+
+    it('a Firestore read failure with no allowedRoles requested still reports roleAllowed: true', async () => {
+      mockGetUserByEmail.mockResolvedValue({ providerData: [] });
+      mockGet.mockRejectedValue(new Error('firestore unavailable'));
+
+      const result = await checkAccountStatus.run(fakeCallableRequest({ email: 'a@example.com' }));
+
+      expect(result).toMatchObject({ roleAllowed: true, role: [] });
+    });
   });
 
   it('rate-limits per caller IP before doing any lookup', async () => {

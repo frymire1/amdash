@@ -56,14 +56,46 @@ export async function findUserByEmail(email: string) {
   }
 }
 
+// One Firestore read serving both checkAccountStatus response fields:
+// `role` itself (so the client's wrong-app screen can suggest the
+// account's *actual* apps, mirroring AccessDeniedScreen's own logic) and
+// `roleAllowed` (whether any of them satisfy the caller's allowedRoles).
+// Best-effort — a Firestore read failing here shouldn't crash the whole
+// checkAccountStatus call; false/empty are the safe defaults either way,
+// never silently granting access just because something went wrong.
+// Empty/omitted allowedRoles short-circuits roleAllowed to true (see
+// CheckAccountStatusRequest's own doc comment for why) but still reads
+// role for real, since the wrong-app screen isn't the only reason a
+// caller might want it later.
+async function accountRoleInfo(
+  uid: string,
+  allowedRoles: string[] | undefined
+): Promise<{ role: string[]; roleAllowed: boolean }> {
+  const roleCheckRequested = Boolean(allowedRoles && allowedRoles.length > 0);
+  let role: string[] = [];
+  try {
+    const doc = await getFirestore().collection('users').doc(uid).get();
+    const rawRole = doc.data()?.['role'];
+    role = Array.isArray(rawRole) ? rawRole : [];
+  } catch {
+    // Only fail closed when a role check was actually requested — a
+    // caller that passed no allowedRoles at all isn't relying on this,
+    // and shouldn't be shown "wrong app" over an unrelated read failure.
+    return { role: [], roleAllowed: !roleCheckRequested };
+  }
+  const roleAllowed = !roleCheckRequested || role.some((r) => allowedRoles!.includes(r));
+  return { role, roleAllowed };
+}
+
 // Deliberately callable without being signed in — the login page uses this
 // to decide, from just an email, whether to show a "set your password"
-// screen (no account yet, or an admin-created account with no password) or
-// a normal single-password sign-in screen. Returning `hasPassword` (rather
+// screen (no account yet, or an admin-created account with no password),
+// a "wrong app for this account" screen (see allowedRoles above), or a
+// normal single-password sign-in screen. Returning `hasPassword` (rather
 // than making the client guess from a failed sign-in attempt) is what lets
 // the email-only-first flow work at all.
 export const checkAccountStatus = onCall<CheckAccountStatusRequest>({ region: REGION }, async (request) => {
-  const { email } = request.data;
+  const { email, allowedRoles } = request.data;
   if (!email) {
     throw new HttpsError('invalid-argument', 'A valid email is required.');
   }
@@ -73,9 +105,10 @@ export const checkAccountStatus = onCall<CheckAccountStatusRequest>({ region: RE
   try {
     const user = await getAuth().getUserByEmail(email);
     const hasPassword = user.providerData.some((provider) => provider.providerId === 'password');
-    return { exists: true, hasPassword };
+    const { role, roleAllowed } = await accountRoleInfo(user.uid, allowedRoles);
+    return { exists: true, hasPassword, roleAllowed, role };
   } catch {
-    return { exists: false, hasPassword: false };
+    return { exists: false, hasPassword: false, roleAllowed: false, role: [] };
   }
 });
 

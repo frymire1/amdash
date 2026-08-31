@@ -37,7 +37,7 @@ void main() {
   AuthService service() => AuthService(auth, functions, firestore);
 
   group('checkAccountStatus', () {
-    test('calls the checkAccountStatus callable with the email and parses the response', () async {
+    test('calls the callable with the email and an empty allowedRoles by default, and parses the response', () async {
       final result = _MockHttpsCallableResult<Map<Object?, Object?>>();
       when(() => result.data).thenReturn({'exists': true, 'hasPassword': false});
       when(() => callable.call<Map<Object?, Object?>>(any())).thenAnswer((_) async => result);
@@ -47,7 +47,33 @@ void main() {
       expect(status.exists, true);
       expect(status.hasPassword, false);
       verify(() => functions.httpsCallable('checkAccountStatus')).called(1);
-      verify(() => callable.call<Map<Object?, Object?>>({'email': 'a@example.com'})).called(1);
+      verify(() => callable.call<Map<Object?, Object?>>({'email': 'a@example.com', 'allowedRoles': <String>[]}))
+          .called(1);
+    });
+
+    test('passes allowedRoles through as their wire values, and parses roleAllowed/role', () async {
+      final result = _MockHttpsCallableResult<Map<Object?, Object?>>();
+      when(() => result.data).thenReturn({
+        'exists': true,
+        'hasPassword': true,
+        'roleAllowed': false,
+        'role': ['physician'],
+      });
+      when(() => callable.call<Map<Object?, Object?>>(any())).thenAnswer((_) async => result);
+
+      final status = await service().checkAccountStatus(
+        'a@example.com',
+        allowedRoles: const [UserRole.ems],
+      );
+
+      expect(status.roleAllowed, false);
+      expect(status.role, [UserRole.physician]);
+      verify(
+        () => callable.call<Map<Object?, Object?>>({
+          'email': 'a@example.com',
+          'allowedRoles': ['ems'],
+        }),
+      ).called(1);
     });
   });
 

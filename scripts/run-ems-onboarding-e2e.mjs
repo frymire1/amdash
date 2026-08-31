@@ -23,13 +23,13 @@
 // for exactly this one step, alongside its existing Test-Lab-only setup.
 //
 // Also seeds/creates a second account for the matching failure state: an
-// admin-created *physician*-role account attempting its first sign-in
-// through the EMS app instead — should genuinely be able to set a
-// password/enroll MFA (neither checks role), then land on
-// AccessDeniedScreen, never HomeScreen. See ems/patrol_test/
-// wrong_app_login_test.dart. ci.yml runs that as its own separate
-// `patrol build android` + Test Lab invocation (a distinct target file
-// needs its own APK), reading this same --account-json for the
+// admin-created *physician*-role account attempting to sign into the EMS
+// app instead — rejected right after email (checkAccountStatus's own
+// roleAllowed field, see functions/src/auth.ts), before a password is
+// ever relevant, landing on AccessDeniedScreen, never HomeScreen. See
+// ems/patrol_test/wrong_app_login_test.dart. ci.yml runs that as its own
+// separate `patrol build android` + Test Lab invocation (a distinct
+// target file needs its own APK), reading this same --account-json for the
 // wrongAppUserEmail/wrongAppUserPassword fields --create-user writes.
 //
 // Usage:
