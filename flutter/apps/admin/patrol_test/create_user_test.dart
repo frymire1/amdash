@@ -85,13 +85,25 @@ void main() {
       await tapKey($, 'add_user_role_dropdown');
       await tapKey($, 'add_user_role_option_$newUserRole');
       await tapKey($, 'add_user_submit');
+      // Scoped to the users Table, not a bare find.text(newUserEmail) — on
+      // success, _createUser doesn't clear the form's own Email field
+      // until *after* the real createUser call returns, so a bare
+      // find.text() can match that still-filled TextField instead of a
+      // genuine new row — confirmed for real running this test locally: it
+      // reported success while createUser had actually thrown, the email
+      // field was simply never cleared, and no account existed afterward.
+      // Same class of bug, same fix, as user_flow_test.dart's own hospital-
+      // creation assertion ("Confirmed via a real GHA failure ('Found 2
+      // widgets')") — this one just hadn't been caught yet, since nothing
+      // here previously required scoping past the field to fail loudly.
+      final userRow = find.descendant(of: find.byType(Table), matching: find.text(newUserEmail));
       await pumpUntil(
         $,
-        () => find.text(newUserEmail).evaluate().isNotEmpty,
+        () => userRow.evaluate().isNotEmpty,
         maxIterations: 40,
       );
       expect(
-        find.text(newUserEmail),
+        userRow,
         findsOneWidget,
         reason: 'user should have been created within the wait budget',
       );

@@ -76,9 +76,25 @@ void main() {
       await tapKey($, 'add_user_role_dropdown');
       await tapKey($, 'add_user_role_option_ems');
       await tapKey($, 'add_user_submit');
-      await pumpUntil($, () => find.text(newUserEmail).evaluate().isNotEmpty);
+      // Scoped to the users Table, not a bare find.text(newUserEmail) — on
+      // success, _createUser doesn't clear the form's own Email field
+      // until *after* the real createUser call returns, so a bare
+      // find.text() can match that still-filled TextField instead of a
+      // genuine new row. Same class of bug, same fix, as this file's own
+      // hospital-creation assertion below ("Confirmed via a real GHA
+      // failure ('Found 2 widgets')") — confirmed for real this time too,
+      // running admin/patrol_test/create_user_test.dart's identical
+      // unscoped version locally: it reported success while createUser
+      // had actually thrown, the email field was simply never cleared,
+      // and no account existed afterward. The edit_user_$newUserEmail
+      // wait right below this would likely still have caught a genuinely
+      // failed creation eventually — this was never a silent full-test
+      // false pass — but the assertion itself wasn't proving what its own
+      // reason string claimed either.
+      final userRow = find.descendant(of: find.byType(Table), matching: find.text(newUserEmail));
+      await pumpUntil($, () => userRow.evaluate().isNotEmpty);
       expect(
-        find.text(newUserEmail),
+        userRow,
         findsOneWidget,
         reason: 'user should have been created within the wait budget',
       );
