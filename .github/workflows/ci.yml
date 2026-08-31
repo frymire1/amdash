@@ -410,6 +410,19 @@ jobs:
         run: node run-patient-flow-e2e.mjs
         working-directory: scripts
 
+      # Same two-sequential-Patrol-runs shape as the patient flow above,
+      # for the other real cross-app path: an admin account creates a new
+      # physician user through the admin app's own UI (no password, no
+      # work location — nothing pre-seeded), and that exact account then
+      # completes its own real first-ever sign-in through the physician
+      # app's own UI. See run-physician-onboarding-e2e.mjs's own header
+      # comment. run-ems-onboarding-e2e.mjs's identical EMS-side flow runs
+      # in flutter-android-e2e below instead — EMS crews use the native
+      # app, not the web build, so that leg needs a real Android device.
+      - name: Run cross-app physician onboarding e2e (admin creates user -> physician first sign-in)
+        run: node run-physician-onboarding-e2e.mjs
+        working-directory: scripts
+
       - name: Upload Patrol reports
         if: failure()
         uses: actions/upload-artifact@v4
@@ -442,8 +455,25 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    # LANG/LC_ALL: same fix as flutter-web-e2e's identical job-level env —
+    # only needed here because of the new admin-onboarding Chrome step
+    # below (see its own comment); the rest of this job never touches
+    # Flutter Web at all.
+    env:
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
     steps:
       - uses: actions/checkout@v4
+
+      # Belt-and-suspenders alongside the job-level LANG/LC_ALL above —
+      # see flutter-web-e2e's identical step.
+      - name: Ensure en_US.UTF-8 locale is generated
+        run: sudo locale-gen en_US.UTF-8
+
+      # Only the new admin-onboarding Chrome step below needs a display —
+      # see flutter-web-e2e's identical step for why xvfb specifically.
+      - name: Ensure xvfb is installed
+        run: sudo apt-get update && sudo apt-get install -y xvfb
 
       - uses: actions/setup-node@v4
         with:
@@ -477,6 +507,13 @@ jobs:
 
       - name: Install scripts dependencies
         run: npm ci
+        working-directory: scripts
+
+      # Only the new admin-onboarding Chrome step below needs this — see
+      # flutter-web-e2e's identical step for why this is needed ahead of
+      # time rather than left to patrol's own on-demand setup.
+      - name: Install Playwright browser + OS dependencies
+        run: npx playwright install --with-deps chromium
         working-directory: scripts
 
       - name: Authenticate to Firebase Admin SDK
@@ -521,6 +558,18 @@ jobs:
         run: |
           node run-physician-patrol-test.mjs --seed-only --account-json="$RUNNER_TEMP/physician-account.json"
           node run-ems-patrol-test.mjs --seed-only --account-json="$RUNNER_TEMP/ems-account.json"
+          node run-ems-onboarding-e2e.mjs --seed-only --account-json="$RUNNER_TEMP/ems-onboarding-account.json"
+        working-directory: scripts
+
+      # The admin half of the cross-app onboarding flow — see
+      # run-ems-onboarding-e2e.mjs's own header comment for why this,
+      # unlike everything else in this job, runs on Chrome rather than a
+      # Test Lab device (admin has no native Android/iOS build at all).
+      # Must run before the ems build below: patrol build android needs
+      # the new EMS account's email baked in as a --dart-define at build
+      # time, so it has to actually exist first.
+      - name: Create ems onboarding user via admin UI (Chrome)
+        run: node run-ems-onboarding-e2e.mjs --create-user --account-json="$RUNNER_TEMP/ems-onboarding-account.json"
         working-directory: scripts
 
       - name: Build + run physician Test Lab suite (Android)
@@ -641,6 +690,87 @@ jobs:
             echo
           done
 
+      # The real onboarding leg — admin's Chrome-based create-user step
+      # already ran above (see run-ems-onboarding-e2e.mjs's own header
+      # comment for why that has to happen before this build, not after);
+      # this is that new account's own first-ever sign-in, on a real
+      # device. No --grant-permissions=none needed here, unlike the ems
+      # suite above — first_login_test.dart never reaches
+      # PatientUploadScreen, so LocationTrackingSection's permission
+      # dialog is never in play.
+      - name: Build + run ems onboarding Test Lab suite (Android)
+        run: |
+          set -o pipefail
+          ACCOUNT="$RUNNER_TEMP/ems-onboarding-account.json"
+          cd flutter/apps/ems
+          patrol build android --target patrol_test/first_login_test.dart \
+            --dart-define SMOKE_EMAIL="$(jq -r .newUserEmail "$ACCOUNT")" \
+            --dart-define SMOKE_NEW_PASSWORD="$(jq -r .newUserPassword "$ACCOUNT")" \
+            --dart-define FIREBASE_APPCHECK_DEBUG_TOKEN="${{ secrets.FIREBASE_APPCHECK_DEBUG_TOKEN }}"
+          gcloud firebase test android run \
+            --type instrumentation \
+            --app build/app/outputs/apk/debug/app-debug.apk \
+            --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            --device model=MediumPhone.arm,version=35,locale=en,orientation=portrait \
+            --results-bucket=gs://amdash-dev-test-lab-results \
+            2>&1 | tee /tmp/ems-onboarding-testlab.log
+
+      - name: Dump ems onboarding Test Lab raw results
+        if: always()
+        run: |
+          BUCKET_PATH=$(grep -oE 'storage/browser/[^]]+' /tmp/ems-onboarding-testlab.log | head -1 | sed 's#storage/browser/##')
+          if [ -z "$BUCKET_PATH" ]; then
+            echo "Could not find a GCS bucket path in the run's output."
+            exit 0
+          fi
+          echo "=== gs://$BUCKET_PATH (recursive listing) ==="
+          gcloud storage ls -r "gs://$BUCKET_PATH" || true
+          echo "=== catting anything text-like found above ==="
+          for f in $(gcloud storage ls -r "gs://$BUCKET_PATH" 2>/dev/null | grep -E '\.(txt|xml|log)$|logcat$|instrumentation\.results$'); do
+            echo "--- $f ---"
+            gcloud storage cat "$f" 2>&1 | head -c 20000
+            echo
+          done
+
+      # The failure-state leg — a physician-role account's first sign-in
+      # attempt through the EMS app, which should genuinely set a
+      # password/enroll MFA (neither checks role) and then land on
+      # AccessDeniedScreen. See ems/patrol_test/wrong_app_login_test.dart's
+      # own header comment.
+      - name: Build + run ems wrong-app Test Lab suite (Android)
+        run: |
+          set -o pipefail
+          ACCOUNT="$RUNNER_TEMP/ems-onboarding-account.json"
+          cd flutter/apps/ems
+          patrol build android --target patrol_test/wrong_app_login_test.dart \
+            --dart-define SMOKE_EMAIL="$(jq -r .wrongAppUserEmail "$ACCOUNT")" \
+            --dart-define SMOKE_NEW_PASSWORD="$(jq -r .newUserPassword "$ACCOUNT")" \
+            --dart-define FIREBASE_APPCHECK_DEBUG_TOKEN="${{ secrets.FIREBASE_APPCHECK_DEBUG_TOKEN }}"
+          gcloud firebase test android run \
+            --type instrumentation \
+            --app build/app/outputs/apk/debug/app-debug.apk \
+            --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            --device model=MediumPhone.arm,version=35,locale=en,orientation=portrait \
+            --results-bucket=gs://amdash-dev-test-lab-results \
+            2>&1 | tee /tmp/ems-wrongapp-testlab.log
+
+      - name: Dump ems wrong-app Test Lab raw results
+        if: always()
+        run: |
+          BUCKET_PATH=$(grep -oE 'storage/browser/[^]]+' /tmp/ems-wrongapp-testlab.log | head -1 | sed 's#storage/browser/##')
+          if [ -z "$BUCKET_PATH" ]; then
+            echo "Could not find a GCS bucket path in the run's output."
+            exit 0
+          fi
+          echo "=== gs://$BUCKET_PATH (recursive listing) ==="
+          gcloud storage ls -r "gs://$BUCKET_PATH" || true
+          echo "=== catting anything text-like found above ==="
+          for f in $(gcloud storage ls -r "gs://$BUCKET_PATH" 2>/dev/null | grep -E '\.(txt|xml|log)$|logcat$|instrumentation\.results$'); do
+            echo "--- $f ---"
+            gcloud storage cat "$f" 2>&1 | head -c 20000
+            echo
+          done
+
       # Runs regardless of whether the steps above succeeded or failed —
       # the GHA equivalent of Codemagic's `publishing.scripts` guarantee.
       # `|| true` on each so one app's teardown failing doesn't skip the
@@ -650,6 +780,7 @@ jobs:
         run: |
           node run-physician-patrol-test.mjs --teardown --account-json="$RUNNER_TEMP/physician-account.json" || true
           node run-ems-patrol-test.mjs --teardown --account-json="$RUNNER_TEMP/ems-account.json" || true
+          node run-ems-onboarding-e2e.mjs --teardown --account-json="$RUNNER_TEMP/ems-onboarding-account.json" || true
         working-directory: scripts
 
   # Deploys physician/ems web to Cloud Run (amdash-dev) once this exact
