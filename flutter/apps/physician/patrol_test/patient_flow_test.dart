@@ -146,8 +146,19 @@ void main() {
         () => find.text('Destination').evaluate().isNotEmpty,
       );
       expect($('Vital Signs'), findsOneWidget);
+      // GoogleMap has its own async load on top of 'Destination' rendering
+      // (the Maps JS API script + tiles, not just the surrounding Flutter
+      // widget tree) — a bare check right after 'Destination' appears races
+      // that load under CI network conditions. Confirmed for real: this
+      // failed "Found 0 widgets with type GoogleMap" 3 times in a row
+      // across otherwise-unrelated CI runs on 2026-08-31, always at this
+      // exact assertion — the same unpolled-immediate-check anti-pattern
+      // already fixed elsewhere in this suite (see MainViewScreen's own
+      // self-heal comment just above), not incidental flakiness.
+      final googleMap = find.byType(GoogleMap);
+      await pumpUntil($, () => googleMap.evaluate().isNotEmpty, maxIterations: 40);
       expect(
-        $(GoogleMap),
+        googleMap,
         findsOneWidget,
         reason: 'patient has a location, so the map should render',
       );
