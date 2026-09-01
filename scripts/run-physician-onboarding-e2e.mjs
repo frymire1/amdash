@@ -182,6 +182,27 @@ try {
     console.log('\n❌ Admin create-user step failed — skipping the physician first-login step (account was never created).');
     exitCode = createPhysicianExitCode;
   } else {
+    // createUser (functions/src/admin.ts) deliberately never sets
+    // emailVerified — a real admin-created employee genuinely needs to
+    // verify their real inbox, same as production. But MfaSetupScreen
+    // gates TOTP enrollment on exactly that flag (Firebase itself
+    // requires a verified email before it'll enroll a factor) and
+    // there's no way for an automated test to click a real email link —
+    // the same class of gap as TOTP having no server-side shortcut, just
+    // the opposite direction: there the Admin SDK can't help at all,
+    // here it's the one thing that *can* stand in for a real click.
+    // Confirmed for real: an ems-side sibling of this exact scenario
+    // (run-ems-onboarding-e2e.mjs) failed completeMfaEnrollment "Bad
+    // state: No element" on every single attempt of its own retry budget
+    // (2026-08-31 CI run) — not a timing race at all, the account just
+    // never got past the static "Verify your email" screen, which never
+    // renders mfa_secret_key. first_login_test.dart's own job is testing
+    // the real set-password/MFA flow, not email verification, so this
+    // flips the one flag standing in its way rather than trying to
+    // fabricate a fake inbox click.
+    const newUser = await auth.getUserByEmail(NEW_USER_EMAIL);
+    await auth.updateUser(newUser.uid, { emailVerified: true });
+
     exitCode = await runPatrolTest({
       appDir: PHYSICIAN_APP_DIR,
       target: 'patrol_test/first_login_test.dart',

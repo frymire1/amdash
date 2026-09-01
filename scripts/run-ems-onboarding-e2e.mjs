@@ -190,6 +190,27 @@ if (mode.startsWith('--create-user')) {
     newUserExitCode === 0 ? '\n✅ Created the real EMS onboarding account.' : '\n❌ Failed to create the real EMS onboarding account.',
   );
 
+  // createUser (functions/src/admin.ts) deliberately never sets
+  // emailVerified — a real admin-created employee genuinely needs to
+  // verify their real inbox, same as production. But MfaSetupScreen gates
+  // TOTP enrollment on exactly that flag (Firebase itself requires a
+  // verified email before it'll enroll a factor) and there's no way for
+  // an automated test to click a real email link — the same class of gap
+  // as TOTP having no server-side shortcut, just the opposite direction:
+  // there the Admin SDK can't help at all, here it's the one thing that
+  // *can* stand in for a real click. Confirmed for real: first_login_test
+  // .dart's completeMfaEnrollment failed "Bad state: No element" on every
+  // single attempt of its own retry budget (2026-08-31 CI run) — not a
+  // timing race at all, the account just never got past the static
+  // "Verify your email" screen, which never renders mfa_secret_key.
+  // first_login_test.dart's own job is testing the real set-password/MFA
+  // flow, not email verification, so this flips the one flag standing in
+  // its way rather than trying to fabricate a fake inbox click.
+  if (newUserExitCode === 0) {
+    const newUser = await auth.getUserByEmail(account.newUserEmail);
+    await auth.updateUser(newUser.uid, { emailVerified: true });
+  }
+
   // Runs regardless of how the first creation went — an independent
   // account, no reason to skip it just because the other had trouble.
   const wrongAppExitCode = await runPatrolTest({

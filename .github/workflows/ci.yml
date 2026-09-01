@@ -629,7 +629,23 @@ jobs:
           echo "=== catting anything text-like found above ==="
           for f in $(gcloud storage ls -r "gs://$BUCKET_PATH" 2>/dev/null | grep -E '\.(txt|xml|log)$|logcat$|instrumentation\.results$'); do
             echo "--- $f ---"
-            gcloud storage cat "$f" 2>&1 | head -c 20000
+            if [[ "$f" == *logcat ]]; then
+              # A full-device logcat's first ~20000 bytes are dominated by
+              # boot noise (ServiceManager/AtomicFile/artd chatter) — a
+              # plain head cutoff never reaches the app's own output at
+              # all (confirmed for real: an ems onboarding failure dump
+              # this way, needed to re-derive from timing math instead of
+              # just reading it). Grep for the flutter tag first — where
+              # print()/debugPrint() and Flutter's own uncaught-error
+              # logging land — and keep the raw head too as a fallback in
+              # case nothing flutter-tagged printed at all.
+              echo "-- flutter-tagged lines --"
+              gcloud storage cat "$f" 2>&1 | grep -iE ' flutter *: ' | head -c 20000
+              echo "-- first 20000 bytes, unfiltered --"
+              gcloud storage cat "$f" 2>&1 | head -c 20000
+            else
+              gcloud storage cat "$f" 2>&1 | head -c 20000
+            fi
             echo
           done
 
@@ -686,7 +702,23 @@ jobs:
           echo "=== catting anything text-like found above ==="
           for f in $(gcloud storage ls -r "gs://$BUCKET_PATH" 2>/dev/null | grep -E '\.(txt|xml|log)$|logcat$|instrumentation\.results$'); do
             echo "--- $f ---"
-            gcloud storage cat "$f" 2>&1 | head -c 20000
+            if [[ "$f" == *logcat ]]; then
+              # A full-device logcat's first ~20000 bytes are dominated by
+              # boot noise (ServiceManager/AtomicFile/artd chatter) — a
+              # plain head cutoff never reaches the app's own output at
+              # all (confirmed for real: an ems onboarding failure dump
+              # this way, needed to re-derive from timing math instead of
+              # just reading it). Grep for the flutter tag first — where
+              # print()/debugPrint() and Flutter's own uncaught-error
+              # logging land — and keep the raw head too as a fallback in
+              # case nothing flutter-tagged printed at all.
+              echo "-- flutter-tagged lines --"
+              gcloud storage cat "$f" 2>&1 | grep -iE ' flutter *: ' | head -c 20000
+              echo "-- first 20000 bytes, unfiltered --"
+              gcloud storage cat "$f" 2>&1 | head -c 20000
+            else
+              gcloud storage cat "$f" 2>&1 | head -c 20000
+            fi
             echo
           done
 
@@ -728,7 +760,23 @@ jobs:
           echo "=== catting anything text-like found above ==="
           for f in $(gcloud storage ls -r "gs://$BUCKET_PATH" 2>/dev/null | grep -E '\.(txt|xml|log)$|logcat$|instrumentation\.results$'); do
             echo "--- $f ---"
-            gcloud storage cat "$f" 2>&1 | head -c 20000
+            if [[ "$f" == *logcat ]]; then
+              # A full-device logcat's first ~20000 bytes are dominated by
+              # boot noise (ServiceManager/AtomicFile/artd chatter) — a
+              # plain head cutoff never reaches the app's own output at
+              # all (confirmed for real: an ems onboarding failure dump
+              # this way, needed to re-derive from timing math instead of
+              # just reading it). Grep for the flutter tag first — where
+              # print()/debugPrint() and Flutter's own uncaught-error
+              # logging land — and keep the raw head too as a fallback in
+              # case nothing flutter-tagged printed at all.
+              echo "-- flutter-tagged lines --"
+              gcloud storage cat "$f" 2>&1 | grep -iE ' flutter *: ' | head -c 20000
+              echo "-- first 20000 bytes, unfiltered --"
+              gcloud storage cat "$f" 2>&1 | head -c 20000
+            else
+              gcloud storage cat "$f" 2>&1 | head -c 20000
+            fi
             echo
           done
 
@@ -766,7 +814,23 @@ jobs:
           echo "=== catting anything text-like found above ==="
           for f in $(gcloud storage ls -r "gs://$BUCKET_PATH" 2>/dev/null | grep -E '\.(txt|xml|log)$|logcat$|instrumentation\.results$'); do
             echo "--- $f ---"
-            gcloud storage cat "$f" 2>&1 | head -c 20000
+            if [[ "$f" == *logcat ]]; then
+              # A full-device logcat's first ~20000 bytes are dominated by
+              # boot noise (ServiceManager/AtomicFile/artd chatter) — a
+              # plain head cutoff never reaches the app's own output at
+              # all (confirmed for real: an ems onboarding failure dump
+              # this way, needed to re-derive from timing math instead of
+              # just reading it). Grep for the flutter tag first — where
+              # print()/debugPrint() and Flutter's own uncaught-error
+              # logging land — and keep the raw head too as a fallback in
+              # case nothing flutter-tagged printed at all.
+              echo "-- flutter-tagged lines --"
+              gcloud storage cat "$f" 2>&1 | grep -iE ' flutter *: ' | head -c 20000
+              echo "-- first 20000 bytes, unfiltered --"
+              gcloud storage cat "$f" 2>&1 | head -c 20000
+            else
+              gcloud storage cat "$f" 2>&1 | head -c 20000
+            fi
             echo
           done
 
