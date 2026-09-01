@@ -22,12 +22,7 @@ import 'interaction_helpers.dart';
 /// MFA setup screen already uses (`amdash_core`'s shared
 /// `mfa_setup_screen.dart`/`totp_enrollment_form.dart`).
 Future<void> completeMfaEnrollment(PatrolIntegrationTester $) async {
-  await pumpUntil(
-    $,
-    () => find.byKey(const Key('mfa_secret_key')).evaluate().isNotEmpty,
-    maxIterations: 40,
-  );
-  final secret = $.tester.widget<SelectableText>(find.byKey(const Key('mfa_secret_key'))).data!;
+  final secret = await _readMfaSecret($);
   // SHA1/6 digits/30s is the universal TOTP convention every authenticator
   // app assumes and the one Firebase's TOTP implementation actually uses
   // (TotpSecret exposes these as fields, but the enrollment UI doesn't
@@ -46,4 +41,38 @@ Future<void> completeMfaEnrollment(PatrolIntegrationTester $) async {
     () => find.byKey(const Key('mfa_secret_key')).evaluate().isEmpty,
     maxIterations: 30,
   );
+}
+
+// Retries the whole wait-then-read cycle, not just the read — same
+// reasoning as ems_test.dart's own tapCardButton retry (real GHA failure
+// there: pumpUntil found the target, but the very next synchronous
+// access threw because a rebuild landed in the gap between the two).
+// Confirmed for real here too (2026-08-31 CI run, physician/patrol_test/
+// first_login_test.dart): pumpUntil found mfa_secret_key, but
+// $.tester.widget<SelectableText>(...) then threw "Bad state: No
+// element" — the secret widget existed a beat earlier and was gone by
+// the very next line, on a first-ever sign-in landing on MFA setup via
+// claimPasswordlessAccount (set-password + immediate sign-in) rather
+// than the plainer signIn() path this helper was originally proven
+// against; something about that extra async hop makes the setup screen
+// more prone to an intermediate rebuild here, though not so much that
+// this needed a `maxIterations` bump — the second attempt reliably
+// finds it, once already fully settled.
+Future<String> _readMfaSecret(PatrolIntegrationTester $) async {
+  for (var attempt = 0; attempt < 3; attempt++) {
+    await pumpUntil(
+      $,
+      () => find.byKey(const Key('mfa_secret_key')).evaluate().isNotEmpty,
+      maxIterations: 40,
+    );
+    try {
+      return $.tester.widget<SelectableText>(find.byKey(const Key('mfa_secret_key'))).data!;
+    } catch (_) {
+      if (attempt == 2) rethrow;
+      await $.pump(const Duration(milliseconds: 300));
+    }
+  }
+  // Unreachable — the loop above always either returns or rethrows on its
+  // final attempt.
+  throw StateError('unreachable');
 }

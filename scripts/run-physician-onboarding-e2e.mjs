@@ -66,26 +66,40 @@ async function seed(db) {
     organizationId,
   });
 
-  // The admin account itself — mirrors run-admin-patrol-test.mjs's own
-  // createSmokeAdminAccount exactly. This is the *only* account this
-  // script seeds directly; the physician account is a real output of the
-  // admin app's own createUser flow, not something this script writes to
-  // Firestore/Auth itself.
-  const adminEmail = `smoke-admin-onboarding-${RUN_ID}@amdash-e2e.test`;
-  const adminPassword = 'SmokeTest123';
-  const adminUser = await getAuth().createUser({ email: adminEmail, password: adminPassword, emailVerified: true });
-  await db.doc(`users/${adminUser.uid}`).set(
-    { email: adminEmail, role: ['admin'], organizationId, firstName: 'Smoke', lastName: 'Admin' },
-    { merge: true },
-  );
+  // Two separate admin accounts — mirrors run-admin-patrol-test.mjs's own
+  // createSmokeAdminAccount, just twice. Genuinely two, not one reused
+  // for both create_user_test.dart legs: completeMfaEnrollment
+  // (amdash_patrol_helpers) hard-assumes a never-enrolled account and
+  // goes straight for the enrollment screen's own secret — reusing the
+  // same admin for a second sign-in, after its MFA is already enrolled
+  // from the first, skips that screen entirely and the helper throws
+  // "Bad state: No element" instead (confirmed for real: exactly this,
+  // on a real CI run, before this fix). Neither the physician account nor
+  // the wrong-app ems account is seeded here directly — both are real
+  // outputs of the admin app's own createUser flow, not something this
+  // script writes to Firestore/Auth itself.
+  async function createAdmin(suffix) {
+    const email = `smoke-admin-onboarding-${suffix}-${RUN_ID}@amdash-e2e.test`;
+    const password = 'SmokeTest123';
+    const user = await getAuth().createUser({ email, password, emailVerified: true });
+    await db.doc(`users/${user.uid}`).set(
+      { email, role: ['admin'], organizationId, firstName: 'Smoke', lastName: 'Admin' },
+      { merge: true },
+    );
+    return { email, password, uid: user.uid };
+  }
+  const admin = await createAdmin('main');
+  const wrongAppAdmin = await createAdmin('wrongapp');
 
-  return { hospitalId: hospitalRef.id, admin: { email: adminEmail, password: adminPassword, uid: adminUser.uid } };
+  return { hospitalId: hospitalRef.id, admin, wrongAppAdmin };
 }
 
 async function cleanup(db, auth, seeded) {
   if (seeded) {
     await auth.deleteUser(seeded.admin.uid).catch(() => {});
     await db.doc(`users/${seeded.admin.uid}`).delete().catch(() => {});
+    await auth.deleteUser(seeded.wrongAppAdmin.uid).catch(() => {});
+    await db.doc(`users/${seeded.wrongAppAdmin.uid}`).delete().catch(() => {});
     await db.doc(`hospitals/${seeded.hospitalId}`).delete().catch(() => {});
     // Neither the new physician account nor the wrong-app ems account was
     // ever created by this script (see seed()'s own comment) — look them
@@ -148,6 +162,7 @@ let exitCode = 1;
 try {
   seeded = await seed(db);
   console.log('Created throwaway admin account:', seeded.admin.email);
+  console.log('Created throwaway wrong-app-leg admin account:', seeded.wrongAppAdmin.email);
   console.log('Seeded hospital:', HOSPITAL_NAME);
   console.log('New physician account (created by the test itself):', NEW_USER_EMAIL);
   console.log('Wrong-app ems account (created by the test itself):', WRONG_APP_USER_EMAIL);
@@ -185,8 +200,8 @@ try {
     appDir: ADMIN_APP_DIR,
     target: 'patrol_test/create_user_test.dart',
     dartDefines: {
-      SMOKE_EMAIL: seeded.admin.email,
-      SMOKE_PASSWORD: seeded.admin.password,
+      SMOKE_EMAIL: seeded.wrongAppAdmin.email,
+      SMOKE_PASSWORD: seeded.wrongAppAdmin.password,
       SMOKE_NEW_USER_EMAIL: WRONG_APP_USER_EMAIL,
       SMOKE_NEW_USER_ROLE: 'ems',
     },

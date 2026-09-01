@@ -67,16 +67,27 @@ async function seedAccount(db) {
   const organizationId = await findOrganizationId(db, 'test-org');
   const runId = Date.now();
 
-  const adminEmail = `smoke-admin-onboarding-${runId}@amdash-e2e.test`;
-  const adminPassword = 'SmokeTest123';
-  const adminUser = await getAuth().createUser({ email: adminEmail, password: adminPassword, emailVerified: true });
-  await db.doc(`users/${adminUser.uid}`).set(
-    { email: adminEmail, role: ['admin'], organizationId, firstName: 'Smoke', lastName: 'Admin' },
-    { merge: true },
-  );
+  // Two separate admin accounts, not one reused for both create_user_test.dart
+  // calls — completeMfaEnrollment (amdash_patrol_helpers) hard-assumes a
+  // never-enrolled account and goes straight for the enrollment screen's
+  // own secret; reusing the same admin for a second sign-in, after its
+  // MFA is already enrolled from the first, skips that screen entirely
+  // and the helper throws "Bad state: No element" instead (confirmed for
+  // real: exactly this, on a real CI run, before this fix).
+  async function createAdmin(suffix) {
+    const email = `smoke-admin-onboarding-${suffix}-${runId}@amdash-e2e.test`;
+    const password = 'SmokeTest123';
+    const user = await getAuth().createUser({ email, password, emailVerified: true });
+    await db.doc(`users/${user.uid}`).set(
+      { email, role: ['admin'], organizationId, firstName: 'Smoke', lastName: 'Admin' },
+      { merge: true },
+    );
+    return { email, password, uid: user.uid };
+  }
 
   return {
-    admin: { email: adminEmail, password: adminPassword, uid: adminUser.uid },
+    admin: await createAdmin('main'),
+    wrongAppAdmin: await createAdmin('wrongapp'),
     newUserEmail: `smoke-ems-onboarding-${runId}@amdash-e2e.test`,
     // Deliberately a *different* prefix (smoke-physician-wrongapp-, not
     // smoke-physician-onboarding-) so this script's own broad sweep can't
@@ -96,6 +107,8 @@ async function cleanup(db, auth, account) {
   if (account) {
     await auth.deleteUser(account.admin.uid).catch(() => {});
     await db.doc(`users/${account.admin.uid}`).delete().catch(() => {});
+    await auth.deleteUser(account.wrongAppAdmin.uid).catch(() => {});
+    await db.doc(`users/${account.wrongAppAdmin.uid}`).delete().catch(() => {});
     // Neither the new EMS account nor the wrong-app physician account is
     // ever created by this script — look them up by their known,
     // deterministic emails instead of ids this script never had; harmless
@@ -153,6 +166,7 @@ if (mode.startsWith('--seed-only')) {
   const account = await seedAccount(db);
   fs.writeFileSync(accountJsonPath, JSON.stringify(account));
   console.log('Created throwaway admin account:', account.admin.email);
+  console.log('Created throwaway wrong-app-leg admin account:', account.wrongAppAdmin.email);
   console.log('New EMS account (created by --create-user, not here):', account.newUserEmail);
   console.log('Wrong-app physician account (created by --create-user, not here):', account.wrongAppUserEmail);
   if (credentialPath) fs.unlinkSync(credentialPath);
@@ -182,8 +196,8 @@ if (mode.startsWith('--create-user')) {
     appDir: ADMIN_APP_DIR,
     target: 'patrol_test/create_user_test.dart',
     dartDefines: {
-      SMOKE_EMAIL: account.admin.email,
-      SMOKE_PASSWORD: account.admin.password,
+      SMOKE_EMAIL: account.wrongAppAdmin.email,
+      SMOKE_PASSWORD: account.wrongAppAdmin.password,
       SMOKE_NEW_USER_EMAIL: account.wrongAppUserEmail,
       SMOKE_NEW_USER_ROLE: 'physician',
     },
