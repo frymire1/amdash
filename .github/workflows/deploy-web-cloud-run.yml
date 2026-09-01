@@ -80,7 +80,18 @@ jobs:
         run: |
           set -e
           cd "flutter/apps/${{ inputs.app }}"
-          flutter build web --release
+          # APP_CHECK_RECAPTCHA_SITE_KEY: a reCAPTCHA Enterprise Key ID, not
+          # a secret — reCAPTCHA site/key IDs are meant to be embedded in
+          # client code (see each app's main.dart, same reasoning as its own
+          # comment there), so this is a plain literal, not a repo secret.
+          # Registered against exactly the three real Cloud Run hostnames
+          # this workflow deploys to (admin-web/physician-web/ems-web) — CI's
+          # own e2e builds (ci.yml) deliberately don't pass this: they run on
+          # localhost, a domain the key was never registered for, so it
+          # wouldn't validate there regardless, and App Check is monitor-mode
+          # only (an unverified token there is harmless, just logged).
+          flutter build web --release \
+            --dart-define=APP_CHECK_RECAPTCHA_SITE_KEY=6Ld6eaItAAAAAMigfWyO0OQ6x0ycufLolu5kcPgn
           echo "SRC_DIR=flutter/apps/${{ inputs.app }}/build/web" >> "$GITHUB_ENV"
 
       - name: Build marketing (Angular)

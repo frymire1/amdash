@@ -35,7 +35,8 @@ Future<void> main() async {
     providerApple: kDebugMode
         ? AppleDebugProvider(debugToken: _appCheckDebugToken.isEmpty ? null : _appCheckDebugToken)
         : const AppleAppAttestWithDeviceCheckFallbackProvider(),
-    providerWeb: ReCaptchaV3Provider(_appCheckRecaptchaSiteKey),
+    // Enterprise, not classic v3 — see admin/lib/main.dart's identical note.
+    providerWeb: ReCaptchaEnterpriseProvider(_appCheckRecaptchaSiteKey),
   );
 
   // Required before any FlutterForegroundTask.startService/sendDataToTask

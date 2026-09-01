@@ -213,9 +213,18 @@ Providers, matching each platform's Firebase-recommended option:
 
 | App | Android | iOS | Web |
 |---|---|---|---|
-| `ems` | Play Integrity | App Attest (Device Check fallback) | reCAPTCHA v3 |
-| `physician` | Play Integrity | App Attest (Device Check fallback) | reCAPTCHA v3 |
-| `admin` | — (no native build) | — (no native build) | reCAPTCHA v3 |
+| `ems` | Play Integrity | App Attest (Device Check fallback) | reCAPTCHA Enterprise |
+| `physician` | Play Integrity | App Attest (Device Check fallback) | reCAPTCHA Enterprise |
+| `admin` | — (no native build) | — (no native build) | reCAPTCHA Enterprise |
+
+Web uses reCAPTCHA *Enterprise*, not classic v3 — one shared key
+(`APP_CHECK_RECAPTCHA_SITE_KEY`, passed as a `--dart-define` in
+`deploy-web-cloud-run.yml`, not a repo secret since site/key IDs are meant to
+be public and embedded in client code) registered against the three real
+Cloud Run hostnames (`admin-web`/`physician-web`/`ems-web`). CI's own web e2e
+builds don't pass it — they run on `localhost`, a domain the key was never
+registered for, so it wouldn't validate there regardless, and an unverified
+token is harmless in monitor mode.
 
 Debug builds use the debug provider instead (`kDebugMode`-gated in each
 app's `main.dart`), which needs a token registered by hand in Firebase

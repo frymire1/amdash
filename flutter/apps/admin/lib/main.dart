@@ -17,8 +17,13 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // Monitor mode only — see SECURITY.md.
-  await FirebaseAppCheck.instance.activate(providerWeb: ReCaptchaV3Provider(_appCheckRecaptchaSiteKey));
+  // Monitor mode only — see SECURITY.md. Enterprise, not classic v3 — the
+  // key registered in the App Check console is a reCAPTCHA Enterprise key
+  // (console defaults to Enterprise now; there's no separate v3 option in
+  // the current registration flow), and the two aren't interchangeable —
+  // ReCaptchaV3Provider expects a classic v3 site key and won't validate
+  // against an Enterprise key ID.
+  await FirebaseAppCheck.instance.activate(providerWeb: ReCaptchaEnterpriseProvider(_appCheckRecaptchaSiteKey));
 
   runApp(const ProviderScope(child: AdminApp()));
 }
