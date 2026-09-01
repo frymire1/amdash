@@ -102,6 +102,7 @@ class _EditHospitalDialogState extends ConsumerState<EditHospitalDialog> {
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
         FilledButton(
+          key: const Key('save_hospital_button'),
           onPressed: _saving ? null : _save,
           child: _saving
               ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))

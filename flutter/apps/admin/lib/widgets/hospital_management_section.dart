@@ -6,12 +6,12 @@ import '../services/admin_service.dart';
 import 'admin_page.dart';
 import 'edit_hospital_dialog.dart';
 
-/// Hospital management, embedded in [OrganizationSettingsScreen] rather
-/// than living on its own route/tab — hospitals are an org-level setting
-/// like data retention, not a separate management domain the way users
-/// are. Was previously `HospitalManagementScreen`, a full `AdminPage` of
-/// its own; now just the two cards (add form + table), title-less so the
-/// enclosing settings page supplies its own section heading.
+/// Hospital management's actual content (add form + table) — kept
+/// title-less and factored out from the page heading so it can be reused
+/// regardless of what hosts it. Was briefly folded directly into
+/// [OrganizationSettingsScreen] (hospitals treated as an org-level setting
+/// like retention, not a separate management domain); now hosted by its
+/// own [HospitalManagementScreen]/route/tab again instead.
 class HospitalManagementSection extends ConsumerStatefulWidget {
   const HospitalManagementSection({super.key});
 

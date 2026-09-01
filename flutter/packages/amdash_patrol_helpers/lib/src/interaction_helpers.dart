@@ -84,3 +84,41 @@ Future<void> pumpUntil(
     await $.pump(const Duration(milliseconds: 400));
   }
 }
+
+/// Taps a [Switch] and waits for its value to flip — retrying the whole
+/// tap (not just the wait) up to [attempts] times if it doesn't, rather
+/// than a single longer wait. Same idiom as this package's own MFA-
+/// secret-read retry (see mfa.dart's `_readMfaSecret`): a dropped tap
+/// event and a slow round trip look identical from here (the value just
+/// never changes), and retrying the tap covers both — a longer single
+/// wait only ever covers the second. Confirmed for real: admin's
+/// retention/country/CMEK/audit-logging/FHIR-export toggles all reflect a
+/// live Firestore listener, not local optimistic state (the write has to
+/// round-trip through a Cloud Function and back down through the
+/// listener before the value here changes at all), and a single 16s wait
+/// occasionally wasn't enough on a loaded dev machine even though the
+/// identical tap+wait had been 100% reliable moments earlier — this is
+/// the shared, correct way to drive any of them, not a one-off patch for
+/// whichever one happened to fail first.
+Future<void> toggleSwitchAndWait(
+  PatrolIntegrationTester $,
+  Finder switchFinder, {
+  int maxIterations = 40,
+  int attempts = 3,
+}) async {
+  final expected = !$.tester.widget<Switch>(switchFinder).value;
+  for (var attempt = 0; attempt < attempts; attempt++) {
+    await tapFinder($, switchFinder);
+    await pumpUntil(
+      $,
+      () => $.tester.widget<Switch>(switchFinder).value == expected,
+      maxIterations: maxIterations,
+    );
+    if ($.tester.widget<Switch>(switchFinder).value == expected) return;
+  }
+  expect(
+    $.tester.widget<Switch>(switchFinder).value,
+    expected,
+    reason: 'switch should have flipped to $expected within the retry budget',
+  );
+}

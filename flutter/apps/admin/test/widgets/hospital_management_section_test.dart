@@ -27,7 +27,7 @@ void main() {
 
   Future<void> pumpSection(WidgetTester tester, {List<Hospital> hospitals = const []}) {
     // Always embedded inside AdminPage's own SingleChildScrollView in
-    // production (organization_settings_screen.dart) — replicated here so
+    // production (hospital_management_screen.dart) — replicated here so
     // the add-hospital form + table don't overflow the test viewport.
     return pumpApp(
       tester,

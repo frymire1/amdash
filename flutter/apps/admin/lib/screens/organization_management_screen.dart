@@ -123,17 +123,25 @@ class _OrganizationManagementScreenState extends ConsumerState<OrganizationManag
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
+                key: const Key('organization_country_dropdown'),
                 initialValue: _country,
                 decoration: const InputDecoration(labelText: 'Country'),
                 items: [
                   for (final entry in organizationCountries.entries)
-                    DropdownMenuItem(value: entry.key, child: Text(entry.value)),
+                    DropdownMenuItem(
+                      value: entry.key,
+                      child: KeyedSubtree(
+                        key: Key('organization_country_option_${entry.key}'),
+                        child: Text(entry.value),
+                      ),
+                    ),
                 ],
                 onChanged: (value) => setState(() => _country = value),
               ),
               if (_message != null) FormMessage(text: _message!, isError: _isError),
               const SizedBox(height: 16),
               FilledButton(
+                key: const Key('create_organization_submit'),
                 onPressed: _creating ? null : _createOrganization,
                 child: _creating
                     ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))

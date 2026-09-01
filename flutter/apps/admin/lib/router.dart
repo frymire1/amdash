@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'screens/audit_log_screen.dart';
+import 'screens/hospital_management_screen.dart';
 import 'screens/organization_management_screen.dart';
 import 'screens/organization_settings_screen.dart';
 import 'screens/user_management_screen.dart';
@@ -13,13 +14,13 @@ import 'widgets/nav_bar.dart';
 /// Mirrors `apps/admin/src/app/app.routes.ts`'s route table and guard
 /// chain — genuinely different shape from EMS/physician's single
 /// required-role-per-app model, so this doesn't reuse [AppRouteGuard]:
-/// `/users`/`/settings`/`/audit-log` require `admin` (hospital management
-/// lives inside `/settings` now, not its own route), `/organizations`
-/// requires `super-admin` (a dual-role account can reach both), and `''`
-/// resolves via a landing redirect (mirrors `landing.guard.ts`) rather than
-/// rendering anything itself. There's also no `workLocationGuard` step at
-/// all — admin skips that entirely, unlike physician.
-const _adminOnlyPaths = {'/users', '/settings', '/audit-log'};
+/// `/users`/`/settings`/`/audit-log`/`/hospitals` require `admin`,
+/// `/organizations` requires `super-admin` (a dual-role account can reach
+/// both), and `''` resolves via a landing redirect (mirrors
+/// `landing.guard.ts`) rather than rendering anything itself. There's also
+/// no `workLocationGuard` step at all — admin skips that entirely, unlike
+/// physician.
+const _adminOnlyPaths = {'/users', '/settings', '/audit-log', '/hospitals'};
 
 // Not private — a separate test file needs to reach this (Dart privacy is
 // library/file-scoped, so a leading underscore would make it permanently
@@ -142,6 +143,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/settings',
             pageBuilder: (context, state) => fastFadePage(context, state, const OrganizationSettingsScreen()),
+          ),
+          GoRoute(
+            path: '/hospitals',
+            pageBuilder: (context, state) => fastFadePage(context, state, const HospitalManagementScreen()),
           ),
           GoRoute(
             path: '/organizations',

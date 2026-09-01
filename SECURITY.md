@@ -192,6 +192,48 @@ changes, hospital management, the organization-level audit-logging toggle
 itself) are always logged regardless of any per-organization setting —
 otherwise disabling that toggle could hide the very act of disabling it.
 
+### Every audited action, and its e2e coverage
+
+24 distinct actions across `functions/src/admin.ts` (governance) and
+`functions/src/patient-data.ts` (patient-record events), confirmed via
+`grep -rn "action: '" functions/src/*.ts` excluding test files. Nothing
+short of driving the real UI end to end and reading the resulting audit
+log row previously verified any of this actually worked — see
+`admin/patrol_test/user_flow_test.dart`/`organization_management_test.dart`
+for how each row below is checked.
+
+| Action | Triggered by | e2e-covered |
+|---|---|---|
+| `user.create` | Admin creates a user | ✅ (unique email in Details) |
+| `user.update` | Admin edits a user's profile | ✅ (unique name in Details) |
+| `user.delete` | Admin deletes a user | ✅ (unique email in Details) |
+| `user.roleAdd` | Admin assigns a role | ✅ (action label only — no per-run-unique detail exists) |
+| `user.roleRemove` | Admin removes a role | ✅ (label only) |
+| `user.disable` / `user.enable` | Admin suspends/reactivates a user | ✅ (label only) |
+| `user.resetMfa` | Admin resets a user's MFA | ✅ (label only) |
+| `user.resendInvite` | Admin resends an invite email | ✅ (label only) |
+| `hospital.create` | Admin creates a hospital | ✅ (unique name in Details) |
+| `hospital.update` | Admin edits a hospital | ✅ (unique name in Details) |
+| `hospital.delete` | Admin deletes a hospital | ✅ (unique name in Details) |
+| `organization.create` | Super-admin creates an org + its first admin | ✅ — verified directly via the Admin SDK, not the UI: a pure super-admin fails `listAuditLog`'s own `requireAdmin` check (no `admin` role, no `organizationId`), so this one entry is structurally unreachable from any app screen |
+| `organization.setRetention` | Admin toggles data retention | ✅ (label only) |
+| `organization.setCountry` | Admin changes the org's country | ✅ (label only) |
+| `organization.setCmekPreference` | Admin toggles CMEK patient-data encryption | ✅ (label only) |
+| `organization.setAuditLogging` | Admin toggles this feature itself | ✅ (label only) |
+| `organization.setFhirExportEnabled` | Admin toggles FHIR export | ✅ (label only) |
+| `patient.delete` (retention-sweep variant) | The daily retention cleanup job, attributed to `SYSTEM_ACTOR` | ❌ — not reachable through any UI at all (a scheduled background job, not a user action); covered only by `functions/`'s own unit tests |
+| `patient.create` | EMS uploads a patient | 🔜 planned — fires from existing EMS/physician e2e flows already, just never checked against the audit log yet |
+| `patient.update` | Any patient record edit | 🔜 planned |
+| `patient.complete` | EMS marks transport complete | 🔜 planned |
+| `patient.delete` (real per-patient variant) | A user deletes a specific patient | 🔜 planned |
+| `patient.decrypt` | Any patient-list render that decrypts name/healthcare number | 🔜 planned |
+| `patient.fhirExport` | Automatic FHIR export on transport completion | 🔜 planned |
+
+The six `patient.*` rows above need cross-app orchestration (an admin
+session reading an audit entry an EMS/physician test generated) rather
+than a single-app flow — a deliberate, separate follow-up, not an
+oversight.
+
 ## Firebase App Check
 
 Attests that a request genuinely comes from a real instance of this app

@@ -313,6 +313,7 @@ class _EditUserDialogState extends ConsumerState<EditUserDialog> {
               Align(
                 alignment: Alignment.centerLeft,
                 child: OutlinedButton(
+                  key: const Key('save_profile_button'),
                   onPressed: _savingProfile ? null : _saveProfile,
                   child: _savingProfile
                       ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
@@ -405,6 +406,7 @@ class _EditUserDialogState extends ConsumerState<EditUserDialog> {
                 children: [
                   if (!_hasPassword && !_disabled)
                     OutlinedButton.icon(
+                      key: const Key('resend_invite_button'),
                       onPressed: _resendingInvite ? null : _resendInvite,
                       icon: _resendingInvite
                           ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
@@ -412,6 +414,7 @@ class _EditUserDialogState extends ConsumerState<EditUserDialog> {
                       label: Text(_resendingInvite ? 'Sending…' : 'Resend Invite'),
                     ),
                   OutlinedButton.icon(
+                    key: const Key('toggle_disabled_button'),
                     onPressed: _togglingDisabled ? null : _toggleDisabled,
                     style: _disabled ? null : OutlinedButton.styleFrom(foregroundColor: AppColors.warning),
                     icon: _togglingDisabled
@@ -430,6 +433,7 @@ class _EditUserDialogState extends ConsumerState<EditUserDialog> {
                   // use this on a still-enrolled-but-locked-out user too,
                   // not just an obviously-unenrolled one.
                   OutlinedButton.icon(
+                    key: const Key('reset_mfa_button'),
                     onPressed: _resettingMfa ? null : _resetMfa,
                     icon: _resettingMfa
                         ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
@@ -446,6 +450,7 @@ class _EditUserDialogState extends ConsumerState<EditUserDialog> {
               const SizedBox(height: 8),
               if (_deleteError != null) FormMessage(text: _deleteError!, isError: true),
               OutlinedButton.icon(
+                key: const Key('delete_account_button'),
                 onPressed: _deleting ? null : _deleteAccount,
                 style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
                 icon: _deleting

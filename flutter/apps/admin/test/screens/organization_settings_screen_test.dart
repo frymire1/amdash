@@ -25,7 +25,6 @@ void main() {
       overrides: [
         adminServiceProvider.overrideWithValue(adminService),
         ownOrganizationProvider.overrideWith((ref) => Stream.value(organization)),
-        hospitalsProvider.overrideWith((ref) => Stream.value(const [])),
       ],
     );
   }
@@ -38,14 +37,6 @@ void main() {
     expect(saveButton.onPressed, isNull);
     final retentionSwitch = tester.widgetList<Switch>(find.byType(Switch)).first;
     expect(retentionSwitch.onChanged, isNull);
-  });
-
-  testWidgets('hosts the Hospitals section below the org settings cards', (tester) async {
-    await pumpScreen(tester, organization: const Organization(id: 'org-1', name: 'Acme Health'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Hospitals'), findsWidgets);
-    expect(find.text('No hospitals yet'), findsOneWidget);
   });
 
   group('country', () {

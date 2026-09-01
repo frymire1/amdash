@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../classes/organization_country.dart';
 import '../services/admin_service.dart';
 import '../widgets/admin_page.dart';
-import '../widgets/hospital_management_section.dart';
 
 /// Mirrors `organization-settings.component.ts`/`.html`: a retention
 /// toggle, a country picker, and a Cloud KMS patient-data-encryption
@@ -20,10 +19,8 @@ import '../widgets/hospital_management_section.dart';
 /// completion by the daily cleanup job; true → this org's completed
 /// patients are skipped by that job entirely.
 ///
-/// Also hosts hospital management ([HospitalManagementSection]) — folded
-/// in here rather than kept on its own route/tab, since hospitals are an
-/// org-level setting like retention, not a separate management domain the
-/// way users are.
+/// Hospital management lives on its own route/tab
+/// ([HospitalManagementScreen]), not here.
 class OrganizationSettingsScreen extends ConsumerStatefulWidget {
   const OrganizationSettingsScreen({super.key});
 
@@ -198,13 +195,17 @@ class _OrganizationSettingsScreenState
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
+                key: const Key('country_dropdown'),
                 initialValue: _countrySelection,
                 decoration: const InputDecoration(labelText: 'Country'),
                 items: [
                   for (final entry in organizationCountries.entries)
                     DropdownMenuItem(
                       value: entry.key,
-                      child: Text(entry.value),
+                      child: KeyedSubtree(
+                        key: Key('country_option_${entry.key}'),
+                        child: Text(entry.value),
+                      ),
                     ),
                 ],
                 onChanged: (value) => setState(() => _countrySelection = value),
@@ -215,6 +216,7 @@ class _OrganizationSettingsScreenState
               Align(
                 alignment: Alignment.centerLeft,
                 child: FilledButton(
+                  key: const Key('save_country_button'),
                   onPressed:
                       _savingCountry ||
                           _countrySelection == null ||
@@ -295,6 +297,7 @@ class _OrganizationSettingsScreenState
               Row(
                 children: [
                   Switch(
+                    key: const Key('audit_logging_switch'),
                     value: auditLoggingEnabled,
                     onChanged: _savingAuditLogging || organization == null
                         ? null
@@ -345,6 +348,7 @@ class _OrganizationSettingsScreenState
               Row(
                 children: [
                   Switch(
+                    key: const Key('cmek_switch'),
                     value: cmekRequested,
                     onChanged: _savingCmek || organization == null
                         ? null
@@ -387,6 +391,7 @@ class _OrganizationSettingsScreenState
               Row(
                 children: [
                   Switch(
+                    key: const Key('fhir_export_switch'),
                     value: fhirExportEnabled,
                     onChanged: _savingFhirExport || organization == null
                         ? null
@@ -412,13 +417,6 @@ class _OrganizationSettingsScreenState
             ],
           ),
         ),
-        const SizedBox(height: 8),
-        const Text(
-          'Hospitals',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 16),
-        const HospitalManagementSection(),
       ],
     );
   }
