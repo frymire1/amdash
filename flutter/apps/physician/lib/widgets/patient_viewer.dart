@@ -32,7 +32,18 @@ const _routeWidth = 6;
 // like swap of "what's inside the pin," not a color change too.
 const _vehicleMarkerColor = Color(0xFFEA4335);
 const _hospitalMarkerColor = Color(0xFF34A853);
+// _markerIconSize is the *raster* resolution the icon is drawn at (kept
+// high for retina sharpness); _markerDisplaySize is the actual on-screen
+// footprint, passed to BitmapDescriptor.bytes's width/height below.
+// BitmapDescriptor.bytes with neither set defaults imagePixelRatio to 1.0
+// ("natural resolution"), which means it displays the raw PNG at its full
+// pixel size in *logical* points — a 96px image rendered as a 96pt marker,
+// roughly double a normal marker's footprint and confirmed for real to
+// look oversized on an iPhone. Passing explicit width/height instead makes
+// the platform scale it correctly for the device's own pixel ratio,
+// decoupled from how big the underlying PNG actually is.
 const _markerIconSize = 96.0;
+const _markerDisplaySize = 36.0;
 
 // Cached module-level, not per-widget-instance: both markers' bitmaps are
 // identical every time (same glyph, same color, same size, nothing
@@ -84,7 +95,11 @@ Future<BitmapDescriptor> _iconMarkerBitmap(IconData icon, Color background) asyn
 
   final image = await recorder.endRecording().toImage(_markerIconSize.toInt(), _markerIconSize.toInt());
   final bytes = await image.toByteData(format: ImageByteFormat.png);
-  return BitmapDescriptor.bytes(bytes!.buffer.asUint8List());
+  return BitmapDescriptor.bytes(
+    bytes!.buffer.asUint8List(),
+    width: _markerDisplaySize,
+    height: _markerDisplaySize,
+  );
 }
 
 /// Mirrors `patient-viewer.component.ts`/`.html` — the core screen: patient
