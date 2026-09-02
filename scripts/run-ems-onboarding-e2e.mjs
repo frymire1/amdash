@@ -27,7 +27,7 @@
 //
 // The matching failure-state leg (an admin-created *physician*-role
 // account attempting to sign into the EMS app instead) used to live here
-// too, but doesn't need Android at all — see run-ems-wrongapp-e2e.mjs,
+// too, but doesn't need Android at all — see run-ems-app-redirect-e2e.mjs,
 // which now owns that scenario entirely, self-contained and Chrome-only.
 //
 // Usage:

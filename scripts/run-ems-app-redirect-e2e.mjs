@@ -22,7 +22,7 @@
 // file's own header comment); this leg is Chrome-only now, so nothing
 // about it needs splitting across job boundaries.
 //
-// Usage: node scripts/run-ems-wrongapp-e2e.mjs
+// Usage: node scripts/run-ems-app-redirect-e2e.mjs
 // Requires: flutter + patrol_cli on PATH (or edit FLUTTER_BIN/PATROL_BIN in
 // scripts/lib/run-patrol.mjs to match your machine), a cached `firebase
 // login` CLI session (or GOOGLE_APPLICATION_CREDENTIALS set, e.g. in CI).

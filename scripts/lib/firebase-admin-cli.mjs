@@ -54,9 +54,10 @@ export async function findOrganizationId(db, name) {
 // state", so an interrupted run (killed process, a crash between
 // --seed-only and --teardown) doesn't orphan its state forever (see each
 // cleanup()'s own comment). But sibling e2e jobs run *concurrently* in the
-// same GHA workflow (flutter-web-e2e and flutter-android-e2e-seed have no
-// `needs` between them, and the three flutter-android-e2e-* run jobs
-// downstream of seed run concurrently with each other too), so an
+// same GHA workflow (the six flutter-web-e2e-* jobs and
+// flutter-android-e2e-seed all `needs: flutter-analyze-test` with no
+// `needs` between any of them, and the three flutter-android-e2e-* run
+// jobs downstream of seed run concurrently with each other too), so an
 // unscoped sweep can delete a DIFFERENT,
 // still-in-use run's state out from under it mid-test. Confirmed for
 // real: the web job's own physician cleanup deleted the Android job's
