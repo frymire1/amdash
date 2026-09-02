@@ -8,10 +8,11 @@
 // sign-in step every other EMS test's account skips straight past (those
 // are all seeded directly via the Admin SDK with a password already set
 // — see run-ems-patrol-test.mjs). Runs on a real Android device via
-// Firebase Test Lab (see ci.yml's flutter-android-e2e job) — deliberately
-// not Chrome, unlike the rest of this file's siblings, since EMS crews
-// use the native app in the field, not the web build (which exists only
-// for this repo's own Chrome e2e coverage — see ems_test.dart's header).
+// Firebase Test Lab (see ci.yml's flutter-android-e2e-ems-onboarding job)
+// — deliberately not Chrome, unlike the rest of this file's siblings,
+// since EMS crews use the native app in the field, not the web build
+// (which exists only for this repo's own Chrome e2e coverage — see
+// ems_test.dart's header).
 //
 // tapText/enterTextAt/pumpUntil/completeMfaEnrollment come from
 // amdash_patrol_helpers, shared across every app's patrol_test/ suite —

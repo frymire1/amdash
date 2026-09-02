@@ -97,7 +97,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Needed so ggshield can see the actual pushed commit range, not
           # just a single-commit shallow clone.
@@ -115,9 +115,9 @@ jobs:
     name: Marketing test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -135,9 +135,9 @@ jobs:
     name: Marketing lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -155,9 +155,9 @@ jobs:
     name: Marketing build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -175,7 +175,7 @@ jobs:
     name: Flutter analyze + unit/widget tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: subosito/flutter-action@v2
         with:
@@ -263,9 +263,9 @@ jobs:
     name: Functions build (tsc)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -312,7 +312,7 @@ jobs:
       LANG: en_US.UTF-8
       LC_ALL: en_US.UTF-8
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Belt-and-suspenders alongside the job-level LANG/LC_ALL above:
       # locale-gen is a no-op if en_US.UTF-8 is already generated.
@@ -326,7 +326,7 @@ jobs:
       - name: Ensure xvfb is installed
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -339,7 +339,7 @@ jobs:
 
       # `dart pub global activate` compiles patrol_cli from source — real
       # time cost, repeated identically in both e2e jobs every run.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.pub-cache
           key: pub-cache-${{ runner.os }}-patrol-cli
@@ -417,15 +417,24 @@ jobs:
       # completes its own real first-ever sign-in through the physician
       # app's own UI. See run-physician-onboarding-e2e.mjs's own header
       # comment. run-ems-onboarding-e2e.mjs's identical EMS-side flow runs
-      # in flutter-android-e2e below instead — EMS crews use the native
-      # app, not the web build, so that leg needs a real Android device.
+      # in the flutter-android-e2e-* jobs below instead — EMS crews use the
+      # native app, not the web build, so that leg needs a real Android
+      # device.
       - name: Run cross-app physician onboarding e2e (admin creates user -> physician first sign-in)
         run: node run-physician-onboarding-e2e.mjs
         working-directory: scripts
 
+      # EMS's own wrong-app rejection leg — moved here from
+      # flutter-android-e2e (see run-ems-wrongapp-e2e.mjs's own header
+      # comment for why: nothing about this scenario is Android-specific,
+      # unlike the real onboarding leg, which stays on Test Lab below).
+      - name: Run ems wrong-app e2e (admin creates physician-role user -> EMS rejects at email)
+        run: node run-ems-wrongapp-e2e.mjs
+        working-directory: scripts
+
       - name: Upload Patrol reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: patrol-reports
           path: |
@@ -440,42 +449,46 @@ jobs:
   # than the older local-emulator approach this repo used before the
   # Codemagic migration — keeping the real-device upgrade, just triggering
   # it from a free runner instead of a paid one.
-  flutter-android-e2e:
-    name: Android e2e (Firebase Test Lab)
+  # Split from a single sequential job into five (seed -> physician/ems/
+  # ems-onboarding in parallel -> teardown) — each of the three build+device
+  # cycles costs ~5-6 minutes on its own (APK compile, upload, Test Lab
+  # device queue/boot/run, result dump), and nothing actually requires them
+  # to run one after another. Separate jobs run on separate runner VMs with
+  # no shared filesystem, unlike steps within one job, so the seeded account
+  # JSON this job produces has to cross via actions/upload-artifact /
+  # actions/download-artifact instead of just staying on disk in
+  # $RUNNER_TEMP for a later step in the same job to read.
+  flutter-android-e2e-seed:
+    name: Android e2e (Firebase Test Lab) — seed accounts
     runs-on: ubuntu-latest
     needs: flutter-analyze-test
     if: github.ref == 'refs/heads/master'
-    # id-token: write is what lets this job request the short-lived OIDC
-    # token Workload Identity Federation exchanges for GCP credentials
-    # (see the file-level comment above) — required for the auth step
-    # below to work at all. Setting `permissions` here replaces the
-    # default token permissions for this job rather than adding to them,
-    # so contents: read has to be listed explicitly too (actions/checkout
-    # needs it) — it's not implied just because id-token is granted.
+    # Only the Firebase Admin SDK (service-account-key secret, not WIF) and
+    # a Chrome-based admin UI run happen in this job — no Test Lab/gcloud
+    # calls at all, so unlike the three run jobs below, no id-token: write
+    # is needed here.
     permissions:
       contents: read
-      id-token: write
     # LANG/LC_ALL: same fix as flutter-web-e2e's identical job-level env —
-    # only needed here because of the new admin-onboarding Chrome step
-    # below (see its own comment); the rest of this job never touches
-    # Flutter Web at all.
+    # only needed here because of the admin-onboarding Chrome step below
+    # (see its own comment).
     env:
       LANG: en_US.UTF-8
       LC_ALL: en_US.UTF-8
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Belt-and-suspenders alongside the job-level LANG/LC_ALL above —
       # see flutter-web-e2e's identical step.
       - name: Ensure en_US.UTF-8 locale is generated
         run: sudo locale-gen en_US.UTF-8
 
-      # Only the new admin-onboarding Chrome step below needs a display —
-      # see flutter-web-e2e's identical step for why xvfb specifically.
+      # The admin-onboarding Chrome step below needs a display — see
+      # flutter-web-e2e's identical step for why xvfb specifically.
       - name: Ensure xvfb is installed
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -486,15 +499,7 @@ jobs:
           channel: stable
           cache: true
 
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('flutter/apps/*/android/**/*.gradle*', 'flutter/apps/*/android/gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: gradle-${{ runner.os }}-
-
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.pub-cache
           key: pub-cache-${{ runner.os }}-patrol-cli
@@ -509,7 +514,7 @@ jobs:
         run: npm ci
         working-directory: scripts
 
-      # Only the new admin-onboarding Chrome step below needs this — see
+      # The admin-onboarding Chrome step below needs this — see
       # flutter-web-e2e's identical step for why this is needed ahead of
       # time rather than left to patrol's own on-demand setup.
       - name: Install Playwright browser + OS dependencies
@@ -520,34 +525,6 @@ jobs:
         run: |
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
-
-      # ems's own run step below needs `gcloud beta` (--grant-permissions
-      # is beta-only — see that step's own comment). ubuntu-latest's
-      # preinstalled gcloud is an apt/system package with its component
-      # manager disabled entirely (confirmed for real: `gcloud components
-      # install beta` fails outright with "the Google Cloud CLI component
-      # manager is disabled for this installation") — swap it for a real,
-      # component-manageable Cloud SDK install instead of trying to
-      # extend the locked one. Installed *before* auth below (standard
-      # ordering for these two actions together) so the fresh install
-      # doesn't risk clobbering the auth step's own gcloud-level config.
-      - name: Install gcloud (component-manageable, with beta)
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          install_components: beta
-
-      # google-github-actions/auth sets up both gcloud CLI credentials and
-      # Application Default Credentials from the service account key in
-      # one step — the GHA-native replacement for manually writing a key
-      # file and calling `gcloud auth activate-service-account`.
-      - name: Authenticate gcloud to Test Lab
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: 'projects/577422583971/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
-          service_account: 'codemagic-testlab@amdash-dev.iam.gserviceaccount.com'
-
-      - name: Set gcloud project
-        run: gcloud config set project amdash-dev
 
       # Seeding and teardown are split into their own steps (rather than
       # one seed->test->teardown script per app, the way web-e2e works)
@@ -565,12 +542,107 @@ jobs:
       # run-ems-onboarding-e2e.mjs's own header comment for why this,
       # unlike everything else in this job, runs on Chrome rather than a
       # Test Lab device (admin has no native Android/iOS build at all).
-      # Must run before the ems build below: patrol build android needs
-      # the new EMS account's email baked in as a --dart-define at build
-      # time, so it has to actually exist first.
+      # Must run before flutter-android-e2e-ems-onboarding's build (a
+      # separate downstream job): patrol build android needs the new EMS
+      # account's email baked in as a --dart-define at build time, so it
+      # has to actually exist first.
       - name: Create ems onboarding user via admin UI (Chrome)
         run: node run-ems-onboarding-e2e.mjs --create-user --account-json="$RUNNER_TEMP/ems-onboarding-account.json"
         working-directory: scripts
+
+      # `if: always()` + if-no-files-found: warn so a failure partway
+      # through the steps above (e.g. the Chrome create-user step) still
+      # uploads whatever account JSON *did* get written — the physician/ems
+      # accounts are seeded before that step ever runs, and the teardown
+      # job below needs them regardless of whether the rest of this job
+      # succeeded.
+      - name: Upload seeded account JSON
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-e2e-accounts
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/physician-account.json
+            ${{ runner.temp }}/ems-account.json
+            ${{ runner.temp }}/ems-onboarding-account.json
+
+  flutter-android-e2e-physician:
+    name: Android e2e (Firebase Test Lab) — physician
+    runs-on: ubuntu-latest
+    needs: flutter-android-e2e-seed
+    if: github.ref == 'refs/heads/master'
+    # id-token: write is what lets this job request the short-lived OIDC
+    # token Workload Identity Federation exchanges for GCP credentials
+    # (see the file-level comment above) — required for the auth step
+    # below to work at all. Setting `permissions` here replaces the
+    # default token permissions for this job rather than adding to them,
+    # so contents: read has to be listed explicitly too (actions/checkout
+    # needs it) — it's not implied just because id-token is granted.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('flutter/apps/*/android/**/*.gradle*', 'flutter/apps/*/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.pub-cache
+          key: pub-cache-${{ runner.os }}-patrol-cli
+
+      - name: Install patrol_cli
+        # Pinned — see the matching comment in flutter-web-e2e above.
+        run: |
+          dart pub global activate patrol_cli 4.7.0
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      # ubuntu-latest's preinstalled gcloud is an apt/system package with
+      # its component manager disabled entirely (confirmed for real:
+      # `gcloud components install beta` fails outright with "the Google
+      # Cloud CLI component manager is disabled for this installation") —
+      # swap it for a real, component-manageable Cloud SDK install instead
+      # of trying to extend the locked one. Installed *before* auth below
+      # (standard ordering for these two actions together) so the fresh
+      # install doesn't risk clobbering the auth step's own gcloud-level
+      # config. `beta` isn't actually needed by this leg (only ems's own
+      # run job below needs --grant-permissions), but installed
+      # unconditionally anyway to keep all three run jobs' setup identical.
+      - name: Install gcloud (component-manageable, with beta)
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          install_components: beta
+
+      # google-github-actions/auth sets up both gcloud CLI credentials and
+      # Application Default Credentials from the service account key in
+      # one step — the GHA-native replacement for manually writing a key
+      # file and calling `gcloud auth activate-service-account`.
+      - name: Authenticate gcloud to Test Lab
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: 'projects/577422583971/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
+          service_account: 'codemagic-testlab@amdash-dev.iam.gserviceaccount.com'
+
+      - name: Set gcloud project
+        run: gcloud config set project amdash-dev
+
+      - name: Download seeded account JSON
+        uses: actions/download-artifact@v8
+        with:
+          name: android-e2e-accounts
+          path: ${{ runner.temp }}
 
       - name: Build + run physician Test Lab suite (Android)
         run: |
@@ -649,9 +721,70 @@ jobs:
             echo
           done
 
+  flutter-android-e2e-ems:
+    name: Android e2e (Firebase Test Lab) — ems
+    runs-on: ubuntu-latest
+    needs: flutter-android-e2e-seed
+    if: github.ref == 'refs/heads/master'
+    # See flutter-android-e2e-physician's identical permissions block for
+    # why both of these are needed.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('flutter/apps/*/android/**/*.gradle*', 'flutter/apps/*/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.pub-cache
+          key: pub-cache-${{ runner.os }}-patrol-cli
+
+      - name: Install patrol_cli
+        run: |
+          dart pub global activate patrol_cli 4.7.0
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      # This leg is the one that actually needs `gcloud beta`
+      # (--grant-permissions is beta-only — see the run step's own
+      # comment) — see flutter-android-e2e-physician's identical step for
+      # why gcloud gets reinstalled component-manageable here at all.
+      - name: Install gcloud (component-manageable, with beta)
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          install_components: beta
+
+      - name: Authenticate gcloud to Test Lab
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: 'projects/577422583971/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
+          service_account: 'codemagic-testlab@amdash-dev.iam.gserviceaccount.com'
+
+      - name: Set gcloud project
+        run: gcloud config set project amdash-dev
+
+      - name: Download seeded account JSON
+        uses: actions/download-artifact@v8
+        with:
+          name: android-e2e-accounts
+          path: ${{ runner.temp }}
+
       - name: Build + run ems Test Lab suite (Android)
         run: |
-          # See physician's identical step above for why this matters.
+          # See flutter-android-e2e-physician's identical step for why this
+          # matters.
           set -o pipefail
           ACCOUNT="$RUNNER_TEMP/ems-account.json"
           cd flutter/apps/ems
@@ -688,7 +821,8 @@ jobs:
             --results-bucket=gs://amdash-dev-test-lab-results \
             2>&1 | tee /tmp/ems-testlab.log
 
-      # Permanent diagnostic — see the physician one above, same rationale.
+      # Permanent diagnostic — see flutter-android-e2e-physician's
+      # identical step above, same rationale.
       - name: Dump ems Test Lab raw results
         if: always()
         run: |
@@ -722,8 +856,66 @@ jobs:
             echo
           done
 
-      # The real onboarding leg — admin's Chrome-based create-user step
-      # already ran above (see run-ems-onboarding-e2e.mjs's own header
+  flutter-android-e2e-ems-onboarding:
+    name: Android e2e (Firebase Test Lab) — ems onboarding
+    runs-on: ubuntu-latest
+    needs: flutter-android-e2e-seed
+    if: github.ref == 'refs/heads/master'
+    # See flutter-android-e2e-physician's identical permissions block for
+    # why both of these are needed.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('flutter/apps/*/android/**/*.gradle*', 'flutter/apps/*/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.pub-cache
+          key: pub-cache-${{ runner.os }}-patrol-cli
+
+      - name: Install patrol_cli
+        run: |
+          dart pub global activate patrol_cli 4.7.0
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      # See flutter-android-e2e-physician's identical step for why gcloud
+      # gets reinstalled component-manageable here at all.
+      - name: Install gcloud (component-manageable, with beta)
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          install_components: beta
+
+      - name: Authenticate gcloud to Test Lab
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: 'projects/577422583971/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
+          service_account: 'codemagic-testlab@amdash-dev.iam.gserviceaccount.com'
+
+      - name: Set gcloud project
+        run: gcloud config set project amdash-dev
+
+      - name: Download seeded account JSON
+        uses: actions/download-artifact@v8
+        with:
+          name: android-e2e-accounts
+          path: ${{ runner.temp }}
+
+      # The real onboarding leg — the seed job's Chrome-based create-user
+      # step already ran (see run-ems-onboarding-e2e.mjs's own header
       # comment for why that has to happen before this build, not after);
       # this is that new account's own first-ever sign-in, on a real
       # device. No --grant-permissions=none needed here, unlike the ems
@@ -780,64 +972,49 @@ jobs:
             echo
           done
 
-      # The failure-state leg — a physician-role account attempting to
-      # sign into the EMS app, rejected right after email (checkAccountStatus's
-      # own roleAllowed field — see functions/src/auth.ts), before a
-      # password is ever relevant. See ems/patrol_test/wrong_app_login_test.dart's
-      # own header comment.
-      - name: Build + run ems wrong-app Test Lab suite (Android)
-        run: |
-          set -o pipefail
-          ACCOUNT="$RUNNER_TEMP/ems-onboarding-account.json"
-          cd flutter/apps/ems
-          patrol build android --target patrol_test/wrong_app_login_test.dart \
-            --dart-define SMOKE_EMAIL="$(jq -r .wrongAppUserEmail "$ACCOUNT")" \
-            --dart-define FIREBASE_APPCHECK_DEBUG_TOKEN="${{ secrets.FIREBASE_APPCHECK_DEBUG_TOKEN }}"
-          gcloud firebase test android run \
-            --type instrumentation \
-            --app build/app/outputs/apk/debug/app-debug.apk \
-            --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
-            --device model=MediumPhone.arm,version=35,locale=en,orientation=portrait \
-            --results-bucket=gs://amdash-dev-test-lab-results \
-            2>&1 | tee /tmp/ems-wrongapp-testlab.log
+  # Runs regardless of whether seeding or any of the three legs above
+  # succeeded or failed — the GHA equivalent of Codemagic's
+  # `publishing.scripts` guarantee. `always()` alone would also make this
+  # run on branches other than master (bypassing the skip that a failed/
+  # skipped `needs` job would otherwise cause), so the ref check is
+  # repeated explicitly here too. `|| true` on each teardown call so one
+  # app's teardown failing doesn't skip the other's; the account-JSON
+  # download is allowed to fail without failing the whole job (e.g. if the
+  # seed job never got as far as uploading anything) since
+  # run-*-patrol-test.mjs's own --teardown mode already tolerates a missing
+  # --account-json file and falls back to its age-guarded broad sweep.
+  flutter-android-e2e-teardown:
+    name: Android e2e (Firebase Test Lab) — teardown
+    runs-on: ubuntu-latest
+    needs: [flutter-android-e2e-seed, flutter-android-e2e-physician, flutter-android-e2e-ems, flutter-android-e2e-ems-onboarding]
+    if: always() && github.ref == 'refs/heads/master'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
 
-      - name: Dump ems wrong-app Test Lab raw results
-        if: always()
-        run: |
-          BUCKET_PATH=$(grep -oE 'storage/browser/[^]]+' /tmp/ems-wrongapp-testlab.log | head -1 | sed 's#storage/browser/##')
-          if [ -z "$BUCKET_PATH" ]; then
-            echo "Could not find a GCS bucket path in the run's output."
-            exit 0
-          fi
-          echo "=== gs://$BUCKET_PATH (recursive listing) ==="
-          gcloud storage ls -r "gs://$BUCKET_PATH" || true
-          echo "=== catting anything text-like found above ==="
-          for f in $(gcloud storage ls -r "gs://$BUCKET_PATH" 2>/dev/null | grep -E '\.(txt|xml|log)$|logcat$|instrumentation\.results$'); do
-            echo "--- $f ---"
-            if [[ "$f" == *logcat ]]; then
-              # A full-device logcat's first ~20000 bytes are dominated by
-              # boot noise (ServiceManager/AtomicFile/artd chatter) — a
-              # plain head cutoff never reaches the app's own output at
-              # all (confirmed for real: an ems onboarding failure dump
-              # this way, needed to re-derive from timing math instead of
-              # just reading it). Grep for the flutter tag first — where
-              # print()/debugPrint() and Flutter's own uncaught-error
-              # logging land — and keep the raw head too as a fallback in
-              # case nothing flutter-tagged printed at all.
-              echo "-- flutter-tagged lines --"
-              gcloud storage cat "$f" 2>&1 | grep -iE ' flutter *: ' | head -c 20000
-              echo "-- first 20000 bytes, unfiltered --"
-              gcloud storage cat "$f" 2>&1 | head -c 20000
-            else
-              gcloud storage cat "$f" 2>&1 | head -c 20000
-            fi
-            echo
-          done
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
 
-      # Runs regardless of whether the steps above succeeded or failed —
-      # the GHA equivalent of Codemagic's `publishing.scripts` guarantee.
-      # `|| true` on each so one app's teardown failing doesn't skip the
-      # other's.
+      - name: Install scripts dependencies
+        run: npm ci
+        working-directory: scripts
+
+      - name: Authenticate to Firebase Admin SDK
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+
+      - name: Download seeded account JSON
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: android-e2e-accounts
+          path: ${{ runner.temp }}
+
       - name: Teardown physician + ems smoke accounts
         if: always()
         run: |
@@ -866,7 +1043,11 @@ jobs:
   flutter-web-deploy:
     name: Deploy physician/EMS web to amdash-dev
     runs-on: ubuntu-latest
-    needs: [flutter-web-e2e, flutter-android-e2e]
+    # Gates on the three Android run jobs, not the seed or teardown jobs —
+    # deploy should wait for real test results, not cleanup succeeding (and
+    # teardown itself needs: all three run jobs, so gating on them already
+    # implies the whole Android leg reached a real pass/fail).
+    needs: [flutter-web-e2e, flutter-android-e2e-physician, flutter-android-e2e-ems, flutter-android-e2e-ems-onboarding]
     if: github.ref == 'refs/heads/master'
     permissions:
       contents: read
@@ -876,7 +1057,7 @@ jobs:
       PROJECT_ID: amdash-dev
       ARTIFACT_REPO: web-hosting
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: subosito/flutter-action@v2
         with:
@@ -897,12 +1078,12 @@ jobs:
       # comment for the exact grants and why it's a separate identity
       # from codemagic-testlab).
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: 'projects/577422583971/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
           service_account: 'github-actions-web-deploy@amdash-dev.iam.gserviceaccount.com'
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v3
 
       - name: Configure Docker to push to Artifact Registry
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet

@@ -18,7 +18,7 @@ jobs:
     name: Deploy firestore rules + indexes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Firebase CLI
         run: npm install -g firebase-tools

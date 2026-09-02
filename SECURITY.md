@@ -270,8 +270,9 @@ token is harmless in monitor mode.
 
 Debug builds use the debug provider instead (`kDebugMode`-gated in each
 app's `main.dart`), which needs a token registered by hand in Firebase
-Console → App Check → (app) → Manage debug tokens. CI's Android e2e job
-(`flutter-android-e2e` in `.github/workflows/ci.yml`) passes one through via
+Console → App Check → (app) → Manage debug tokens. CI's Android e2e jobs
+(`flutter-android-e2e-physician`/`-ems`/`-ems-onboarding` in
+`.github/workflows/ci.yml`) pass one through via
 the `FIREBASE_APPCHECK_DEBUG_TOKEN` repo secret and a matching
 `--dart-define`, so a debug-build Patrol run mints a real, registered token
 instead of an unregistered ad-hoc one — this is groundwork for the day
