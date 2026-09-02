@@ -786,6 +786,82 @@ jobs:
             flutter/apps/ems/playwright-report
           retention-days: 7
 
+  flutter-web-e2e-physician-app-redirect:
+    name: Web e2e (Chrome) — physician app redirect
+    runs-on: ubuntu-latest
+    needs: flutter-analyze-test
+    if: github.ref == 'refs/heads/master'
+    # See flutter-web-e2e-admin's identical job-level env for why.
+    env:
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Ensure en_US.UTF-8 locale is generated
+        run: sudo locale-gen en_US.UTF-8
+
+      - name: Ensure xvfb is installed
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.pub-cache
+          key: pub-cache-${{ runner.os }}-patrol-cli
+
+      - name: Install patrol_cli
+        # See flutter-web-e2e-admin's identical step for why this is
+        # pinned rather than left latest.
+        run: |
+          dart pub global activate patrol_cli 4.7.0
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: Install scripts dependencies
+        run: npm ci
+        working-directory: scripts
+
+      - name: Install Playwright browser + OS dependencies
+        run: npx playwright install --with-deps chromium
+        working-directory: scripts
+
+      - name: Authenticate to Firebase
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+
+      # Physician's own wrong-app rejection leg — split out of
+      # run-physician-onboarding-e2e.mjs (see run-physician-app-redirect-
+      # e2e.mjs's own header comment for why: a real attempt at merging it
+      # into the same script/patrolTest block as the real onboarding leg
+      # hit a hard wall — AuthService.signOut()'s deliberate page reload
+      # on web kills a still-running Patrol test, and no scenario ordering
+      # avoids needing that sign-out somewhere in the middle).
+      - name: Run physician app-redirect e2e (admin creates ems-role user -> physician rejects at email)
+        run: node run-physician-app-redirect-e2e.mjs
+        working-directory: scripts
+
+      - name: Upload Patrol reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: patrol-reports-physician-app-redirect
+          path: |
+            flutter/apps/admin/playwright-report
+            flutter/apps/physician/playwright-report
+            flutter/apps/ems/playwright-report
+          retention-days: 7
+
   # Only runs on master — see flutter-web-e2e-admin's identical note on real
   # Firebase/Test Lab resource usage. Mirrors codemagic.yaml's own
   # android-e2e job (real Test Lab devices, not a local emulator) rather
@@ -1389,7 +1465,7 @@ jobs:
     # Gates on the three Android run jobs (not the seed or teardown jobs —
     # deploy should wait for real test results, not cleanup succeeding; and
     # teardown itself needs: all three run jobs, so gating on them already
-    # implies the whole Android leg reached a real pass/fail) and all six
+    # implies the whole Android leg reached a real pass/fail) and all seven
     # web-e2e jobs.
     needs:
       [
@@ -1399,6 +1475,7 @@ jobs:
         flutter-web-e2e-patient-flow,
         flutter-web-e2e-physician-onboarding,
         flutter-web-e2e-ems-app-redirect,
+        flutter-web-e2e-physician-app-redirect,
         flutter-android-e2e-physician,
         flutter-android-e2e-ems,
         flutter-android-e2e-ems-onboarding,

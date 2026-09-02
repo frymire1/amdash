@@ -177,7 +177,6 @@ if (teardown) {
 }
 
 let account;
-let exportTestAccount;
 let exitCode = 1;
 try {
   account = await createSmokeEmsAccount(db);
@@ -188,69 +187,41 @@ try {
     console.log('Wrote seeded account to', accountJsonPath);
     exitCode = 0;
   } else {
-    const commonOptions = {
+    // Both of ems_test.dart's own phases (add/edit/delete a patient, then
+    // complete transport + export FHIR) run in this one `patrol test`
+    // process, inside one `patrolTest` block, sharing this one account and
+    // its one MFA enrollment — see that file's own header comment for why
+    // (used to be two separate patrol test files/processes/accounts
+    // specifically to route around a cross-process MFA limitation; one
+    // continuous patrolTest block never hits that limitation in the first
+    // place, since nothing ever reloads mid-test to lose the session).
+    exitCode = await runPatrolTest({
       appDir: EMS_APP_DIR,
       device: process.env.PATROL_DEVICE || 'chrome',
       // ems_test.dart never grants geolocation (it deliberately leaves
-      // live tracking off) — but LocationTrackingSection.initState()
-      // still calls Geolocator.getCurrentPosition() unconditionally on
-      // every mount of the upload/edit form regardless. With no
-      // permission decision at all, the browser leaves the request in
-      // "prompt" limbo indefinitely (no UI to click through in headless
-      // CI), so it only ever resolves via that call's own internal 12s
-      // Dart-side timeout — a real race window against Patrol's own 10s
-      // hit-test timeout, confirmed via a real GHA "Found 0 widgets with
-      // type TextField" right around that ~12s mark. Explicitly denying
-      // (empty permissions array, not omitted) makes the browser reject
-      // the request immediately instead, removing the race entirely.
-      // complete_and_export_test.dart shares this same need (it also
-      // turns live tracking off during upload), so both runs use it.
+      // live tracking off in both phases) — but
+      // LocationTrackingSection.initState() still calls
+      // Geolocator.getCurrentPosition() unconditionally on every mount of
+      // the upload/edit form regardless. With no permission decision at
+      // all, the browser leaves the request in "prompt" limbo
+      // indefinitely (no UI to click through in headless CI), so it only
+      // ever resolves via that call's own internal 12s Dart-side timeout
+      // — a real race window against Patrol's own 10s hit-test timeout,
+      // confirmed via a real GHA "Found 0 widgets with type TextField"
+      // right around that ~12s mark. Explicitly denying (empty
+      // permissions array, not omitted) makes the browser reject the
+      // request immediately instead, removing the race entirely.
       webPermissions: [],
-    };
-
-    const emsTestExitCode = await runPatrolTest({
-      ...commonOptions,
       target: 'patrol_test/ems_test.dart',
       dartDefines: { SMOKE_EMAIL: account.email, SMOKE_PASSWORD: account.password },
     });
-
-    // Its own throwaway account, not a reuse of the one above — confirmed
-    // for real (a first attempt shared one account across both runs):
-    // once ems_test.dart enrolls MFA on an account, every *later* sign-in
-    // to that same account hits Firebase's MFA *challenge* (enter a code
-    // from the authenticator app) rather than skipping straight through —
-    // and this separate `patrol test` process has no way to know the TOTP
-    // secret the first process generated and enrolled with (Firebase
-    // never exposes it again after enrollment, by design). A fresh
-    // account sidesteps this entirely: its own sign-in goes through
-    // enrollment instead, where the secret is visible on-screen exactly
-    // like ems_test.dart's own flow already handles.
-    exportTestAccount = await createSmokeEmsAccount(db);
-    console.log('Created throwaway EMS account for the export test:', exportTestAccount.email);
-
-    // Separate `patrol test` process — see complete_and_export_test.dart's
-    // own header comment for why this is its own file rather than folded
-    // into ems_test.dart. Runs regardless of whether the first passed, so
-    // a failure in one doesn't hide whether the other also failed; not
-    // wired into the Firebase Test Lab (Android) path — see that file's
-    // header comment.
-    const exportTestExitCode = await runPatrolTest({
-      ...commonOptions,
-      target: 'patrol_test/complete_and_export_test.dart',
-      dartDefines: { SMOKE_EMAIL: exportTestAccount.email, SMOKE_PASSWORD: exportTestAccount.password },
-    });
-
-    exitCode = emsTestExitCode !== 0 ? emsTestExitCode : exportTestExitCode;
   }
 } finally {
   // --seed-only intentionally skips cleanup — teardown happens in a later,
   // separately-invoked `--teardown` run (see the Test Lab workflows), after
   // `patrol build` + `gcloud firebase test ... run` have both used this
   // seeded state.
-  if (!seedOnly) {
-    const uids = [account, exportTestAccount].filter(Boolean).map((a) => a.uid);
-    if (uids.length > 0) await cleanup(db, auth, uids);
-  }
+  if (!seedOnly && account) await cleanup(db, auth, account.uid);
   if (credentialPath) fs.unlinkSync(credentialPath);
 }
 

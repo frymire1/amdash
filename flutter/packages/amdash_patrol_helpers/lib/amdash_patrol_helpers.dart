@@ -6,3 +6,4 @@ library;
 export 'src/interaction_helpers.dart';
 export 'src/location_prompts.dart';
 export 'src/mfa.dart';
+export 'src/session.dart';

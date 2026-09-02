@@ -11,18 +11,25 @@
 // goes through — admin's createUser call is what makes the account exist
 // and passwordless, not a seed script standing in for it.
 //
-// A third leg then covers the matching failure state: an admin-created
-// *ems*-role account attempting to sign into the physician app instead —
-// rejected right after email (checkAccountStatus's own roleAllowed
-// field, see functions/src/auth.ts), before a password is ever relevant,
-// landing on AccessDeniedScreen, never MainViewScreen. See
-// physician/patrol_test/wrong_app_login_test.dart.
+// The matching failure-state leg (an admin-created *ems*-role account
+// attempting to sign into the physician app instead) used to live here
+// too, then briefly got merged into first_login_test.dart's own patrolTest
+// block — reverted for real: the transition from "real onboarding, ends
+// signed in" to "wrong-app, needs a clean LoginScreen" requires signing
+// out, and AuthService.signOut() (amdash_core) deliberately calls
+// FirebaseFirestore.terminate() + a full page reload on web (a documented
+// fix for a real prior bug, not something to work around) — any reload
+// mid-`patrolTest` kills the currently-running test outright, the same
+// way Patrol's own reload *between* separate patrolTest blocks does (see
+// run-physician-app-redirect-e2e.mjs's own header comment for that
+// finding). No ordering avoids it: whichever scenario runs second still
+// needs a clean LoginScreen, and the only in-app way there is a sign-out
+// button that reloads. See run-physician-app-redirect-e2e.mjs, which now
+// owns that scenario entirely, self-contained and Chrome-only, as its own
+// parallel CI job instead.
 //
-// All three legs run on Chrome (unlike run-ems-onboarding-e2e.mjs's
-// sibling, which needs a real Android device for its EMS legs) — mirrors
-// run-patient-flow-e2e.mjs's own two-sequential-Patrol-runs shape,
-// extended to three, just for account onboarding instead of a patient
-// handoff.
+// Runs on Chrome (unlike run-ems-onboarding-e2e.mjs's sibling, which needs
+// a real Android device for its EMS-side equivalent).
 //
 // Usage: node scripts/run-physician-onboarding-e2e.mjs
 // Requires: flutter + patrol_cli on PATH (or edit FLUTTER_BIN/PATROL_BIN in
@@ -45,11 +52,6 @@ const PHYSICIAN_APP_DIR = path.join(REPO_ROOT, 'flutter', 'apps', 'physician');
 const RUN_ID = Date.now();
 const HOSPITAL_NAME = `Patrol Onboarding Test Hospital ${RUN_ID}`;
 const NEW_USER_EMAIL = `smoke-physician-onboarding-${RUN_ID}@amdash-e2e.test`;
-// The wrong-app leg's account — deliberately a *different* prefix
-// (smoke-ems-wrongapp-, not smoke-physician-onboarding-) so its own sweep
-// in cleanup() below can't accidentally collide with a sibling
-// run-ems-onboarding-e2e.mjs job's own smoke-ems-onboarding- accounts.
-const WRONG_APP_USER_EMAIL = `smoke-ems-wrongapp-${RUN_ID}@amdash-e2e.test`;
 // Must satisfy passwordMeetsComplexityRequirements (functions/src/auth.ts)
 // — 8+ chars, an uppercase letter, a number, a special character — same as
 // every other onboarding password this suite generates.
@@ -66,51 +68,33 @@ async function seed(db) {
     organizationId,
   });
 
-  // Two separate admin accounts — mirrors run-admin-patrol-test.mjs's own
-  // createSmokeAdminAccount, just twice. Genuinely two, not one reused
-  // for both create_user_test.dart legs: completeMfaEnrollment
-  // (amdash_patrol_helpers) hard-assumes a never-enrolled account and
-  // goes straight for the enrollment screen's own secret — reusing the
-  // same admin for a second sign-in, after its MFA is already enrolled
-  // from the first, skips that screen entirely and the helper throws
-  // "Bad state: No element" instead (confirmed for real: exactly this,
-  // on a real CI run, before this fix). Neither the physician account nor
-  // the wrong-app ems account is seeded here directly — both are real
-  // outputs of the admin app's own createUser flow, not something this
-  // script writes to Firestore/Auth itself.
-  async function createAdmin(suffix) {
-    const email = `smoke-admin-onboarding-${suffix}-${RUN_ID}@amdash-e2e.test`;
-    const password = 'SmokeTest123';
-    const user = await getAuth().createUser({ email, password, emailVerified: true });
-    await db.doc(`users/${user.uid}`).set(
-      { email, role: ['admin'], organizationId, firstName: 'Smoke', lastName: 'Admin' },
-      { merge: true },
-    );
-    return { email, password, uid: user.uid };
-  }
-  const admin = await createAdmin('main');
-  const wrongAppAdmin = await createAdmin('wrongapp');
+  // Mirrors run-admin-patrol-test.mjs's own createSmokeAdminAccount. The
+  // new physician account itself is never seeded here directly — it's a
+  // real output of the admin app's own createUser flow, not something
+  // this script writes to Firestore/Auth itself.
+  const email = `smoke-admin-onboarding-${RUN_ID}@amdash-e2e.test`;
+  const password = 'SmokeTest123';
+  const user = await getAuth().createUser({ email, password, emailVerified: true });
+  await db.doc(`users/${user.uid}`).set(
+    { email, role: ['admin'], organizationId, firstName: 'Smoke', lastName: 'Admin' },
+    { merge: true },
+  );
 
-  return { hospitalId: hospitalRef.id, admin, wrongAppAdmin };
+  return { hospitalId: hospitalRef.id, admin: { email, password, uid: user.uid } };
 }
 
 async function cleanup(db, auth, seeded) {
   if (seeded) {
     await auth.deleteUser(seeded.admin.uid).catch(() => {});
     await db.doc(`users/${seeded.admin.uid}`).delete().catch(() => {});
-    await auth.deleteUser(seeded.wrongAppAdmin.uid).catch(() => {});
-    await db.doc(`users/${seeded.wrongAppAdmin.uid}`).delete().catch(() => {});
     await db.doc(`hospitals/${seeded.hospitalId}`).delete().catch(() => {});
-    // Neither the new physician account nor the wrong-app ems account was
-    // ever created by this script (see seed()'s own comment) — look them
-    // up by their known, deterministic emails instead of ids this script
-    // never had.
-    for (const email of [NEW_USER_EMAIL, WRONG_APP_USER_EMAIL]) {
-      const newUser = await auth.getUserByEmail(email).catch(() => null);
-      if (newUser) {
-        await auth.deleteUser(newUser.uid).catch(() => {});
-        await db.doc(`users/${newUser.uid}`).delete().catch(() => {});
-      }
+    // The new physician account was never created by this script (see
+    // seed()'s own comment) — look it up by its known, deterministic
+    // email instead of an id this script never had.
+    const newUser = await auth.getUserByEmail(NEW_USER_EMAIL).catch(() => null);
+    if (newUser) {
+      await auth.deleteUser(newUser.uid).catch(() => {});
+      await db.doc(`users/${newUser.uid}`).delete().catch(() => {});
     }
   }
 
@@ -124,9 +108,7 @@ async function cleanup(db, auth, seeded) {
     for (const user of page.users) {
       if (
         user.email &&
-        (user.email.startsWith('smoke-admin-onboarding-') ||
-          user.email.startsWith('smoke-physician-onboarding-') ||
-          user.email.startsWith('smoke-ems-wrongapp-')) &&
+        (user.email.startsWith('smoke-admin-onboarding-') || user.email.startsWith('smoke-physician-onboarding-')) &&
         isOldEnoughToSweep(user.email)
       ) {
         await auth.deleteUser(user.uid);
@@ -162,10 +144,8 @@ let exitCode = 1;
 try {
   seeded = await seed(db);
   console.log('Created throwaway admin account:', seeded.admin.email);
-  console.log('Created throwaway wrong-app-leg admin account:', seeded.wrongAppAdmin.email);
   console.log('Seeded hospital:', HOSPITAL_NAME);
   console.log('New physician account (created by the test itself):', NEW_USER_EMAIL);
-  console.log('Wrong-app ems account (created by the test itself):', WRONG_APP_USER_EMAIL);
 
   const createPhysicianExitCode = await runPatrolTest({
     appDir: ADMIN_APP_DIR,
@@ -213,39 +193,6 @@ try {
       },
     });
   }
-
-  // Third leg: the failure state. Runs regardless of how the two above
-  // went — an independent account/scenario, no reason to skip it just
-  // because the happy-path legs had trouble.
-  const createWrongAppExitCode = await runPatrolTest({
-    appDir: ADMIN_APP_DIR,
-    target: 'patrol_test/create_user_test.dart',
-    dartDefines: {
-      SMOKE_EMAIL: seeded.wrongAppAdmin.email,
-      SMOKE_PASSWORD: seeded.wrongAppAdmin.password,
-      SMOKE_NEW_USER_EMAIL: WRONG_APP_USER_EMAIL,
-      SMOKE_NEW_USER_ROLE: 'ems',
-    },
-  });
-
-  let wrongAppExitCode = createWrongAppExitCode;
-  if (createWrongAppExitCode === 0) {
-    wrongAppExitCode = await runPatrolTest({
-      appDir: PHYSICIAN_APP_DIR,
-      target: 'patrol_test/wrong_app_login_test.dart',
-      // No SMOKE_NEW_PASSWORD — wrong_app_login_test.dart is rejected
-      // right after email, before a password is ever relevant (see its
-      // own header comment).
-      dartDefines: {SMOKE_EMAIL: WRONG_APP_USER_EMAIL},
-    });
-  } else {
-    console.log('\n❌ Admin create-user step failed — skipping the wrong-app login step (account was never created).');
-  }
-
-  // Both onboarding and wrong-app legs have to pass for this script to
-  // report success — a real regression in either is a real regression,
-  // not something the other leg's result should be allowed to mask.
-  if (exitCode === 0 && wrongAppExitCode !== 0) exitCode = wrongAppExitCode;
 } finally {
   await cleanup(db, auth, seeded);
   if (credentialPath) fs.unlinkSync(credentialPath);

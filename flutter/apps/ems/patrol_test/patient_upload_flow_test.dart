@@ -8,8 +8,9 @@
 // makes a patient visible there. GPS is mocked via Playwright's
 // geolocation override (--web-geolocation, passed by the orchestrator),
 // not a real device fix — see run-patrol.mjs's webGeolocation param.
-// Deliberately no self-cleanup here (unlike complete_and_export_test.dart)
-// — the whole point is the patient this test uploads/edits stays behind
+// Deliberately no self-cleanup here (unlike ems_test.dart's own second
+// phase, the FHIR export one) — the whole point is the patient this
+// test uploads/edits stays behind
 // for incoming_patient_test.dart to find; run-patient-flow-e2e.mjs's own
 // orchestration owns tearing it down once both halves are done.
 //
