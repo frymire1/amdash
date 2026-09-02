@@ -1,13 +1,27 @@
 #!/usr/bin/env node
-// Self-contained runner for the admin app's Patrol e2e test — mirrors the
-// pattern the earlier Playwright verification scripts used (create
-// throwaway Firebase state, drive the test, tear the state back down),
-// but as a permanent, reusable script instead of a one-off deleted after
-// each run. Creates a fresh smoke-admin-*@amdash-e2e.test account, runs
-// `patrol test`, and always cleans up (account + anything the test itself
-// creates: patrol-created-* users, "Patrol Test Hospital *" hospitals)
-// regardless of whether the test passed or failed. Wired into
-// .github/workflows/ci.yml's e2e job — not a local-only dev tool.
+// Self-contained runner for the admin app's own user-management Patrol
+// e2e test — mirrors the pattern the earlier Playwright verification
+// scripts used (create throwaway Firebase state, drive the test, tear the
+// state back down), but as a permanent, reusable script instead of a
+// one-off deleted after each run. Creates a fresh smoke-admin-*
+// @amdash-e2e.test account, runs `patrol test`, and always cleans up
+// (account + anything the test itself creates: patrol-created-* users,
+// "Patrol Test Hospital *" hospitals) regardless of whether the test
+// passed or failed. Wired into .github/workflows/ci.yml's e2e job — not a
+// local-only dev tool.
+//
+// organization_management_test.dart used to run here too, right after
+// this one — split into its own script (run-admin-org-management-e2e.mjs)
+// and parallel CI job instead, the same pattern already proven for
+// physician's/EMS's own wrong-app legs: it genuinely needs a different
+// account (a super-admin with no organization membership at all, not the
+// regular org-scoped admin this test uses — see that script's own header
+// comment), which would need a sign-out to reach from here, and
+// AuthService.signOut() (amdash_core) deliberately forces a full page
+// reload on web that kills a still-running Patrol test — not something to
+// route around. Splitting into two parallel jobs gets the same real
+// build-time win (this job no longer pays for two sequential builds) with
+// none of that risk.
 //
 // Written in Node/JS rather than Dart because it needs the Firebase
 // *Admin* SDK (elevated, server-side — creates/deletes real Auth users and
@@ -51,64 +65,20 @@ async function createSmokeAdminAccount(db) {
   return { email, password, uid: user.uid };
 }
 
-// No organizationId — a real super-admin has none of their own (see
-// createOrganization's own comment in functions/src/admin.ts); requireAdmin
-// would reject this account for every *other* admin.ts callable, which is
-// exactly right, since organization_management_test.dart only ever
-// exercises createOrganization, the one callable gated on 'super-admin'
-// specifically rather than requireAdmin.
-async function createSmokeSuperAdminAccount() {
-  const email = `smoke-superadmin-${Date.now()}@amdash-e2e.test`;
-  const password = 'SmokeTest123';
-  const user = await getAuth().createUser({ email, password, emailVerified: true });
-  await getFirestore().doc(`users/${user.uid}`).set(
-    { email, role: ['super-admin'], firstName: 'Smoke', lastName: 'SuperAdmin' },
-    { merge: true },
-  );
-  return { email, password, uid: user.uid };
-}
-
-// organization.create's own audit entry can't be verified through the app
-// UI at all — see organization_management_test.dart's own header comment
-// for why (a pure super-admin fails listAuditLog's requireAdmin check, and
-// the newly-created org's own first admin would need a full first-login
-// flow just to check one row). Reads it directly via the Admin SDK instead,
-// bypassing that UI limitation rather than building a second onboarding
-// flow just for this one check.
-async function verifyOrganizationCreateAuditEntry(db, organizationName) {
-  const snap = await db
-    .collection('auditLog')
-    .where('action', '==', 'organization.create')
-    .where('details.organizationName', '==', organizationName)
-    .limit(1)
-    .get();
-  if (snap.empty) {
-    throw new Error(`No organization.create audit entry found for "${organizationName}".`);
-  }
-  console.log(`✅ Confirmed organization.create audit entry for "${organizationName}".`);
-}
-
-async function cleanup(db, auth, smokeAccountUids) {
-  // Age-guarded for every account/hospital/organization other than this
-  // run's own (always safe, always deleted regardless of age) — see
+async function cleanup(db, auth, accountUid) {
+  // Age-guarded for every account/hospital other than this run's own
+  // (always safe, always deleted regardless of age) — see
   // isOldEnoughToSweep's own comment: without this, a broad sweep here
   // can delete a concurrently-running sibling job's still-in-use state.
-  // patrol-org-admin-* is organization_management_test.dart's own
-  // creation (the new org's first admin, atomically created alongside
-  // it) — swept the same way patrol-created-* (user_flow_test.dart's own
-  // user) already was.
   let deletedUsers = 0;
   let pageToken;
   do {
     const page = await auth.listUsers(1000, pageToken);
     for (const user of page.users) {
       if (
-        smokeAccountUids.includes(user.uid) ||
+        user.uid === accountUid ||
         (user.email &&
-          (user.email.startsWith('smoke-admin-') ||
-            user.email.startsWith('smoke-superadmin-') ||
-            user.email.startsWith('patrol-created-') ||
-            user.email.startsWith('patrol-org-admin-')) &&
+          (user.email.startsWith('smoke-admin-') || user.email.startsWith('patrol-created-')) &&
           isOldEnoughToSweep(user.email))
       ) {
         await auth.deleteUser(user.uid);
@@ -132,23 +102,7 @@ async function cleanup(db, auth, smokeAccountUids) {
     }
   }
 
-  const orgSnap = await db
-    .collection('organizations')
-    .where('name', '>=', 'Patrol Test Org')
-    .where('name', '<', 'Patrol Test Orh')
-    .get();
-  let deletedOrgs = 0;
-  for (const doc of orgSnap.docs) {
-    if (isOldEnoughToSweep(doc.data().name)) {
-      await doc.ref.delete();
-      deletedOrgs++;
-    }
-  }
-
-  console.log(
-    `Cleanup: removed ${deletedUsers} throwaway user(s), ${deletedHospitals} leftover hospital(s), ` +
-      `${deletedOrgs} leftover organization(s).`,
-  );
+  console.log(`Cleanup: removed ${deletedUsers} throwaway user(s), ${deletedHospitals} leftover hospital(s).`);
 }
 
 const credentialPath = initFirebaseAdmin('adminpatrol');
@@ -156,7 +110,6 @@ const db = getFirestore();
 const auth = getAuth();
 
 let account;
-let superAdminAccount;
 let exitCode = 1;
 try {
   account = await createSmokeAdminAccount(db);
@@ -166,33 +119,8 @@ try {
     target: 'patrol_test/user_flow_test.dart',
     dartDefines: { SMOKE_EMAIL: account.email, SMOKE_PASSWORD: account.password },
   });
-
-  superAdminAccount = await createSmokeSuperAdminAccount();
-  console.log('Created throwaway super-admin account:', superAdminAccount.email);
-  const organizationName = `Patrol Test Org ${Date.now()}`;
-  const orgExitCode = await runPatrolTest({
-    appDir: ADMIN_APP_DIR,
-    target: 'patrol_test/organization_management_test.dart',
-    dartDefines: {
-      SMOKE_EMAIL: superAdminAccount.email,
-      SMOKE_PASSWORD: superAdminAccount.password,
-      SMOKE_ORG_NAME: organizationName,
-    },
-  });
-  let auditExitCode = 0;
-  if (orgExitCode === 0) {
-    try {
-      await verifyOrganizationCreateAuditEntry(db, organizationName);
-    } catch (error) {
-      console.error(error.message);
-      auditExitCode = 1;
-    }
-  } else {
-    console.log('\n❌ Organization creation failed — skipping the audit-entry check (nothing to verify).');
-  }
-  if (exitCode === 0) exitCode = orgExitCode !== 0 ? orgExitCode : auditExitCode;
 } finally {
-  await cleanup(db, auth, [account?.uid, superAdminAccount?.uid].filter(Boolean));
+  await cleanup(db, auth, account?.uid);
   if (credentialPath) fs.unlinkSync(credentialPath);
 }
 

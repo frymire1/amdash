@@ -414,6 +414,81 @@ jobs:
             flutter/apps/ems/playwright-report
           retention-days: 7
 
+  flutter-web-e2e-admin-org-management:
+    name: Web e2e (Chrome) — admin org management
+    runs-on: ubuntu-latest
+    needs: flutter-analyze-test
+    if: github.ref == 'refs/heads/master'
+    # See flutter-web-e2e-admin's identical job-level env for why.
+    env:
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Ensure en_US.UTF-8 locale is generated
+        run: sudo locale-gen en_US.UTF-8
+
+      - name: Ensure xvfb is installed
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.pub-cache
+          key: pub-cache-${{ runner.os }}-patrol-cli
+
+      - name: Install patrol_cli
+        # See flutter-web-e2e-admin's identical step for why this is
+        # pinned rather than left latest.
+        run: |
+          dart pub global activate patrol_cli 4.7.0
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: Install scripts dependencies
+        run: npm ci
+        working-directory: scripts
+
+      - name: Install Playwright browser + OS dependencies
+        run: npx playwright install --with-deps chromium
+        working-directory: scripts
+
+      - name: Authenticate to Firebase
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+
+      # Admin's own organization-creation leg — split out of
+      # flutter-web-e2e-admin (see run-admin-org-management-e2e.mjs's own
+      # header comment for why: it genuinely needs a different account
+      # than user_flow_test.dart, which a mid-test sign-out can't safely
+      # reach — AuthService.signOut()'s deliberate page reload on web
+      # kills a still-running Patrol test).
+      - name: Run admin org-management e2e
+        run: node run-admin-org-management-e2e.mjs
+        working-directory: scripts
+
+      - name: Upload Patrol reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: patrol-reports-admin-org-management
+          path: |
+            flutter/apps/admin/playwright-report
+            flutter/apps/physician/playwright-report
+            flutter/apps/ems/playwright-report
+          retention-days: 7
+
   flutter-web-e2e-physician:
     name: Web e2e (Chrome) — physician
     runs-on: ubuntu-latest
@@ -1465,11 +1540,12 @@ jobs:
     # Gates on the three Android run jobs (not the seed or teardown jobs —
     # deploy should wait for real test results, not cleanup succeeding; and
     # teardown itself needs: all three run jobs, so gating on them already
-    # implies the whole Android leg reached a real pass/fail) and all seven
+    # implies the whole Android leg reached a real pass/fail) and all eight
     # web-e2e jobs.
     needs:
       [
         flutter-web-e2e-admin,
+        flutter-web-e2e-admin-org-management,
         flutter-web-e2e-physician,
         flutter-web-e2e-ems,
         flutter-web-e2e-patient-flow,
