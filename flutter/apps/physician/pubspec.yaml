@@ -65,6 +65,7 @@ dependencies:
   intl: ^0.20.2
   web: ^1.1.0
   firebase_app_check: ^0.4.7
+  material_symbols_icons: ^4.2960.0
 
 dev_dependencies:
   flutter_test:

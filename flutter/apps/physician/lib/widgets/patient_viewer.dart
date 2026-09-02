@@ -6,7 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:intl/intl.dart';
+// intl exports its own TextDirection (for BIDI text, unrelated to
+// Flutter/dart:ui's own one) that would otherwise shadow the real one —
+// this file only ever needs DateFormat from here.
+import 'package:intl/intl.dart' hide TextDirection;
+import 'package:material_symbols_icons/symbols.dart';
 
 import '../classes/active_location.dart';
 import '../services/directions_service.dart';
@@ -22,6 +26,66 @@ const _directionsRefreshDistanceM = 75.0;
 // "use the default" option, so the values have to be picked explicitly.
 const _routeColor = Color(0xFF1A73E8);
 const _routeWidth = 6;
+
+// Google's own default-pin hues these markers used before — kept as the
+// background color behind the new icon glyphs below, so this is a like-for-
+// like swap of "what's inside the pin," not a color change too.
+const _vehicleMarkerColor = Color(0xFFEA4335);
+const _hospitalMarkerColor = Color(0xFF34A853);
+const _markerIconSize = 96.0;
+
+// Cached module-level, not per-widget-instance: both markers' bitmaps are
+// identical every time (same glyph, same color, same size, nothing
+// per-patient about them), so there's no reason to regenerate them on every
+// _LiveMapCard mount — the first caller pays the (small, local, no-network)
+// render cost once, every later mount/patient switch/expand just reuses the
+// already-resolved Future.
+Future<BitmapDescriptor>? _vehicleMarkerIcon;
+Future<BitmapDescriptor>? _hospitalMarkerIcon;
+
+/// Renders [icon] centered in a filled circle with a white ring border
+/// (matching the look `BitmapDescriptor.defaultMarkerWithHue`'s own pins
+/// had) to a real bitmap `google_maps_flutter` can use as a marker icon —
+/// Google Maps markers take a static image, not a live Flutter widget, so
+/// there's no way to just hand it an `Icon` directly. `fontVariations` picks
+/// the same filled/medium-weight rendering already confirmed to look right
+/// (see the published marker-icon-options preview) — Material Symbols is a
+/// variable font, so without this it renders in its default thin/unfilled
+/// style instead.
+Future<BitmapDescriptor> _iconMarkerBitmap(IconData icon, Color background) async {
+  final recorder = PictureRecorder();
+  final canvas = Canvas(recorder);
+  const radius = _markerIconSize / 2;
+
+  canvas.drawCircle(const Offset(radius, radius), radius, Paint()..color = Colors.white);
+  canvas.drawCircle(const Offset(radius, radius), radius - 4, Paint()..color = background);
+
+  final textPainter = TextPainter(textDirection: TextDirection.ltr)
+    ..text = TextSpan(
+      text: String.fromCharCode(icon.codePoint),
+      style: TextStyle(
+        fontSize: _markerIconSize * 0.55,
+        fontFamily: icon.fontFamily,
+        package: icon.fontPackage,
+        color: Colors.white,
+        fontVariations: const [
+          FontVariation('FILL', 1),
+          FontVariation('wght', 500),
+          FontVariation('GRAD', 0),
+          FontVariation('opsz', 48),
+        ],
+      ),
+    )
+    ..layout();
+  textPainter.paint(
+    canvas,
+    Offset((_markerIconSize - textPainter.width) / 2, (_markerIconSize - textPainter.height) / 2),
+  );
+
+  final image = await recorder.endRecording().toImage(_markerIconSize.toInt(), _markerIconSize.toInt());
+  final bytes = await image.toByteData(format: ImageByteFormat.png);
+  return BitmapDescriptor.bytes(bytes!.buffer.asUint8List());
+}
 
 /// Mirrors `patient-viewer.component.ts`/`.html` — the core screen: patient
 /// info/vitals cards, a live map with the animated EMS vehicle marker
@@ -214,6 +278,27 @@ class _LiveMapCardState extends ConsumerState<_LiveMapCard> with TickerProviderS
   // widget disposes mid-fetch, a freshly recreated instance deciding to
   // re-fetch is fine, since it checks the surviving cache's own timestamp.
   final Set<String> _pendingDirectionsFetches = {};
+
+  // Resolved copies of the module-level cached Futures above — build()
+  // needs synchronous access to hand markers a BitmapDescriptor, and a
+  // second (or later) _LiveMapCard mount finds these Futures already
+  // resolved, so setState here fires on essentially the next microtask, not
+  // a visible delay. Only the very first map any user ever opens briefly
+  // falls back to the plain default pins (see build()) while the real
+  // icons render for the first time.
+  BitmapDescriptor? _vehicleIcon;
+  BitmapDescriptor? _hospitalIcon;
+
+  @override
+  void initState() {
+    super.initState();
+    (_vehicleMarkerIcon ??= _iconMarkerBitmap(Symbols.e911_emergency, _vehicleMarkerColor)).then((icon) {
+      if (mounted) setState(() => _vehicleIcon = icon);
+    });
+    (_hospitalMarkerIcon ??= _iconMarkerBitmap(Symbols.local_hospital, _hospitalMarkerColor)).then((icon) {
+      if (mounted) setState(() => _hospitalIcon = icon);
+    });
+  }
 
   @override
   void dispose() {
@@ -418,13 +503,17 @@ class _LiveMapCardState extends ConsumerState<_LiveMapCard> with TickerProviderS
         Marker(
           markerId: const MarkerId('vehicle'),
           position: vehiclePosition,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          // Falls back to a plain default pin only until the real icon's
+          // one-time render resolves (see initState) — never a lasting
+          // state, and every map after the first one this app ever opens
+          // finds it already cached.
+          icon: _vehicleIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
         ),
         if (hospitalPosition != null)
           Marker(
             markerId: const MarkerId('hospital'),
             position: hospitalPosition,
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+            icon: _hospitalIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
           ),
       },
       polylines: {
