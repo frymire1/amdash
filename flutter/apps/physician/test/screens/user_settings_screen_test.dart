@@ -306,9 +306,9 @@ void main() {
     });
 
     testWidgets('enabling successfully leaves no blocked message', (tester) async {
-      when(() => patientAlertService.enableAlerts('uid-1', 4)).thenAnswer(
-        (_) async => const EnableAlertsResult(granted: true),
-      );
+      when(
+        () => patientAlertService.enableAlerts('uid-1', 4, etaAlertThresholdsMinutes: const []),
+      ).thenAnswer((_) async => const EnableAlertsResult(granted: true));
 
       await pumpScreen(tester);
       await tester.pumpAndSettle();
@@ -317,14 +317,14 @@ void main() {
       await tester.tap(find.text('Enable'));
       await tester.pumpAndSettle();
 
-      verify(() => patientAlertService.enableAlerts('uid-1', 4)).called(1);
+      verify(() => patientAlertService.enableAlerts('uid-1', 4, etaAlertThresholdsMinutes: const [])).called(1);
       expect(find.textContaining('blocked'), findsNothing);
     });
 
     testWidgets('enabling when browser notifications are blocked shows the blocked message', (tester) async {
-      when(() => patientAlertService.enableAlerts('uid-1', 4)).thenAnswer(
-        (_) async => const EnableAlertsResult(granted: false),
-      );
+      when(
+        () => patientAlertService.enableAlerts('uid-1', 4, etaAlertThresholdsMinutes: const []),
+      ).thenAnswer((_) async => const EnableAlertsResult(granted: false));
 
       await pumpScreen(tester);
       await tester.pumpAndSettle();
@@ -340,7 +340,9 @@ void main() {
     });
 
     testWidgets('enabling that throws shows the generic failure message', (tester) async {
-      when(() => patientAlertService.enableAlerts('uid-1', 4)).thenThrow(Exception('boom'));
+      when(
+        () => patientAlertService.enableAlerts('uid-1', 4, etaAlertThresholdsMinutes: const []),
+      ).thenThrow(Exception('boom'));
 
       await pumpScreen(tester);
       await tester.pumpAndSettle();
@@ -350,6 +352,70 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Failed to enable alerts. Please try again.'), findsOneWidget);
+    });
+
+    testWidgets('checking a threshold box and enabling passes the selected thresholds', (tester) async {
+      when(
+        () => patientAlertService.enableAlerts('uid-1', 4, etaAlertThresholdsMinutes: const [60, 15]),
+      ).thenAnswer((_) async => const EnableAlertsResult(granted: true));
+
+      await pumpScreen(tester);
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byKey(const Key('eta_threshold_60')));
+      await tester.tap(find.byKey(const Key('eta_threshold_60')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('eta_threshold_15')));
+      await tester.tap(find.byKey(const Key('eta_threshold_15')));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text('Enable'));
+      await tester.tap(find.text('Enable'));
+      await tester.pumpAndSettle();
+
+      verify(() => patientAlertService.enableAlerts('uid-1', 4, etaAlertThresholdsMinutes: const [60, 15])).called(1);
+    });
+
+    testWidgets('unchecking a previously-checked threshold box removes it', (tester) async {
+      when(
+        () => patientAlertService.enableAlerts('uid-1', 4, etaAlertThresholdsMinutes: const []),
+      ).thenAnswer((_) async => const EnableAlertsResult(granted: true));
+
+      await pumpScreen(tester);
+      await tester.pumpAndSettle();
+
+      final box = find.byKey(const Key('eta_threshold_5'));
+      await tester.ensureVisible(box);
+      await tester.tap(box); // check
+      await tester.pumpAndSettle();
+      await tester.tap(box); // uncheck
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text('Enable'));
+      await tester.tap(find.text('Enable'));
+      await tester.pumpAndSettle();
+
+      verify(() => patientAlertService.enableAlerts('uid-1', 4, etaAlertThresholdsMinutes: const [])).called(1);
+    });
+
+    testWidgets('prefills previously-saved threshold selections as checked', (tester) async {
+      await pumpScreen(
+        tester,
+        profile: UserProfile(
+          firstName: 'Jordan',
+          lastName: 'Lee',
+          workLocation: 'Ottawa Civic',
+          etaAlertThresholdsMinutes: const [30, 5],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final thirtyCheckbox = tester.widget<CheckboxListTile>(find.byKey(const Key('eta_threshold_30')));
+      final fiveCheckbox = tester.widget<CheckboxListTile>(find.byKey(const Key('eta_threshold_5')));
+      final sixtyCheckbox = tester.widget<CheckboxListTile>(find.byKey(const Key('eta_threshold_60')));
+      expect(thirtyCheckbox.value, true);
+      expect(fiveCheckbox.value, true);
+      expect(sixtyCheckbox.value, false);
     });
 
     testWidgets('disabling calls the service and never surfaces a failure', (tester) async {

@@ -39,11 +39,13 @@ class UserProfile {
     this.organizationId,
     this.newPatientAlertsExpiresAt,
     this.fcmTokens = const [],
+    this.etaAlertThresholdsMinutes = const [],
   });
 
   factory UserProfile.fromFirestore(Map<String, Object?> data) {
     final rawRoles = data['role'];
     final rawFcmTokens = data['fcmTokens'];
+    final rawEtaAlertThresholdsMinutes = data['etaAlertThresholdsMinutes'];
     return UserProfile(
       firstName: data['firstName'] as String?,
       lastName: data['lastName'] as String?,
@@ -65,6 +67,9 @@ class UserProfile {
       fcmTokens: rawFcmTokens is List
           ? rawFcmTokens.whereType<String>().toList()
           : const [],
+      etaAlertThresholdsMinutes: rawEtaAlertThresholdsMinutes is List
+          ? rawEtaAlertThresholdsMinutes.whereType<int>().toList()
+          : const [],
     );
   }
 
@@ -75,6 +80,16 @@ class UserProfile {
   final String? organizationId;
   final Timestamp? newPatientAlertsExpiresAt;
   final List<String> fcmTokens;
+
+  /// Which of the physician "arrival proximity" thresholds (a subset of
+  /// 60/30/15/5 minutes-away) this user wants a push alert for — read
+  /// alongside `newPatientAlertsExpiresAt`/`fcmTokens` at the same
+  /// enable step (`PatientAlertService.enableAlerts`, physician app only)
+  /// rather than as its own separate arm/disarm flow. Consumed
+  /// server-side by `notifyPatientProximity`
+  /// (`functions/src/physician.ts`), triggered from `ems.ts`'s
+  /// `onEmsLocationEvent`.
+  final List<int> etaAlertThresholdsMinutes;
 
   bool hasRole(UserRole target) => role.contains(target);
 

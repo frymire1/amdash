@@ -25,6 +25,7 @@ import 'package:patrol/patrol.dart';
 import 'package:physician/firebase_options.dart';
 import 'package:physician/main.dart';
 import 'package:physician/screens/main_view_screen.dart';
+import 'package:physician/screens/user_settings_screen.dart';
 
 void main() {
   patrolTest(
@@ -210,6 +211,53 @@ void main() {
             "the trend dialog should chart ems's original upload and later edit as two points, not report insufficient data",
       );
       await tapText($, 'Close');
+
+      // ---- Patient-arrival proximity alerts: check a threshold box and
+      // enable. ----
+      //
+      // Deliberately the single safest threshold (60 minutes) — the
+      // seeded hospital/GPS-fix pair (run-patient-flow-e2e.mjs's
+      // GPS_LATITUDE/LONGITUDE vs. the hospital's own lat/lng) are a few
+      // real km apart in Toronto, so a real Directions ETA is
+      // essentially guaranteed under 60 minutes but not reliably under
+      // 5 — testing all 4 exact minute boundaries against a live
+      // Directions API call would be flaky. That precise
+      // threshold-crossing arithmetic gets dedicated Cloud Functions
+      // unit coverage instead (functions/src/ems.test.ts). Verifying the
+      // resulting patients/{id}/location/current.notifiedThresholds
+      // write itself (proof the real onEmsLocationEvent detection
+      // pipeline fired, not just that this checkbox saved) happens in
+      // run-patient-flow-e2e.mjs, directly via the Admin SDK.
+      await tapFinder($, find.byTooltip('Account'));
+      await pumpUntil($, () => find.text('Settings').evaluate().isNotEmpty);
+      await tapText($, 'Settings');
+      await pumpUntil(
+        $,
+        () => find.byType(UserSettingsScreen).evaluate().isNotEmpty,
+      );
+
+      final sixtyMinuteBox = find.byKey(const Key('eta_threshold_60'));
+      await pumpUntil($, () => sixtyMinuteBox.evaluate().isNotEmpty);
+      await tapFinder($, sixtyMinuteBox);
+
+      // A real notification-permission grant + FCM token registration
+      // round trip — run-patient-flow-e2e.mjs grants the 'notifications'
+      // webPermission so this doesn't hang the way an unresolved browser
+      // prompt would (same reasoning as patient_upload_flow_test.dart's
+      // own explicit geolocation grant). First real e2e exercise of this
+      // flow; previously only unit-tested
+      // (patient_alert_service_test.dart).
+      await tapText($, 'Enable');
+      await pumpUntil(
+        $,
+        () => find.textContaining('Alerts armed until').evaluate().isNotEmpty,
+        maxIterations: 60,
+      );
+      expect(
+        find.textContaining('blocked'),
+        findsNothing,
+        reason: 'a real notification permission grant should not be reported as blocked',
+      );
     },
   );
 }

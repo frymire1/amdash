@@ -31,6 +31,11 @@ class _UserSettingsScreenState extends ConsumerState<UserSettingsScreen> {
   bool _hospitalTouched = false;
 
   int _selectedAlertHours = 4;
+  // Which of the four "how close" proximity thresholds this physician
+  // wants a push for — read at Enable-press time alongside
+  // _selectedAlertHours, not auto-saved on every checkbox tap (mirrors
+  // that field's own existing pattern).
+  final Set<int> _selectedEtaThresholds = {};
   bool _enablingAlerts = false;
   bool _disablingAlerts = false;
   String? _alertsBlockedMessage;
@@ -73,6 +78,7 @@ class _UserSettingsScreenState extends ConsumerState<UserSettingsScreen> {
     _firstNameController.text = profile.firstName ?? '';
     _lastNameController.text = profile.lastName ?? '';
     _typedHospital = profile.workLocation ?? '';
+    _selectedEtaThresholds.addAll(profile.etaAlertThresholdsMinutes);
   }
 
   Future<void> _enableAlerts(String uid) async {
@@ -81,7 +87,11 @@ class _UserSettingsScreenState extends ConsumerState<UserSettingsScreen> {
       _alertsBlockedMessage = null;
     });
     try {
-      final result = await ref.read(patientAlertServiceProvider).enableAlerts(uid, _selectedAlertHours);
+      final result = await ref.read(patientAlertServiceProvider).enableAlerts(
+        uid,
+        _selectedAlertHours,
+        etaAlertThresholdsMinutes: _selectedEtaThresholds.toList(),
+      );
       if (!result.granted) {
         setState(() {
           _alertsBlockedMessage =
@@ -301,7 +311,7 @@ class _UserSettingsScreenState extends ConsumerState<UserSettingsScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const Text('New Patient Alerts', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const Text('Patient Arrival Alerts', style: TextStyle(fontWeight: FontWeight.bold)),
                         const SizedBox(height: 8),
                         if (alertsActive)
                           Text(
@@ -327,6 +337,24 @@ class _UserSettingsScreenState extends ConsumerState<UserSettingsScreen> {
                             ),
                           ],
                         ),
+                        const SizedBox(height: 12),
+                        const Text('Also notify me when a patient is:'),
+                        for (final threshold in const [60, 30, 15, 5])
+                          CheckboxListTile(
+                            key: Key('eta_threshold_$threshold'),
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            title: Text(threshold == 60 ? '1 hour away' : '$threshold minutes away'),
+                            value: _selectedEtaThresholds.contains(threshold),
+                            onChanged: (checked) => setState(() {
+                              if (checked ?? false) {
+                                _selectedEtaThresholds.add(threshold);
+                              } else {
+                                _selectedEtaThresholds.remove(threshold);
+                              }
+                            }),
+                          ),
                         if (_alertsBlockedMessage != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 8),

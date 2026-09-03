@@ -11,22 +11,45 @@ const {
   mockPublishMessage,
   mockTopic,
   mockLocationSet,
+  mockLocationGet,
   mockPatientLocationRef,
+  mockHospitalsWhere1,
+  mockHospitalsWhere2,
+  mockHospitalsLimit,
+  mockHospitalsGet,
+  mockNotifyPatientProximity,
+  mockLoggerError,
 } = vi.hoisted(() => {
   const mockPublishMessage = vi.fn();
   const mockPatientGet = vi.fn();
+  const mockLocationSet = vi.fn();
+  const mockLocationGet = vi.fn();
+
+  const mockHospitalsGet = vi.fn();
+  const mockHospitalsLimit = vi.fn(() => ({ get: mockHospitalsGet }));
+  const mockHospitalsWhere2 = vi.fn(() => ({ limit: mockHospitalsLimit }));
+  const mockHospitalsWhere1 = vi.fn(() => ({ where: mockHospitalsWhere2 }));
+
   return {
     mockPatientGet,
     mockCollection: vi.fn((name: string) => {
-      if (name !== 'patients') throw new Error(`Unexpected collection in test: ${name}`);
-      return { doc: (id: string) => ({ get: mockPatientGet, id }) };
+      if (name === 'patients') return { doc: (id: string) => ({ get: mockPatientGet, id }) };
+      if (name === 'hospitals') return { where: mockHospitalsWhere1 };
+      throw new Error(`Unexpected collection in test: ${name}`);
     }),
     mockRecursiveDelete: vi.fn(),
     mockGetCallerProfile: vi.fn(),
     mockPublishMessage,
     mockTopic: vi.fn(() => ({ publishMessage: mockPublishMessage })),
-    mockLocationSet: vi.fn(),
-    mockPatientLocationRef: vi.fn(() => ({ set: mockLocationSet })),
+    mockLocationSet,
+    mockLocationGet,
+    mockPatientLocationRef: vi.fn(() => ({ set: mockLocationSet, get: mockLocationGet })),
+    mockHospitalsWhere1,
+    mockHospitalsWhere2,
+    mockHospitalsLimit,
+    mockHospitalsGet,
+    mockNotifyPatientProximity: vi.fn(),
+    mockLoggerError: vi.fn(),
   };
 });
 
@@ -38,7 +61,18 @@ vi.mock('@google-cloud/pubsub', () => ({
 
 vi.mock('firebase-admin/firestore', () => ({
   getFirestore: () => ({ collection: mockCollection, recursiveDelete: mockRecursiveDelete }),
-  FieldValue: { serverTimestamp: () => 'SERVER_TIMESTAMP' },
+  FieldValue: {
+    serverTimestamp: () => 'SERVER_TIMESTAMP',
+    arrayUnion: (...items: number[]) => ({ __arrayUnion: items }),
+  },
+}));
+
+vi.mock('firebase-functions/v2', () => ({
+  logger: { error: mockLoggerError },
+}));
+
+vi.mock('firebase-functions/params', () => ({
+  defineSecret: () => ({ value: () => 'fake-directions-api-key' }),
 }));
 
 vi.mock('./auth', () => ({
@@ -50,12 +84,49 @@ vi.mock('./patient-data', () => ({
   patientLocationRef: mockPatientLocationRef,
 }));
 
+vi.mock('./physician', () => ({
+  notifyPatientProximity: mockNotifyPatientProximity,
+}));
+
 import { onEmsLocationEvent, onPatientDeleted, publishEmsLocation, stopEmsLocation } from './ems';
 
 const EMS_PROFILE = { uid: 'ems-uid', email: 'ems@example.com', role: ['ems'], organizationId: 'org-1' };
 
+function activeLocationEvent(overrides: Record<string, unknown> = {}) {
+  return {
+    data: {
+      message: {
+        json: { patientId: 'p1', organizationId: 'org-1', active: true, latitude: 43.6, longitude: -79.4, ...overrides },
+      },
+    },
+  } as never;
+}
+
+function okDirectionsResponse(durationSeconds: number) {
+  return {
+    json: () =>
+      Promise.resolve({
+        status: 'OK',
+        routes: [
+          {
+            legs: [{ duration: { text: 'n/a', value: durationSeconds }, distance: { text: 'n/a', value: 1 } }],
+            overview_polyline: { points: 'AA' },
+          },
+        ],
+      }),
+  };
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.unstubAllGlobals();
+  // Default: no prior location doc, no prior patient doc — most tests
+  // below that don't care about proximity-check specifics never even
+  // reach the patient-lookup guard, since an empty patient doc short-
+  // circuits checkProximityAlertThresholds immediately (see its own
+  // organizationId/destination guard).
+  mockLocationGet.mockResolvedValue({ data: () => undefined });
+  mockPatientGet.mockResolvedValue({ data: () => undefined });
 });
 
 describe('publishEmsLocation', () => {
@@ -144,7 +215,7 @@ describe('onEmsLocationEvent', () => {
     consoleError.mockRestore();
   });
 
-  it('merges active/organizationId (no lat/lng) when the event carries none', async () => {
+  it('merges active/organizationId (no lat/lng) when the event carries none, and never runs the proximity check', async () => {
     await onEmsLocationEvent.run({
       data: { message: { json: { patientId: 'p1', organizationId: 'org-1', active: false } } },
     } as never);
@@ -154,17 +225,121 @@ describe('onEmsLocationEvent', () => {
       { patientId: 'p1', organizationId: 'org-1', active: false, updatedAt: 'SERVER_TIMESTAMP' },
       { merge: true },
     );
+    expect(mockLocationGet).not.toHaveBeenCalled();
   });
 
   it('includes latitude/longitude in the merge when the event carries a real fix', async () => {
-    await onEmsLocationEvent.run({
-      data: { message: { json: { patientId: 'p1', organizationId: 'org-1', active: true, latitude: 43.65, longitude: -79.38 } } },
-    } as never);
+    await onEmsLocationEvent.run(activeLocationEvent());
 
     expect(mockLocationSet).toHaveBeenCalledWith(
-      expect.objectContaining({ latitude: 43.65, longitude: -79.38 }),
+      expect.objectContaining({ latitude: 43.6, longitude: -79.4 }),
       { merge: true },
     );
+  });
+
+  it('does not run the proximity check when active but the event carries no fix', async () => {
+    await onEmsLocationEvent.run({
+      data: { message: { json: { patientId: 'p1', organizationId: 'org-1', active: true } } },
+    } as never);
+
+    expect(mockLocationGet).not.toHaveBeenCalled();
+  });
+
+  describe('proximity-alert threshold check', () => {
+    it('skips the ETA recheck entirely when the last one was under a minute ago (throttle)', async () => {
+      mockLocationGet.mockResolvedValue({ data: () => ({ lastEtaCheckAt: { toMillis: () => Date.now() - 10_000 } }) });
+
+      await onEmsLocationEvent.run(activeLocationEvent());
+
+      expect(mockPatientGet).not.toHaveBeenCalled();
+    });
+
+    it('proceeds past the throttle once a minute has elapsed', async () => {
+      mockLocationGet.mockResolvedValue({ data: () => ({ lastEtaCheckAt: { toMillis: () => Date.now() - 120_000 } }) });
+
+      await onEmsLocationEvent.run(activeLocationEvent());
+
+      expect(mockPatientGet).toHaveBeenCalled();
+    });
+
+    it('stops (no hospital lookup) when the patient has no organizationId/destination yet', async () => {
+      mockPatientGet.mockResolvedValue({ data: () => ({}) });
+
+      await onEmsLocationEvent.run(activeLocationEvent());
+
+      expect(mockHospitalsWhere1).not.toHaveBeenCalled();
+      expect(mockNotifyPatientProximity).not.toHaveBeenCalled();
+    });
+
+    it('stamps lastEtaCheckAt only (no notify) when the destination hospital cannot be resolved', async () => {
+      mockPatientGet.mockResolvedValue({ data: () => ({ organizationId: 'org-1', destination: 'General Hospital' }) });
+      mockHospitalsGet.mockResolvedValue({ docs: [] });
+
+      await onEmsLocationEvent.run(activeLocationEvent());
+
+      expect(mockNotifyPatientProximity).not.toHaveBeenCalled();
+      expect(mockLocationSet).toHaveBeenLastCalledWith({ lastEtaCheckAt: 'SERVER_TIMESTAMP' }, { merge: true });
+    });
+
+    it('stamps lastEtaCheckAt only (no notify) when a hospital is found but the Directions API finds no route', async () => {
+      mockPatientGet.mockResolvedValue({ data: () => ({ organizationId: 'org-1', destination: 'General Hospital' }) });
+      mockHospitalsGet.mockResolvedValue({ docs: [{ data: () => ({ latitude: 43.7, longitude: -79.5 }) }] });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: () => Promise.resolve({ status: 'ZERO_RESULTS', routes: [] }) }));
+
+      await onEmsLocationEvent.run(activeLocationEvent());
+
+      expect(mockNotifyPatientProximity).not.toHaveBeenCalled();
+      expect(mockLocationSet).toHaveBeenLastCalledWith({ lastEtaCheckAt: 'SERVER_TIMESTAMP' }, { merge: true });
+    });
+
+    it('logs and stamps lastEtaCheckAt only (no notify) when the Directions API call itself throws', async () => {
+      mockPatientGet.mockResolvedValue({ data: () => ({ organizationId: 'org-1', destination: 'General Hospital' }) });
+      mockHospitalsGet.mockResolvedValue({ docs: [{ data: () => ({ latitude: 43.7, longitude: -79.5 }) }] });
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network error')));
+
+      await onEmsLocationEvent.run(activeLocationEvent());
+
+      expect(mockLoggerError).toHaveBeenCalledWith('Failed to check proximity-alert thresholds', expect.any(Error));
+      expect(mockNotifyPatientProximity).not.toHaveBeenCalled();
+      expect(mockLocationSet).toHaveBeenLastCalledWith({ lastEtaCheckAt: 'SERVER_TIMESTAMP' }, { merge: true });
+    });
+
+    it('stamps lastEtaCheckAt only (no notify, no notifiedThresholds write) when ETA has not crossed any threshold yet', async () => {
+      mockPatientGet.mockResolvedValue({ data: () => ({ organizationId: 'org-1', destination: 'General Hospital' }) });
+      mockHospitalsGet.mockResolvedValue({ docs: [{ data: () => ({ latitude: 43.7, longitude: -79.5 }) }] });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okDirectionsResponse(90 * 60))); // 90 minutes
+
+      await onEmsLocationEvent.run(activeLocationEvent());
+
+      expect(mockNotifyPatientProximity).not.toHaveBeenCalled();
+      expect(mockLocationSet).toHaveBeenLastCalledWith({ lastEtaCheckAt: 'SERVER_TIMESTAMP' }, { merge: true });
+    });
+
+    it('notifies and records every newly-crossed threshold when ETA drops under them', async () => {
+      const patient = { organizationId: 'org-1', destination: 'General Hospital', age: 42, gender: 'Male' };
+      mockPatientGet.mockResolvedValue({ data: () => patient });
+      mockHospitalsGet.mockResolvedValue({ docs: [{ data: () => ({ latitude: 43.7, longitude: -79.5 }) }] });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okDirectionsResponse(20 * 60))); // 20 minutes -> crosses 60 and 30
+
+      await onEmsLocationEvent.run(activeLocationEvent());
+
+      expect(mockNotifyPatientProximity).toHaveBeenCalledWith(patient, [60, 30]);
+      expect(mockLocationSet).toHaveBeenLastCalledWith(
+        { lastEtaCheckAt: 'SERVER_TIMESTAMP', notifiedThresholds: { __arrayUnion: [60, 30] } },
+        { merge: true },
+      );
+    });
+
+    it('excludes already-notified thresholds from a new crossing', async () => {
+      mockLocationGet.mockResolvedValue({ data: () => ({ notifiedThresholds: [60] }) });
+      mockPatientGet.mockResolvedValue({ data: () => ({ organizationId: 'org-1', destination: 'General Hospital' }) });
+      mockHospitalsGet.mockResolvedValue({ docs: [{ data: () => ({ latitude: 43.7, longitude: -79.5 }) }] });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okDirectionsResponse(20 * 60))); // still crosses 60 and 30
+
+      await onEmsLocationEvent.run(activeLocationEvent());
+
+      expect(mockNotifyPatientProximity).toHaveBeenCalledWith(expect.anything(), [30]);
+    });
   });
 });
 

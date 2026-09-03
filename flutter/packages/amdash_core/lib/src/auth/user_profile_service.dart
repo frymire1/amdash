@@ -39,10 +39,12 @@ class UserProfileService {
     String uid,
     Timestamp expiresAt,
     String fcmToken,
+    List<int> etaAlertThresholdsMinutes,
   ) {
     return _doc(uid).set({
       'newPatientAlertsExpiresAt': expiresAt,
       'fcmTokens': FieldValue.arrayUnion([fcmToken]),
+      'etaAlertThresholdsMinutes': etaAlertThresholdsMinutes,
     }, SetOptions(merge: true));
   }
 

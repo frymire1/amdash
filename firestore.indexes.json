@@ -78,6 +78,7 @@
       "fields": [
         { "fieldPath": "organizationId", "order": "ASCENDING" },
         { "fieldPath": "workLocation", "order": "ASCENDING" },
+        { "fieldPath": "etaAlertThresholdsMinutes", "arrayConfig": "CONTAINS" },
         { "fieldPath": "newPatientAlertsExpiresAt", "order": "ASCENDING" }
       ]
     },

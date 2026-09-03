@@ -103,6 +103,51 @@ async function seed(db) {
   };
 }
 
+// incoming_patient_test.dart's own final phase checks the "1 hour away"
+// proximity-alert threshold box and hits Enable — this confirms the real
+// UI persisted that selection. The resulting patients/{id}/location/
+// current.notifiedThresholds write (proof the real onEmsLocationEvent
+// detection pipeline — functions/src/ems.ts's checkProximityAlertThresholds
+// — actually fired for this live-tracked patient, not just that the
+// checkbox saved) isn't tied to physician's own test timing at all: it's
+// driven entirely by EMS's own location-publish ticks during *its* test
+// run (a Cloud Function trigger, not something physician's separate
+// process could influence either way), and the seeded GPS-fix/hospital
+// pair is close enough that the 60-minute threshold is essentially
+// guaranteed to have already been crossed by the time this runs. Polls
+// briefly regardless, purely as a safety margin against Cloud Functions
+// cold-start latency, not because anything is expected to still be
+// in-flight.
+async function verifyEtaAlertThreshold(db, physicianUid) {
+  const userSnap = await db.doc(`users/${physicianUid}`).get();
+  const thresholds = userSnap.data()?.etaAlertThresholdsMinutes ?? [];
+  if (!thresholds.includes(60)) {
+    throw new Error(`Expected users/${physicianUid}.etaAlertThresholdsMinutes to contain 60, got ${JSON.stringify(thresholds)}.`);
+  }
+  console.log('✅ Confirmed the physician\'s 60-minute proximity-alert threshold was saved.');
+
+  const patientSnap = await db.collection('patients').where('destination', '==', HOSPITAL_NAME).limit(1).get();
+  if (patientSnap.empty) {
+    throw new Error(`No patient found with destination "${HOSPITAL_NAME}" to check notifiedThresholds on.`);
+  }
+  const locationRef = patientSnap.docs[0].ref.collection('location').doc('current');
+
+  const deadline = Date.now() + 30_000;
+  let notifiedThresholds = [];
+  while (Date.now() < deadline) {
+    const locationSnap = await locationRef.get();
+    notifiedThresholds = locationSnap.data()?.notifiedThresholds ?? [];
+    if (notifiedThresholds.includes(60)) {
+      console.log('✅ Confirmed the real onEmsLocationEvent proximity-check pipeline recorded the 60-minute crossing.');
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+  }
+  throw new Error(
+    `Expected patients/${patientSnap.docs[0].id}/location/current.notifiedThresholds to contain 60, got ${JSON.stringify(notifiedThresholds)}.`,
+  );
+}
+
 async function cleanup(db, auth, seeded) {
   // Specific-reference deletes first, unconditional regardless of age —
   // this run's own account/hospital/patient just finished being used, so
@@ -238,7 +283,24 @@ try {
         SMOKE_LATITUDE: String(GPS_LATITUDE),
         SMOKE_LONGITUDE: String(GPS_LONGITUDE),
       },
+      // Granted so the test's own real notification-permission request
+      // (arming proximity alerts) resolves immediately instead of hanging
+      // on an unresolved browser prompt — same reasoning as EMS's own
+      // geolocation grant above. First real e2e exercise of this
+      // permission anywhere in the suite.
+      webPermissions: ['notifications'],
     });
+
+    if (exitCode === 0) {
+      try {
+        await verifyEtaAlertThreshold(db, seeded.physician.uid);
+      } catch (error) {
+        console.error(error.message);
+        exitCode = 1;
+      }
+    } else {
+      console.log('\n❌ Physician verification failed — skipping the proximity-alert checks (nothing meaningful to verify).');
+    }
   }
 } finally {
   await cleanup(db, auth, seeded);

@@ -39,6 +39,7 @@ void main() {
         'organizationId': 'org-1',
         'newPatientAlertsExpiresAt': expiresAt,
         'fcmTokens': ['token-1', 'token-2'],
+        'etaAlertThresholdsMinutes': [60, 15],
       });
 
       expect(profile.firstName, 'Jordan');
@@ -48,9 +49,10 @@ void main() {
       expect(profile.organizationId, 'org-1');
       expect(profile.newPatientAlertsExpiresAt, expiresAt);
       expect(profile.fcmTokens, ['token-1', 'token-2']);
+      expect(profile.etaAlertThresholdsMinutes, [60, 15]);
     });
 
-    test('defaults role/fcmTokens to empty lists and leaves everything else null when the document is empty', () {
+    test('defaults role/fcmTokens/etaAlertThresholdsMinutes to empty lists and leaves everything else null when the document is empty', () {
       final profile = UserProfile.fromFirestore(const {});
 
       expect(profile.firstName, isNull);
@@ -60,6 +62,7 @@ void main() {
       expect(profile.organizationId, isNull);
       expect(profile.newPatientAlertsExpiresAt, isNull);
       expect(profile.fcmTokens, isEmpty);
+      expect(profile.etaAlertThresholdsMinutes, isEmpty);
     });
 
     test('role defaults to empty when the field is present but not a List', () {
@@ -77,6 +80,11 @@ void main() {
     test('fcmTokens defaults to empty when the field is present but not a List', () {
       final profile = UserProfile.fromFirestore(const {'fcmTokens': 'not-a-list'});
       expect(profile.fcmTokens, isEmpty);
+    });
+
+    test('etaAlertThresholdsMinutes defaults to empty when the field is present but not a List', () {
+      final profile = UserProfile.fromFirestore(const {'etaAlertThresholdsMinutes': 'not-a-list'});
+      expect(profile.etaAlertThresholdsMinutes, isEmpty);
     });
   });
 

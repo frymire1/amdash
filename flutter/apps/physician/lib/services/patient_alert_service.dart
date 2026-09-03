@@ -15,11 +15,12 @@ class EnableAlertsResult {
 }
 
 /// Mirrors `libs/auth/src/lib/services/patient-alert.service.ts`: arms/
-/// disarms new-patient push alerts by requesting notification permission,
-/// registering an FCM token, and writing it to the same
-/// `fcmTokens`/`newPatientAlertsExpiresAt` fields `sendNewPatientAlerts`
-/// (Cloud Function, unchanged) already reads — no server-side change
-/// needed for this to work from Flutter.
+/// disarms patient-arrival push alerts by requesting notification
+/// permission, registering an FCM token, and writing it (plus the
+/// physician's chosen proximity thresholds) to the `fcmTokens`/
+/// `newPatientAlertsExpiresAt`/`etaAlertThresholdsMinutes` fields
+/// `notifyPatientProximity` (`functions/src/physician.ts`, triggered from
+/// `ems.ts`'s `onEmsLocationEvent`) reads.
 ///
 /// Lives here in the physician app rather than in `amdash_core` — this is
 /// the only app that ever arms new-patient alerts (EMS uploads patients,
@@ -34,7 +35,11 @@ class PatientAlertService {
   final FirebaseMessaging _messaging;
   final UserProfileService _userProfileService;
 
-  Future<EnableAlertsResult> enableAlerts(String uid, int hours) async {
+  Future<EnableAlertsResult> enableAlerts(
+    String uid,
+    int hours, {
+    List<int> etaAlertThresholdsMinutes = const [],
+  }) async {
     final settings = await _messaging.requestPermission();
     if (settings.authorizationStatus == AuthorizationStatus.denied) {
       return const EnableAlertsResult(granted: false);
@@ -48,7 +53,7 @@ class PatientAlertService {
     final expiresAt = Timestamp.fromMillisecondsSinceEpoch(
       DateTime.now().millisecondsSinceEpoch + hours * 3600000,
     );
-    await _userProfileService.enableNewPatientAlerts(uid, expiresAt, token);
+    await _userProfileService.enableNewPatientAlerts(uid, expiresAt, token, etaAlertThresholdsMinutes);
     return const EnableAlertsResult(granted: true);
   }
 

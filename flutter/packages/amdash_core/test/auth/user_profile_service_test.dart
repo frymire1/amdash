@@ -44,16 +44,26 @@ void main() {
       expect(data?['workLocation'], "St. Michael's Hospital");
     });
 
-    test('enableNewPatientAlerts sets the expiry and unions the fcm token', () async {
+    test('enableNewPatientAlerts sets the expiry, unions the fcm token, and sets the eta thresholds', () async {
       await firestore.collection('users').doc('uid-1').set({
         'fcmTokens': ['existing-token'],
       });
       final expiresAt = Timestamp.fromDate(DateTime(2026, 12, 31));
-      await service.enableNewPatientAlerts('uid-1', expiresAt, 'new-token');
+      await service.enableNewPatientAlerts('uid-1', expiresAt, 'new-token', [60, 15]);
 
       final data = await readUser('uid-1');
       expect(data?['newPatientAlertsExpiresAt'], expiresAt);
       expect(data?['fcmTokens'], containsAll(['existing-token', 'new-token']));
+      expect(data?['etaAlertThresholdsMinutes'], [60, 15]);
+    });
+
+    test('enableNewPatientAlerts overwrites (not unions) a previous eta threshold selection', () async {
+      final expiresAt = Timestamp.fromDate(DateTime(2026, 12, 31));
+      await firestore.collection('users').doc('uid-1').set({'etaAlertThresholdsMinutes': [60]});
+      await service.enableNewPatientAlerts('uid-1', expiresAt, 'new-token', [15, 5]);
+
+      final data = await readUser('uid-1');
+      expect(data?['etaAlertThresholdsMinutes'], [15, 5]);
     });
 
     test('disableNewPatientAlerts deletes the expiry field, leaving fcmTokens alone', () async {

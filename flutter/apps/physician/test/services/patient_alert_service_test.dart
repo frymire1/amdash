@@ -58,6 +58,30 @@ void main() {
       expect(data['fcmTokens'], contains('fcm-token-1'));
       expect(data['newPatientAlertsExpiresAt'], isNotNull);
     });
+
+    test('etaAlertThresholdsMinutes defaults to empty when not passed', () async {
+      final settings = _MockNotificationSettings();
+      when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.authorized);
+      when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
+      when(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).thenAnswer((_) async => 'fcm-token-1');
+
+      await service.enableAlerts('user-1', 24);
+
+      final doc = await firestore.collection('users').doc('user-1').get();
+      expect(doc.data()!['etaAlertThresholdsMinutes'], isEmpty);
+    });
+
+    test('writes the given etaAlertThresholdsMinutes when passed', () async {
+      final settings = _MockNotificationSettings();
+      when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.authorized);
+      when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
+      when(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).thenAnswer((_) async => 'fcm-token-1');
+
+      await service.enableAlerts('user-1', 24, etaAlertThresholdsMinutes: [60, 15]);
+
+      final doc = await firestore.collection('users').doc('user-1').get();
+      expect(doc.data()!['etaAlertThresholdsMinutes'], [60, 15]);
+    });
   });
 
   group('disableAlerts', () {
