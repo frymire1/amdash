@@ -3,9 +3,11 @@
 // as run-admin-patrol-test.mjs. Simpler than physician's runner: the test
 // itself creates, edits, and deletes its own throwaway patient entirely
 // through the app's UI (see patrol_test/ems_test.dart), so
-// this script only needs to create/delete the throwaway EMS account.
-// Wired into .github/workflows/ci.yml's e2e job — not a local-only dev
-// tool.
+// this script only needs to create/delete the throwaway EMS account. On the
+// self-contained (non --seed-only/--teardown) path, it also verifies the
+// resulting patient.* audit-log entries directly via the Admin SDK — see
+// verifyPatientAuditEntries's own comment. Wired into .github/workflows/
+// ci.yml's e2e job — not a local-only dev tool.
 //
 // Written in Node/JS rather than Dart for the same reason as
 // run-admin-patrol-test.mjs: needs the Firebase *Admin* SDK to seed/tear
@@ -65,7 +67,13 @@ async function createSmokeEmsAccount(db) {
   // regardless of whatever this shared fixture's last state was. Safe to
   // set unconditionally: it only ever adds a new opt-in prompt, never
   // changes any other existing behavior this or any other test relies on.
-  await db.doc(`organizations/${organizationId}`).set({ fhirExportEnabled: true }, { merge: true });
+  // auditLoggingEnabled likewise — verifyPatientAuditEntries below needs
+  // the patient.* actions this test triggers to actually get logged
+  // (logAudit silently skips GATED_ACTIONS when an org has explicitly
+  // turned this off — see audit.ts), regardless of whatever some other
+  // concurrently-running or earlier test last left this shared org's
+  // toggle set to.
+  await db.doc(`organizations/${organizationId}`).set({ fhirExportEnabled: true, auditLoggingEnabled: true }, { merge: true });
   const email = `smoke-ems-${Date.now()}@amdash-e2e.test`;
   const password = 'SmokeTest123';
   // emailVerified: true — required for mandatory MFA's /mfa-setup screen to
@@ -77,6 +85,37 @@ async function createSmokeEmsAccount(db) {
     { merge: true },
   );
   return { email, password, uid: user.uid };
+}
+
+// Confirms ems_test.dart's own UI-level flow (add/edit/delete a patient,
+// then complete transport + export a FHIR record) actually produced the
+// audit-log entries SECURITY.md's coverage table expects for each of these
+// five patient.* actions — previously listed there as "🔜 planned": the
+// actions themselves already fired on every green run, nothing had ever
+// checked the resulting audit rows actually existed.
+//
+// Keyed on actorUid (this run's own freshly-created smoke account), not
+// target/details — the two patients this test creates never surface their
+// Firestore-generated ids back to this script, but actorUid is unique to
+// this run regardless (a fresh account every time), so it's an
+// unambiguous, race-safe match even with sibling e2e jobs writing to this
+// same shared test-org concurrently (see firebase-admin-cli.mjs's own
+// comment on that risk).
+//
+// patient.decrypt isn't checked here — it only fires for a genuinely
+// CMEK-encrypted field (see amdash_core's patient_decryption_service.dart's
+// _needsDecrypt), which no current e2e flow, including this one, ever
+// triggers (test-org isn't CMEK-opted-in). That's a separate, larger
+// follow-up — a dedicated CMEK e2e flow — not an oversight here.
+async function verifyPatientAuditEntries(db, actorUid) {
+  const actions = ['patient.create', 'patient.update', 'patient.delete', 'patient.complete', 'patient.fhirExport'];
+  for (const action of actions) {
+    const snap = await db.collection('auditLog').where('actorUid', '==', actorUid).where('action', '==', action).limit(1).get();
+    if (snap.empty) {
+      throw new Error(`No ${action} audit-log entry found for this run's EMS account (${actorUid}).`);
+    }
+  }
+  console.log(`✅ Confirmed audit-log entries for: ${actions.join(', ')}.`);
 }
 
 async function cleanup(db, auth, smokeAccountUids) {
@@ -215,6 +254,17 @@ try {
       target: 'patrol_test/ems_test.dart',
       dartDefines: { SMOKE_EMAIL: account.email, SMOKE_PASSWORD: account.password },
     });
+
+    if (exitCode === 0) {
+      try {
+        await verifyPatientAuditEntries(db, account.uid);
+      } catch (error) {
+        console.error(error.message);
+        exitCode = 1;
+      }
+    } else {
+      console.log('\n❌ Patrol test failed — skipping the audit-entry checks (nothing meaningful to verify).');
+    }
   }
 } finally {
   // --seed-only intentionally skips cleanup — teardown happens in a later,

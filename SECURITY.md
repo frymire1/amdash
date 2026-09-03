@@ -222,17 +222,24 @@ for how each row below is checked.
 | `organization.setAuditLogging` | Admin toggles this feature itself | ✅ (label only) |
 | `organization.setFhirExportEnabled` | Admin toggles FHIR export | ✅ (label only) |
 | `patient.delete` (retention-sweep variant) | The daily retention cleanup job, attributed to `SYSTEM_ACTOR` | ❌ — not reachable through any UI at all (a scheduled background job, not a user action); covered only by `functions/`'s own unit tests |
-| `patient.create` | EMS uploads a patient | 🔜 planned — fires from existing EMS/physician e2e flows already, just never checked against the audit log yet |
-| `patient.update` | Any patient record edit | 🔜 planned |
-| `patient.complete` | EMS marks transport complete | 🔜 planned |
-| `patient.delete` (real per-patient variant) | A user deletes a specific patient | 🔜 planned |
-| `patient.decrypt` | Any patient-list render that decrypts name/healthcare number | 🔜 planned |
-| `patient.fhirExport` | Automatic FHIR export on transport completion | 🔜 planned |
+| `patient.create` | EMS uploads a patient | ✅ — verified directly via the Admin SDK, not the UI (see below) |
+| `patient.update` | Any patient record edit | ✅ (same) |
+| `patient.complete` | EMS marks transport complete | ✅ (same) |
+| `patient.delete` (real per-patient variant) | A user deletes a specific patient | ✅ (same) |
+| `patient.decrypt` | Any patient-list render that decrypts name/healthcare number | 🔜 planned — only fires for a genuinely CMEK-encrypted field (see `patient_decryption_service.dart`'s `_needsDecrypt`), which no current e2e flow triggers since `test-org` isn't CMEK-opted-in; needs its own dedicated CMEK e2e flow, a bigger separate follow-up |
+| `patient.fhirExport` | Automatic FHIR export on transport completion | ✅ — verified directly via the Admin SDK, not the UI (see below) |
 
-The six `patient.*` rows above need cross-app orchestration (an admin
-session reading an audit entry an EMS/physician test generated) rather
-than a single-app flow — a deliberate, separate follow-up, not an
-oversight.
+The five checked `patient.*` rows above are all exercised by
+`ems_test.dart`'s own single merged run (add/edit/delete a patient, then
+complete transport + export FHIR) — `run-ems-patrol-test.mjs`'s
+`verifyPatientAuditEntries` confirms the resulting audit-log rows directly
+via the Admin SDK afterward, keyed on that run's own freshly-created
+account uid (`actorUid`) rather than reading them back through the admin
+app's UI — the original plan here was cross-app orchestration (an admin
+session reading an entry an EMS/physician test generated), but that's more
+machinery than the check needs: the same direct-Admin-SDK-verification
+pattern `organization.create` above already uses works just as well here,
+without a second app's UI in the loop at all.
 
 ## Firebase App Check
 
