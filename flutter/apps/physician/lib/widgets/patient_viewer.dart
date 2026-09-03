@@ -10,7 +10,6 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 // Flutter/dart:ui's own one) that would otherwise shadow the real one —
 // this file only ever needs DateFormat from here.
 import 'package:intl/intl.dart' hide TextDirection;
-import 'package:material_symbols_icons/symbols.dart';
 
 import '../classes/active_location.dart';
 import '../services/directions_service.dart';
@@ -27,11 +26,6 @@ const _directionsRefreshDistanceM = 75.0;
 const _routeColor = Color(0xFF1A73E8);
 const _routeWidth = 6;
 
-// Google's own default-pin hues these markers used before — kept as the
-// background color behind the new icon glyphs below, so this is a like-for-
-// like swap of "what's inside the pin," not a color change too.
-const _vehicleMarkerColor = Color(0xFFEA4335);
-const _hospitalMarkerColor = Color(0xFF34A853);
 // _markerIconSize is the *raster* resolution the icon is drawn at (kept
 // high for retina sharpness); _markerDisplaySize is the actual on-screen
 // footprint, passed to BitmapDescriptor.bytes's width/height below.
@@ -46,47 +40,43 @@ const _markerIconSize = 96.0;
 const _markerDisplaySize = 36.0;
 
 // Cached module-level, not per-widget-instance: both markers' bitmaps are
-// identical every time (same glyph, same color, same size, nothing
-// per-patient about them), so there's no reason to regenerate them on every
-// _LiveMapCard mount — the first caller pays the (small, local, no-network)
-// render cost once, every later mount/patient switch/expand just reuses the
+// identical every time (same glyph, same size, nothing per-patient about
+// them), so there's no reason to regenerate them on every _LiveMapCard
+// mount — the first caller pays the (small, local, no-network) render cost
+// once, every later mount/patient switch/expand just reuses the
 // already-resolved Future.
 Future<BitmapDescriptor>? _vehicleMarkerIcon;
 Future<BitmapDescriptor>? _hospitalMarkerIcon;
 
-/// Renders [icon] centered in a filled circle with a white ring border
-/// (matching the look `BitmapDescriptor.defaultMarkerWithHue`'s own pins
-/// had) to a real bitmap `google_maps_flutter` can use as a marker icon —
-/// Google Maps markers take a static image, not a live Flutter widget, so
-/// there's no way to just hand it an `Icon` directly. `fontVariations` picks
-/// the same filled/medium-weight rendering already confirmed to look right
-/// (see the published marker-icon-options preview) — Material Symbols is a
-/// variable font, so without this it renders in its default thin/unfilled
-/// style instead.
-Future<BitmapDescriptor> _iconMarkerBitmap(IconData icon, Color background) async {
+/// Renders [emoji] centered on a plain white circle (with a soft drop
+/// shadow so it still reads against a light basemap, matching the look
+/// Google's own default pins have) to a real bitmap `google_maps_flutter`
+/// can use as a marker icon — Google Maps markers take a static image, not
+/// a live Flutter widget, so there's no way to just hand it a `Text`
+/// directly. No custom font/package needed: emoji render through each
+/// platform's own system emoji font (Apple Color Emoji / Noto Color Emoji
+/// / Segoe UI Emoji) — Flutter's text engine already falls back to it
+/// automatically for emoji code points, unlike the icon-glyph approach
+/// this replaced (see the published marker-icon-options comparison — a
+/// plain white circle with the real 🚑/🏥 emoji read more clearly at
+/// marker size than either the Material Symbols or Font Awesome glyphs
+/// tried first).
+Future<BitmapDescriptor> _emojiMarkerBitmap(String emoji) async {
   final recorder = PictureRecorder();
   final canvas = Canvas(recorder);
   const radius = _markerIconSize / 2;
 
-  canvas.drawCircle(const Offset(radius, radius), radius, Paint()..color = Colors.white);
-  canvas.drawCircle(const Offset(radius, radius), radius - 4, Paint()..color = background);
+  canvas.drawCircle(
+    const Offset(radius, radius),
+    radius,
+    Paint()
+      ..color = Colors.black26
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
+  );
+  canvas.drawCircle(const Offset(radius, radius), radius - 2, Paint()..color = Colors.white);
 
   final textPainter = TextPainter(textDirection: TextDirection.ltr)
-    ..text = TextSpan(
-      text: String.fromCharCode(icon.codePoint),
-      style: TextStyle(
-        fontSize: _markerIconSize * 0.55,
-        fontFamily: icon.fontFamily,
-        package: icon.fontPackage,
-        color: Colors.white,
-        fontVariations: const [
-          FontVariation('FILL', 1),
-          FontVariation('wght', 500),
-          FontVariation('GRAD', 0),
-          FontVariation('opsz', 48),
-        ],
-      ),
-    )
+    ..text = TextSpan(text: emoji, style: const TextStyle(fontSize: _markerIconSize * 0.62))
     ..layout();
   textPainter.paint(
     canvas,
@@ -307,10 +297,10 @@ class _LiveMapCardState extends ConsumerState<_LiveMapCard> with TickerProviderS
   @override
   void initState() {
     super.initState();
-    (_vehicleMarkerIcon ??= _iconMarkerBitmap(Symbols.e911_emergency, _vehicleMarkerColor)).then((icon) {
+    (_vehicleMarkerIcon ??= _emojiMarkerBitmap('🚑')).then((icon) {
       if (mounted) setState(() => _vehicleIcon = icon);
     });
-    (_hospitalMarkerIcon ??= _iconMarkerBitmap(Symbols.local_hospital, _hospitalMarkerColor)).then((icon) {
+    (_hospitalMarkerIcon ??= _emojiMarkerBitmap('🏥')).then((icon) {
       if (mounted) setState(() => _hospitalIcon = icon);
     });
   }
