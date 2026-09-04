@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:amdash_core/amdash_core.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -36,6 +37,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // — this screen is only ever reached once signed in (see the router's
     // own guard chain), but a stray unauthenticated mount should silently
     // skip registration rather than crash.
+    //
+    // Skipped entirely on web: there's no production EMS web app (kept
+    // only for this repo's own Chrome e2e coverage — see ems_test.dart's
+    // header comment), so a real registration attempt here serves no
+    // production purpose, and it's actively harmful in that e2e role —
+    // confirmed for real: a first version that ran this unconditionally
+    // broke ems_test.dart's own Chrome CI job with a missing
+    // patient.fhirExport audit-log entry, evidently from Chromium's
+    // requestPermission()/getToken() call (already known-broken for real
+    // push registration — see incoming_patient_test.dart's identical
+    // finding) tying up test/browser resources during this suite's
+    // longest, most Firestore-heavy run.
+    if (kIsWeb) return;
     final uid = ref.read(authStateProvider).valueOrNull?.uid;
     if (uid != null) {
       unawaited(ref.read(emsAlertServiceProvider).registerForConnectivityAlerts(uid));
