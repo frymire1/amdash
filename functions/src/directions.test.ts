@@ -28,7 +28,7 @@ vi.mock('firebase-functions/params', () => ({
   defineSecret: () => ({ value: () => 'fake-directions-api-key' }),
 }));
 
-import { callDirectionsApi, decodePolyline, resolveDestinationHospitalLatLng } from './directions';
+import { callDirectionsApi, decodePolyline, haversineDistanceKm, resolveDestinationHospitalLatLng } from './directions';
 
 // A hand-traced-correct minimal encoded polyline: "AA" decodes to exactly
 // one point at (1/1e5, 1/1e5) — verified by walking decodePolyline's own
@@ -93,6 +93,25 @@ describe('decodePolyline', () => {
 
   it("decodes a negative-delta polyline point correctly (the sign-handling branch)", () => {
     expect(decodePolyline(NEGATIVE_POINT_ENCODED_POLYLINE)).toEqual([NEGATIVE_POINT_DECODED]);
+  });
+});
+
+describe('haversineDistanceKm', () => {
+  it('is zero for the same point', () => {
+    expect(haversineDistanceKm(43.65, -79.38, 43.65, -79.38)).toBeCloseTo(0, 6);
+  });
+
+  it('matches the well-known ~111.19km-per-degree-of-latitude figure', () => {
+    // One degree of latitude is a fixed, real-world-verifiable distance
+    // regardless of longitude — a good sanity check that doesn't depend on
+    // trusting any one specific city-pair distance from memory.
+    expect(haversineDistanceKm(0, 0, 1, 0)).toBeCloseTo(111.19, 1);
+  });
+
+  it('is symmetric (order of the two points does not matter)', () => {
+    const ab = haversineDistanceKm(43.65, -79.38, 43.7, -79.5);
+    const ba = haversineDistanceKm(43.7, -79.5, 43.65, -79.38);
+    expect(ab).toBeCloseTo(ba, 9);
   });
 });
 

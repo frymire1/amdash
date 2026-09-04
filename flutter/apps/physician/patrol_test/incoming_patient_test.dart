@@ -26,6 +26,7 @@ import 'package:physician/firebase_options.dart';
 import 'package:physician/main.dart';
 import 'package:physician/screens/main_view_screen.dart';
 import 'package:physician/screens/user_settings_screen.dart';
+import 'package:physician/services/patient_alert_service.dart';
 
 void main() {
   patrolTest(
@@ -248,10 +249,29 @@ void main() {
       // flow; previously only unit-tested
       // (patient_alert_service_test.dart).
       await tapText($, 'Enable');
+      // pumpUntil itself never throws on timeout (see its own doc
+      // comment) — it just stops pumping and returns, so the actual
+      // assertion has to be a real expect afterward, or a silent failure
+      // to arm (e.g. requestPermission()/getToken() never resolving or
+      // throwing in a headless browser) would fall through both this and
+      // the next check without ever failing the test.
       await pumpUntil(
         $,
         () => find.textContaining('Alerts armed until').evaluate().isNotEmpty,
         maxIterations: 60,
+      );
+      expect(
+        find.textContaining('Alerts armed until'),
+        findsOneWidget,
+        // debugLastEnableAlertsError (patient_alert_service.dart) surfaces
+        // the real exception requestPermission()/getToken() threw, if
+        // any — the UI itself deliberately shows only a generic "Failed
+        // to enable alerts" message, and no OS-level notification prompt
+        // is visible to inspect either way, so this is the only way a
+        // failure here says anything more specific than "it didn't work".
+        reason:
+            'enabling alerts should genuinely arm them, not silently fail to grant permission or fetch a token '
+            '(debugLastEnableAlertsError: $debugLastEnableAlertsError)',
       );
       expect(
         find.textContaining('blocked'),

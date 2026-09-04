@@ -262,6 +262,31 @@ describe('onEmsLocationEvent', () => {
       expect(mockPatientGet).toHaveBeenCalled();
     });
 
+    it('skips even the patient/hospital lookup once every threshold has already been notified', async () => {
+      mockLocationGet.mockResolvedValue({ data: () => ({ notifiedThresholds: [60, 30, 15, 5] }) });
+
+      await onEmsLocationEvent.run(activeLocationEvent());
+
+      expect(mockPatientGet).not.toHaveBeenCalled();
+      expect(mockLocationSet).toHaveBeenLastCalledWith({ lastEtaCheckAt: 'SERVER_TIMESTAMP' }, { merge: true });
+    });
+
+    it('skips the real Directions call (haversine pre-filter) when nowhere near the next threshold', async () => {
+      mockPatientGet.mockResolvedValue({ data: () => ({ organizationId: 'org-1', destination: 'General Hospital' }) });
+      // Roughly 130+ km from activeLocationEvent()'s (43.6, -79.4) fix —
+      // far enough that even the slow ASSUMED_AVERAGE_SPEED_KMH estimate
+      // clears every threshold's margin, so this should never reach fetch.
+      mockHospitalsGet.mockResolvedValue({ docs: [{ data: () => ({ latitude: 44.5, longitude: -80.5 }) }] });
+      const fetchSpy = vi.fn();
+      vi.stubGlobal('fetch', fetchSpy);
+
+      await onEmsLocationEvent.run(activeLocationEvent());
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(mockNotifyPatientProximity).not.toHaveBeenCalled();
+      expect(mockLocationSet).toHaveBeenLastCalledWith({ lastEtaCheckAt: 'SERVER_TIMESTAMP' }, { merge: true });
+    });
+
     it('stops (no hospital lookup) when the patient has no organizationId/destination yet', async () => {
       mockPatientGet.mockResolvedValue({ data: () => ({}) });
 

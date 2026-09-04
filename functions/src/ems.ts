@@ -9,7 +9,7 @@ import { EmsLocationEvent } from './classes/ems-location-event';
 import { PublishLocationRequest } from './classes/publish-location-request';
 import { StopLocationRequest } from './classes/stop-location-request';
 import { REGION, getCallerProfile } from './auth';
-import { DIRECTIONS_API_KEY, callDirectionsApi, resolveDestinationHospitalLatLng } from './directions';
+import { DIRECTIONS_API_KEY, callDirectionsApi, haversineDistanceKm, resolveDestinationHospitalLatLng } from './directions';
 import { notifyPatientProximity } from './physician';
 import { patientLocationRef } from './patient-data';
 
@@ -122,6 +122,20 @@ export const onEmsLocationEvent = onMessagePublished(
 const ETA_RECHECK_INTERVAL_MS = 60 * 1000;
 const PROXIMITY_THRESHOLDS_MINUTES = [60, 30, 15, 5];
 
+// Purely a pre-filter gate, never the actual notification decision (that
+// always comes from a real callDirectionsApi result below) — deliberately
+// conservative (an assumed average speed slower than most real driving,
+// so straight-line distance's own underestimate-vs-real-roads bias errs
+// toward checking too early rather than missing a crossing).
+const ASSUMED_AVERAGE_SPEED_KMH = 40;
+// Multiplies the rough estimate before comparing to a threshold, on top
+// of the conservative speed assumption above — real driving time is
+// almost always higher than straight-line distance suggests (roads
+// aren't straight, traffic exists), so this widens the window a real
+// Directions call gets attempted in, rather than risk gating it shut
+// right as a threshold is actually being crossed.
+const ROUGH_ETA_SAFETY_MARGIN = 1.5;
+
 async function checkProximityAlertThresholds(patientId: string, latitude: number, longitude: number): Promise<void> {
   const locationRef = patientLocationRef(patientId);
   const locationSnapshot = await locationRef.get();
@@ -132,6 +146,19 @@ async function checkProximityAlertThresholds(patientId: string, latitude: number
     return;
   }
 
+  const alreadyNotified = new Set((locationData?.['notifiedThresholds'] as number[] | undefined) ?? []);
+  const remainingThresholds = PROXIMITY_THRESHOLDS_MINUTES.filter((threshold) => !alreadyNotified.has(threshold));
+  if (remainingThresholds.length === 0) {
+    // Every threshold this patient could ever cross already has — nothing
+    // left a real Directions call (or even a patient/hospital lookup)
+    // could tell us that matters, so stop doing any of that for this
+    // patient at all. Still stamp lastEtaCheckAt so the throttle above
+    // keeps skipping cheaply instead of re-entering this whole function
+    // on every tick.
+    await locationRef.set({ lastEtaCheckAt: FieldValue.serverTimestamp() }, { merge: true });
+    return;
+  }
+
   const patientSnapshot = await getFirestore().collection('patients').doc(patientId).get();
   const patient = patientSnapshot.data();
   if (!patient?.['organizationId'] || !patient?.['destination']) {
@@ -139,24 +166,50 @@ async function checkProximityAlertThresholds(patientId: string, latitude: number
   }
 
   const hospitalLatLng = await resolveDestinationHospitalLatLng(patient['organizationId'], patient['destination']);
-  const route = hospitalLatLng
-    ? await callDirectionsApi(latitude, longitude, hospitalLatLng.latitude, hospitalLatLng.longitude).catch((error) => {
-        logger.error('Failed to check proximity-alert thresholds', error);
-        return null;
-      })
-    : null;
+  if (!hospitalLatLng) {
+    // No hospital match — nothing to compare against. Still stamp
+    // lastEtaCheckAt so the throttle above doesn't retry on every single
+    // ~15s tick until this destination eventually resolves.
+    await locationRef.set({ lastEtaCheckAt: FieldValue.serverTimestamp() }, { merge: true });
+    return;
+  }
+
+  // Cheap pre-filter: a real Directions API call costs real money at scale
+  // ($5/1,000 requests, no meaningful free tier at this volume) and this
+  // function is invoked on every ~15s GPS tick (throttled to ~once/minute
+  // above) for the entire duration of every tracked transport — most of
+  // that time, the vehicle is nowhere near close enough to the *next*
+  // (largest remaining) threshold to plausibly have crossed it. Straight-
+  // line distance + an assumed average speed is free (no API call) and
+  // conservative enough (slow speed assumption + a safety margin on top)
+  // that it only ever skips calls that couldn't matter — the actual
+  // crossing decision always still comes from a real Directions result,
+  // never this estimate.
+  const distanceKm = haversineDistanceKm(latitude, longitude, hospitalLatLng.latitude, hospitalLatLng.longitude);
+  const roughEtaMinutes = (distanceKm / ASSUMED_AVERAGE_SPEED_KMH) * 60;
+  const nextThresholdMinutes = Math.max(...remainingThresholds);
+  if (roughEtaMinutes > nextThresholdMinutes * ROUGH_ETA_SAFETY_MARGIN) {
+    await locationRef.set({ lastEtaCheckAt: FieldValue.serverTimestamp() }, { merge: true });
+    return;
+  }
+
+  const route = await callDirectionsApi(latitude, longitude, hospitalLatLng.latitude, hospitalLatLng.longitude).catch(
+    (error) => {
+      logger.error('Failed to check proximity-alert thresholds', error);
+      return null;
+    },
+  );
 
   if (!route) {
-    // No hospital match, no route found, or the Directions call itself
-    // failed — nothing to compare against this time. Still stamp
-    // lastEtaCheckAt so the throttle above doesn't retry on every single
-    // ~15s tick until it eventually succeeds.
+    // The Directions call itself found no route or failed — nothing to
+    // compare against this time. Still stamp lastEtaCheckAt so the
+    // throttle above doesn't retry on every single ~15s tick until it
+    // eventually succeeds.
     await locationRef.set({ lastEtaCheckAt: FieldValue.serverTimestamp() }, { merge: true });
     return;
   }
 
   const etaMinutes = route.durationSeconds / 60;
-  const alreadyNotified = new Set((locationData?.['notifiedThresholds'] as number[] | undefined) ?? []);
   const newlyCrossed = PROXIMITY_THRESHOLDS_MINUTES.filter(
     (threshold) => etaMinutes <= threshold && !alreadyNotified.has(threshold),
   );

@@ -22,6 +22,14 @@ void main() {
   });
 
   group('enableAlerts', () {
+    test('requestPermission throwing is captured in debugLastEnableAlertsError and rethrown', () async {
+      final thrown = Exception('service worker registration failed');
+      when(() => messaging.requestPermission()).thenThrow(thrown);
+
+      await expectLater(() => service.enableAlerts('user-1', 24), throwsA(thrown));
+      expect(debugLastEnableAlertsError, thrown);
+    });
+
     test('permission denied -> not granted, never requests a token', () async {
       final settings = _MockNotificationSettings();
       when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.denied);

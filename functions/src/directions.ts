@@ -85,6 +85,26 @@ export function decodePolyline(encoded: string): Array<[number, number]> {
   return points;
 }
 
+const EARTH_RADIUS_KM = 6371;
+
+// Straight-line (great-circle) distance — pure math, no billed API call.
+// Used as a cheap pre-filter ahead of a real callDirectionsApi call (see
+// ems.ts's checkProximityAlertThresholds): calling the real Directions API
+// on every ~15s-throttled-to-60s GPS tick for the whole duration of every
+// tracked transport is real, non-trivial money at scale ($5/1,000
+// requests, no meaningful free tier at volume) for ticks where the
+// vehicle is nowhere near close enough to any threshold to plausibly have
+// crossed one — this lets a caller skip the expensive call entirely for
+// those ticks using only free Firestore reads + arithmetic already in
+// hand.
+export function haversineDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return EARTH_RADIUS_KM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 // Shared hospital-lookup — resolve a patient's destination hospital name
 // (plaintext, not PII — see patient-data.ts's own comments on why
 // `destination` is safe to query directly) to real lat/lng, the input

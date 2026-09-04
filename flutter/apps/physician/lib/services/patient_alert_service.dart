@@ -14,6 +14,18 @@ class EnableAlertsResult {
   final bool granted;
 }
 
+/// The real Object thrown by the most recent `enableAlerts` call, if any
+/// — same debug-capture rationale as amdash_core's
+/// `fhir_export_service.dart`'s `debugLastExportError`: the screen's own
+/// catch block (`user_settings_screen.dart`'s `_enableAlerts`) deliberately
+/// shows a generic "Failed to enable alerts" message rather than a raw
+/// exception, but a test needs the real reason to diagnose a failure it
+/// can't otherwise observe (no OS-level notification permission UI is
+/// visible to a headless test either way, and console/print isn't a
+/// reliable channel back to a test in this pipeline — see
+/// `debugLastExportError`'s own doc comment).
+Object? debugLastEnableAlertsError;
+
 /// Mirrors `libs/auth/src/lib/services/patient-alert.service.ts`: arms/
 /// disarms patient-arrival push alerts by requesting notification
 /// permission, registering an FCM token, and writing it (plus the
@@ -40,21 +52,26 @@ class PatientAlertService {
     int hours, {
     List<int> etaAlertThresholdsMinutes = const [],
   }) async {
-    final settings = await _messaging.requestPermission();
-    if (settings.authorizationStatus == AuthorizationStatus.denied) {
-      return const EnableAlertsResult(granted: false);
-    }
+    try {
+      final settings = await _messaging.requestPermission();
+      if (settings.authorizationStatus == AuthorizationStatus.denied) {
+        return const EnableAlertsResult(granted: false);
+      }
 
-    final token = await _messaging.getToken(vapidKey: _vapidKey);
-    if (token == null) {
-      return const EnableAlertsResult(granted: false);
-    }
+      final token = await _messaging.getToken(vapidKey: _vapidKey);
+      if (token == null) {
+        return const EnableAlertsResult(granted: false);
+      }
 
-    final expiresAt = Timestamp.fromMillisecondsSinceEpoch(
-      DateTime.now().millisecondsSinceEpoch + hours * 3600000,
-    );
-    await _userProfileService.enableNewPatientAlerts(uid, expiresAt, token, etaAlertThresholdsMinutes);
-    return const EnableAlertsResult(granted: true);
+      final expiresAt = Timestamp.fromMillisecondsSinceEpoch(
+        DateTime.now().millisecondsSinceEpoch + hours * 3600000,
+      );
+      await _userProfileService.enableNewPatientAlerts(uid, expiresAt, token, etaAlertThresholdsMinutes);
+      return const EnableAlertsResult(granted: true);
+    } catch (error) {
+      debugLastEnableAlertsError = error;
+      rethrow;
+    }
   }
 
   Future<void> disableAlerts(String uid) {
