@@ -120,7 +120,7 @@ export const onEmsLocationEvent = onMessagePublished(
 // piggybacking on the already-frequent location pipeline rather than
 // standing up a separate scheduled polling function.
 const ETA_RECHECK_INTERVAL_MS = 60 * 1000;
-const PROXIMITY_THRESHOLDS_MINUTES = [60, 30, 15, 5];
+const PROXIMITY_THRESHOLDS_MINUTES = [30, 15, 5];
 
 // Purely a pre-filter gate, never the actual notification decision (that
 // always comes from a real callDirectionsApi result below) — deliberately

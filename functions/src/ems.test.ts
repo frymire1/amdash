@@ -263,7 +263,7 @@ describe('onEmsLocationEvent', () => {
     });
 
     it('skips even the patient/hospital lookup once every threshold has already been notified', async () => {
-      mockLocationGet.mockResolvedValue({ data: () => ({ notifiedThresholds: [60, 30, 15, 5] }) });
+      mockLocationGet.mockResolvedValue({ data: () => ({ notifiedThresholds: [30, 15, 5] }) });
 
       await onEmsLocationEvent.run(activeLocationEvent());
 
@@ -344,26 +344,26 @@ describe('onEmsLocationEvent', () => {
       const patient = { organizationId: 'org-1', destination: 'General Hospital', age: 42, gender: 'Male' };
       mockPatientGet.mockResolvedValue({ data: () => patient });
       mockHospitalsGet.mockResolvedValue({ docs: [{ data: () => ({ latitude: 43.7, longitude: -79.5 }) }] });
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okDirectionsResponse(20 * 60))); // 20 minutes -> crosses 60 and 30
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okDirectionsResponse(10 * 60))); // 10 minutes -> crosses 30 and 15
 
       await onEmsLocationEvent.run(activeLocationEvent());
 
-      expect(mockNotifyPatientProximity).toHaveBeenCalledWith(patient, [60, 30]);
+      expect(mockNotifyPatientProximity).toHaveBeenCalledWith(patient, [30, 15]);
       expect(mockLocationSet).toHaveBeenLastCalledWith(
-        { lastEtaCheckAt: 'SERVER_TIMESTAMP', notifiedThresholds: { __arrayUnion: [60, 30] } },
+        { lastEtaCheckAt: 'SERVER_TIMESTAMP', notifiedThresholds: { __arrayUnion: [30, 15] } },
         { merge: true },
       );
     });
 
     it('excludes already-notified thresholds from a new crossing', async () => {
-      mockLocationGet.mockResolvedValue({ data: () => ({ notifiedThresholds: [60] }) });
+      mockLocationGet.mockResolvedValue({ data: () => ({ notifiedThresholds: [30] }) });
       mockPatientGet.mockResolvedValue({ data: () => ({ organizationId: 'org-1', destination: 'General Hospital' }) });
       mockHospitalsGet.mockResolvedValue({ docs: [{ data: () => ({ latitude: 43.7, longitude: -79.5 }) }] });
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okDirectionsResponse(20 * 60))); // still crosses 60 and 30
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okDirectionsResponse(10 * 60))); // still crosses 30 and 15
 
       await onEmsLocationEvent.run(activeLocationEvent());
 
-      expect(mockNotifyPatientProximity).toHaveBeenCalledWith(expect.anything(), [30]);
+      expect(mockNotifyPatientProximity).toHaveBeenCalledWith(expect.anything(), [15]);
     });
   });
 });

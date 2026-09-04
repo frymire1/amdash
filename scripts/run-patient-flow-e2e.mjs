@@ -84,6 +84,21 @@ async function seed(db) {
   // doesn't match it is filtered out of the default view entirely (a real
   // one found live during this session's own manual testing, not a
   // hypothetical).
+  //
+  // etaAlertThresholdsMinutes pre-seeded the same way, rather than driven
+  // through Settings' own checkbox + Enable button in the test itself —
+  // Enable needs a real FCM permission + token round trip, which Patrol's
+  // bundled Playwright Chromium cannot complete for real (confirmed:
+  // Chrome's own "AbortError: Registration failed - permission denied" on
+  // service-worker registration, consistent with a known Playwright/
+  // Chromium limitation around push registration — see
+  // incoming_patient_test.dart's own comment for the full story). What
+  // this test verifies instead is the *read* half — that this real,
+  // pre-seeded Firestore value correctly reaches and checks the right box
+  // — via a genuine cross-process round trip; the write half (Enable
+  // persisting a fresh selection) has full widget-test coverage instead
+  // (user_settings_screen_test.dart), with PatientAlertService mocked out
+  // so it doesn't depend on real browser push-registration support at all.
   await db.doc(`users/${physicianUser.uid}`).set(
     {
       email: physicianEmail,
@@ -92,6 +107,7 @@ async function seed(db) {
       firstName: 'Smoke',
       lastName: 'Physician',
       workLocation: HOSPITAL_NAME,
+      etaAlertThresholdsMinutes: [30],
     },
     { merge: true },
   );
@@ -103,29 +119,23 @@ async function seed(db) {
   };
 }
 
-// incoming_patient_test.dart's own final phase checks the "1 hour away"
-// proximity-alert threshold box and hits Enable — this confirms the real
-// UI persisted that selection. The resulting patients/{id}/location/
-// current.notifiedThresholds write (proof the real onEmsLocationEvent
-// detection pipeline — functions/src/ems.ts's checkProximityAlertThresholds
-// — actually fired for this live-tracked patient, not just that the
-// checkbox saved) isn't tied to physician's own test timing at all: it's
-// driven entirely by EMS's own location-publish ticks during *its* test
-// run (a Cloud Function trigger, not something physician's separate
-// process could influence either way), and the seeded GPS-fix/hospital
-// pair is close enough that the 60-minute threshold is essentially
-// guaranteed to have already been crossed by the time this runs. Polls
-// briefly regardless, purely as a safety margin against Cloud Functions
-// cold-start latency, not because anything is expected to still be
-// in-flight.
-async function verifyEtaAlertThreshold(db, physicianUid) {
-  const userSnap = await db.doc(`users/${physicianUid}`).get();
-  const thresholds = userSnap.data()?.etaAlertThresholdsMinutes ?? [];
-  if (!thresholds.includes(60)) {
-    throw new Error(`Expected users/${physicianUid}.etaAlertThresholdsMinutes to contain 60, got ${JSON.stringify(thresholds)}.`);
-  }
-  console.log('✅ Confirmed the physician\'s 60-minute proximity-alert threshold was saved.');
-
+// Verifies the real backend detection pipeline — functions/src/ems.ts's
+// checkProximityAlertThresholds — actually fired for this live-tracked
+// patient. The checkbox/preference side is verified separately, inside
+// incoming_patient_test.dart itself (a real Firestore read confirming the
+// pre-seeded etaAlertThresholdsMinutes correctly checks the right box —
+// see seed()'s own comment above for why this doesn't go through the
+// real Enable button). This check isn't tied to physician's own test
+// timing at all: it's driven entirely by EMS's own location-publish ticks
+// during *its* test run (a Cloud Function trigger, not something
+// physician's separate process could influence either way), and the
+// seeded GPS-fix/hospital pair is close enough that the 30-minute
+// threshold (the largest one that exists — see ems.ts's
+// PROXIMITY_THRESHOLDS_MINUTES) is essentially guaranteed to have already
+// been crossed by the time this runs. Polls briefly regardless, purely as
+// a safety margin against Cloud Functions cold-start latency, not because
+// anything is expected to still be in-flight.
+async function verifyEtaAlertThreshold(db) {
   const patientSnap = await db.collection('patients').where('destination', '==', HOSPITAL_NAME).limit(1).get();
   if (patientSnap.empty) {
     throw new Error(`No patient found with destination "${HOSPITAL_NAME}" to check notifiedThresholds on.`);
@@ -137,14 +147,14 @@ async function verifyEtaAlertThreshold(db, physicianUid) {
   while (Date.now() < deadline) {
     const locationSnap = await locationRef.get();
     notifiedThresholds = locationSnap.data()?.notifiedThresholds ?? [];
-    if (notifiedThresholds.includes(60)) {
-      console.log('✅ Confirmed the real onEmsLocationEvent proximity-check pipeline recorded the 60-minute crossing.');
+    if (notifiedThresholds.includes(30)) {
+      console.log('✅ Confirmed the real onEmsLocationEvent proximity-check pipeline recorded the 30-minute crossing.');
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 3_000));
   }
   throw new Error(
-    `Expected patients/${patientSnap.docs[0].id}/location/current.notifiedThresholds to contain 60, got ${JSON.stringify(notifiedThresholds)}.`,
+    `Expected patients/${patientSnap.docs[0].id}/location/current.notifiedThresholds to contain 30, got ${JSON.stringify(notifiedThresholds)}.`,
   );
 }
 
@@ -283,17 +293,11 @@ try {
         SMOKE_LATITUDE: String(GPS_LATITUDE),
         SMOKE_LONGITUDE: String(GPS_LONGITUDE),
       },
-      // Granted so the test's own real notification-permission request
-      // (arming proximity alerts) resolves immediately instead of hanging
-      // on an unresolved browser prompt — same reasoning as EMS's own
-      // geolocation grant above. First real e2e exercise of this
-      // permission anywhere in the suite.
-      webPermissions: ['notifications'],
     });
 
     if (exitCode === 0) {
       try {
-        await verifyEtaAlertThreshold(db, seeded.physician.uid);
+        await verifyEtaAlertThreshold(db);
       } catch (error) {
         console.error(error.message);
         exitCode = 1;

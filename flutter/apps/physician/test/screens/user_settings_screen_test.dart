@@ -356,14 +356,14 @@ void main() {
 
     testWidgets('checking a threshold box and enabling passes the selected thresholds', (tester) async {
       when(
-        () => patientAlertService.enableAlerts('uid-1', 4, etaAlertThresholdsMinutes: const [60, 15]),
+        () => patientAlertService.enableAlerts('uid-1', 4, etaAlertThresholdsMinutes: const [30, 15]),
       ).thenAnswer((_) async => const EnableAlertsResult(granted: true));
 
       await pumpScreen(tester);
       await tester.pumpAndSettle();
 
-      await tester.ensureVisible(find.byKey(const Key('eta_threshold_60')));
-      await tester.tap(find.byKey(const Key('eta_threshold_60')));
+      await tester.ensureVisible(find.byKey(const Key('eta_threshold_30')));
+      await tester.tap(find.byKey(const Key('eta_threshold_30')));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.byKey(const Key('eta_threshold_15')));
       await tester.tap(find.byKey(const Key('eta_threshold_15')));
@@ -373,7 +373,7 @@ void main() {
       await tester.tap(find.text('Enable'));
       await tester.pumpAndSettle();
 
-      verify(() => patientAlertService.enableAlerts('uid-1', 4, etaAlertThresholdsMinutes: const [60, 15])).called(1);
+      verify(() => patientAlertService.enableAlerts('uid-1', 4, etaAlertThresholdsMinutes: const [30, 15])).called(1);
     });
 
     testWidgets('unchecking a previously-checked threshold box removes it', (tester) async {
@@ -412,10 +412,10 @@ void main() {
 
       final thirtyCheckbox = tester.widget<CheckboxListTile>(find.byKey(const Key('eta_threshold_30')));
       final fiveCheckbox = tester.widget<CheckboxListTile>(find.byKey(const Key('eta_threshold_5')));
-      final sixtyCheckbox = tester.widget<CheckboxListTile>(find.byKey(const Key('eta_threshold_60')));
+      final fifteenCheckbox = tester.widget<CheckboxListTile>(find.byKey(const Key('eta_threshold_15')));
       expect(thirtyCheckbox.value, true);
       expect(fiveCheckbox.value, true);
-      expect(sixtyCheckbox.value, false);
+      expect(fifteenCheckbox.value, false);
     });
 
     testWidgets('disabling calls the service and never surfaces a failure', (tester) async {

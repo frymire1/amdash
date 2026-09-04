@@ -339,13 +339,13 @@ class _UserSettingsScreenState extends ConsumerState<UserSettingsScreen> {
                         ),
                         const SizedBox(height: 12),
                         const Text('Also notify me when a patient is:'),
-                        for (final threshold in const [60, 30, 15, 5])
+                        for (final threshold in const [30, 15, 5])
                           CheckboxListTile(
                             key: Key('eta_threshold_$threshold'),
                             dense: true,
                             contentPadding: EdgeInsets.zero,
                             controlAffinity: ListTileControlAffinity.leading,
-                            title: Text(threshold == 60 ? '1 hour away' : '$threshold minutes away'),
+                            title: Text('$threshold minutes away'),
                             value: _selectedEtaThresholds.contains(threshold),
                             onChanged: (checked) => setState(() {
                               if (checked ?? false) {

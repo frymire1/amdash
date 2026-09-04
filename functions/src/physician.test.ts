@@ -242,11 +242,11 @@ describe('notifyPatientProximity', () => {
     });
     mockSendEachForMulticast.mockResolvedValue({ failureCount: 0, responses: [{ success: true }] });
 
-    await notifyPatientProximity(patient, [60, 30]);
+    await notifyPatientProximity(patient, [30, 15]);
 
     expect(mockSendEachForMulticast).toHaveBeenCalledWith({
       tokens: ['token-1'],
-      data: { title: 'Patient approaching', body: '42, Male is about 30 minutes away.' },
+      data: { title: 'Patient approaching', body: '42, Male is about 15 minutes away.' },
     });
   });
 
