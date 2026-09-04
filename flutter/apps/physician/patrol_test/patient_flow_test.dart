@@ -18,6 +18,7 @@
 // see that package for the full rationale/history behind each one.
 import 'package:amdash_patrol_helpers/amdash_patrol_helpers.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -166,52 +167,62 @@ void main() {
       );
 
       // ---- Patient-arrival proximity alerts: drive the *real* Enable
-      // button, on Android. ----
+      // button, on Android only. ----
       //
-      // incoming_patient_test.dart's own web counterpart only verifies the
-      // read/prefill half of this feature — Patrol's bundled Playwright
-      // Chromium can't complete a real FCM push registration (confirmed:
-      // a first attempt at driving the real Enable button there failed
-      // with `debugLastEnableAlertsError` reporting `AbortError:
-      // Registration failed - permission denied`, a known Playwright/
-      // Chromium push-registration limitation, not an app bug — see that
-      // file's own comment). Android Test Lab's device runs real Google
-      // Play Services, so the real requestPermission() -> getToken()
-      // round trip can complete for real here — this phase exists
-      // specifically to prove that production path actually works
-      // somewhere in this suite, not just that the checkbox persists.
+      // This same file also runs on Chrome — scripts/
+      // run-physician-patrol-test.mjs's own self-contained (no --seed-
+      // only/--android) mode defaults to `device: 'chrome'` and targets
+      // this exact file, alongside the separate `patrol build android` +
+      // Test Lab job (see ci.yml's flutter-android-e2e-physician). A
+      // first version of this phase ran unconditionally and broke that
+      // Chrome job for the same reason incoming_patient_test.dart's own
+      // web counterpart never drives this button either: Patrol's bundled
+      // Playwright Chromium can't complete a real FCM push registration
+      // (confirmed for real, twice now: `debugLastEnableAlertsError`
+      // reporting `AbortError: Registration failed - permission denied`,
+      // a known Playwright/Chromium push-registration limitation, not an
+      // app bug — see incoming_patient_test.dart's own comment). Android
+      // Test Lab's device runs real Google Play Services, so the real
+      // requestPermission() -> getToken() round trip can complete for
+      // real there — gating on kIsWeb (true only for the Chrome job) is
+      // what lets this phase exist at all without breaking that sibling
+      // job, and is the whole reason this phase is worth having: proving
+      // the production FCM path actually works somewhere in this suite,
+      // not just that the checkbox persists.
       //
       // Unlike incoming_patient_test.dart's account (pre-seeded with
       // etaAlertThresholdsMinutes: [30] by run-patient-flow-e2e.mjs), this
       // one (scripts/run-physician-patrol-test.mjs) seeds no alert
       // preferences at all — the checkbox starts unchecked, so this
       // actually checks it rather than just confirming a prefill.
-      await tapFinder($, find.byTooltip('Account'));
-      await pumpUntil($, () => find.text('Settings').evaluate().isNotEmpty);
-      await tapText($, 'Settings');
-      await pumpUntil(
-        $,
-        () => find.byType(UserSettingsScreen).evaluate().isNotEmpty,
-      );
+      if (!kIsWeb) {
+        await tapFinder($, find.byTooltip('Account'));
+        await pumpUntil($, () => find.text('Settings').evaluate().isNotEmpty);
+        await tapText($, 'Settings');
+        await pumpUntil(
+          $,
+          () => find.byType(UserSettingsScreen).evaluate().isNotEmpty,
+        );
 
-      final thirtyMinuteBox = find.byKey(const Key('eta_threshold_30'));
-      await pumpUntil($, () => thirtyMinuteBox.evaluate().isNotEmpty);
-      await tapFinder($, thirtyMinuteBox);
+        final thirtyMinuteBox = find.byKey(const Key('eta_threshold_30'));
+        await pumpUntil($, () => thirtyMinuteBox.evaluate().isNotEmpty);
+        await tapFinder($, thirtyMinuteBox);
 
-      await tapText($, 'Enable');
-      await pumpUntil(
-        $,
-        () => find.textContaining('Alerts armed until').evaluate().isNotEmpty,
-        maxIterations: 60,
-      );
-      expect(
-        find.textContaining('Alerts armed until'),
-        findsOneWidget,
-        reason:
-            'the real Enable button, permission grant, and FCM getToken() round trip should all '
-            'succeed on Android (unlike Patrol\'s Playwright-backed web runner) — '
-            'debugLastEnableAlertsError: $debugLastEnableAlertsError',
-      );
+        await tapText($, 'Enable');
+        await pumpUntil(
+          $,
+          () => find.textContaining('Alerts armed until').evaluate().isNotEmpty,
+          maxIterations: 60,
+        );
+        expect(
+          find.textContaining('Alerts armed until'),
+          findsOneWidget,
+          reason:
+              'the real Enable button, permission grant, and FCM getToken() round trip should all '
+              'succeed on Android (unlike Patrol\'s Playwright-backed web runner) — '
+              'debugLastEnableAlertsError: $debugLastEnableAlertsError',
+        );
+      }
     },
   );
 }
