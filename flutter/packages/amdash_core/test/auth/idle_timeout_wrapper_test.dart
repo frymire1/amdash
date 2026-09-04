@@ -2,6 +2,7 @@ import 'package:amdash_core/amdash_core.dart';
 import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
@@ -179,6 +180,40 @@ void main() {
       setNow(now().add(idleTimeoutDuration ~/ 2));
       await tester.pump(idleTimeoutDuration ~/ 2);
       verifyNever(() => authService.signOut());
+    });
+  });
+
+  testWidgets('externalActivityProvider.register() resets the idle clock like a real pointer/keyboard event', (
+    tester,
+  ) async {
+    await withFakeClock(DateTime(2024, 1, 1, 12), (now, setNow) async {
+      await pumpApp(
+        tester,
+        const IdleTimeoutWrapper(child: SizedBox(key: Key('child'), width: 100, height: 100)),
+        overrides: [authServiceProvider.overrideWithValue(authService)],
+      );
+      await tester.pump();
+
+      final container = ProviderScope.containerOf(tester.element(find.byType(IdleTimeoutWrapper)));
+
+      // Halfway through the window: register activity via the provider
+      // hook instead of a real tap — this is exactly what
+      // ems_tracking_service.dart's own successful-publish path calls.
+      setNow(now().add(idleTimeoutDuration ~/ 2));
+      await tester.pump(idleTimeoutDuration ~/ 2);
+      container.read(externalActivityProvider.notifier).register();
+
+      // The remaining half of the *original* schedule must not sign out —
+      // proves the hook actually reset _lastActivity, the same as a real
+      // pointer/keyboard event would.
+      setNow(now().add(idleTimeoutDuration ~/ 2));
+      await tester.pump(idleTimeoutDuration ~/ 2);
+      verifyNever(() => authService.signOut());
+
+      // From the reset point, a full fresh timeout does eventually sign out.
+      setNow(now().add(idleTimeoutDuration));
+      await tester.pump(idleTimeoutDuration);
+      verify(() => authService.signOut()).called(1);
     });
   });
 

@@ -14,6 +14,31 @@ import 'auth_service.dart';
 /// different number per app.
 const idleTimeoutDuration = Duration(minutes: 15);
 
+/// Lets app-specific code register a real activity signal that isn't a
+/// pointer/keyboard event, without `amdash_core` needing to know what any
+/// given app considers "not idle" — e.g. EMS's own live GPS publish loop
+/// (see `ems`'s `ems_tracking_service.dart`) isn't a pointer/keyboard
+/// event, but a device actively transmitting a patient's live position is
+/// not idle by any reasonable definition, regardless of this widget's own
+/// default pointer/keyboard-only tracking. Call
+/// `ref.read(externalActivityProvider.notifier).register()` from anywhere
+/// in the widget tree below an `IdleTimeoutWrapper`; it listens for this
+/// below and treats it exactly like a real pointer/keyboard event.
+///
+/// The stored `int` itself is meaningless (an incrementing counter, not a
+/// timestamp) — `IdleTimeoutWrapper` always re-stamps `_lastActivity` with
+/// its own `clock.now()` the moment it's notified; this only exists to
+/// make `ref.listen` fire on every call, including two calls made within
+/// the same millisecond.
+class ExternalActivityNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void register() => state++;
+}
+
+final externalActivityProvider = NotifierProvider<ExternalActivityNotifier, int>(ExternalActivityNotifier.new);
+
 /// Signs the user out after [idleTimeoutDuration] of no pointer/keyboard
 /// activity — a workstation or device left unattended while still signed
 /// in is a real PHI exposure. Wrapped around the whole app (via
@@ -101,6 +126,12 @@ class _IdleTimeoutWrapperState extends ConsumerState<IdleTimeoutWrapper> with Wi
 
   @override
   Widget build(BuildContext context) {
+    // externalActivityProvider — see its own doc comment. Only a *change*
+    // fires this (fireImmediately defaults to false), which is correct
+    // here: the initial build already seeds _lastActivity via its field
+    // initializer above, so there's nothing to "catch up" on mount.
+    ref.listen<int>(externalActivityProvider, (_, _) => _registerActivity());
+
     return Listener(
       behavior: HitTestBehavior.translucent,
       onPointerDown: _registerActivity,

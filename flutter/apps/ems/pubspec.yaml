@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+23
+version: 1.0.0+24
 
 environment:
   sdk: ^3.12.2
@@ -51,6 +51,13 @@ dependencies:
   connectivity_plus: ">=7.0.0 <7.1.0"
   intl: ^0.20.2
   firebase_app_check: ^0.4.7
+  # ems_alert_service.dart's connectivity-loss push registration — see
+  # physician/pubspec.yaml's identical entry.
+  firebase_messaging: ^16.0.4
+  web: ^1.1.0
+  # battery_watch_service.dart's low-battery warning — purely client-side,
+  # no server round trip (see that file's own doc comment).
+  battery_plus: ^7.1.1
 
 dev_dependencies:
   flutter_test:
@@ -87,6 +94,9 @@ dev_dependencies:
   # platform channels, which don't exist in a plain `flutter test` run).
   plugin_platform_interface: ^2.1.8
   geolocator_platform_interface: ^4.2.8
+  # battery_watch_service_test.dart's own MockPlatformInterfaceMixin fake —
+  # same pattern as geolocator_platform_interface just above.
+  battery_plus_platform_interface: ^2.0.1
   # Widget-testing only (Stage C1) — already a transitive dependency (via
   # amdash_core), pinned directly here since flutter_test_config.dart
   # imports it directly for the GoogleFonts.allowRuntimeFetching guard
@@ -94,6 +104,11 @@ dev_dependencies:
   # test/support/pump_app.dart can import it directly without any change
   # here.
   google_fonts: ^6.2.1
+  # battery_watch_service_test.dart's own recharge test — deterministically
+  # advances BatteryWatchController's real Timer.periodic poll without
+  # waiting out real wall-clock time (plain `test()`, not `testWidgets()`,
+  # so there's no flutter_test fake-async binding already doing this).
+  fake_async: ^1.3.3
 
 # Read by patrol_cli — package_name feeds the PATROL_APP_PACKAGE_NAME
 # dart-define and `patrol test`'s own instrumentation-component

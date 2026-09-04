@@ -1,12 +1,26 @@
 import 'package:amdash_core/amdash_core.dart';
 import 'package:ems/classes/uploaded_patient.dart';
 import 'package:ems/screens/patient_viewer_screen.dart';
+import 'package:ems/services/battery_watch_service.dart';
 import 'package:ems/services/patient_session_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/pump_app.dart';
+
+// This screen doesn't otherwise touch tracking at all (unlike
+// patient_upload_screen.dart/home_screen.dart, which already fake out
+// emsTrackingProvider directly) — BatteryWarningBanner's own
+// batteryWatchProvider transitively reads emsTrackingProvider, which would
+// otherwise hit a real, un-mocked FirebaseFunctions.instanceFor(...) and
+// throw [core/no-app]. Faking batteryWatchProvider itself directly (rather
+// than emsTrackingProvider) keeps this screen's own tests decoupled from a
+// dependency they have no other reason to know about.
+class _FakeBatteryWatchController extends BatteryWatchController {
+  @override
+  bool build() => false;
+}
 
 const _fullPatient = Patient(
   id: 'patient-1',
@@ -31,6 +45,7 @@ void main() {
       overrides: [
         uploadedPatientsProvider.overrideWithValue(patients),
         isOfflineProvider.overrideWithValue(isOffline),
+        batteryWatchProvider.overrideWith(_FakeBatteryWatchController.new),
       ],
       routes: {'/patient/patient-1': (_) => const PatientViewerScreen(patientId: 'patient-1')},
       initialLocation: '/patient/patient-1',

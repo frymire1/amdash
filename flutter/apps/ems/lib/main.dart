@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'firebase_options.dart';
 import 'router.dart';
+import 'web/service_worker_registration.dart';
 
 // Empty string (the default when no --dart-define is passed) means "let the
 // SDK auto-generate/print a debug token on first run" — only CI's Patrol
@@ -48,6 +49,12 @@ Future<void> main() async {
   if (!kIsWeb) {
     FlutterForegroundTask.initCommunicationPort();
   }
+
+  // Required for background push delivery on web (and PWA installability —
+  // Chrome requires a controlling service worker with a fetch handler
+  // before offering "Install AmDash"). No-op on non-web platforms. See
+  // ems_alert_service.dart for what actually registers a token with it.
+  registerFirebaseMessagingServiceWorker();
 
   runApp(const ProviderScope(child: EmsApp()));
 }

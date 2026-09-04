@@ -9,6 +9,7 @@ import '../classes/uploaded_patient.dart';
 import '../services/ems_tracking_service.dart';
 import '../services/patient_session_service.dart';
 import '../services/patient_upload_service.dart';
+import '../widgets/battery_warning_banner.dart';
 import '../widgets/location_tracking_section.dart';
 
 // Standard peripheral IV catheter gauges, largest (trauma) to smallest
@@ -385,6 +386,7 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     return Column(
       children: [
         const OfflineBanner(),
+        const BatteryWarningBanner(),
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),

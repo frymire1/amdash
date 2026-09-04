@@ -18,9 +18,12 @@
 // amdash_patrol_helpers, shared across every app's patrol_test/ suite —
 // see that package for the full rationale/history behind each one.
 import 'package:amdash_patrol_helpers/amdash_patrol_helpers.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:ems/firebase_options.dart';
 import 'package:ems/main.dart';
 import 'package:ems/screens/home_screen.dart';
+import 'package:ems/services/ems_alert_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -74,6 +77,48 @@ void main() {
         find.byType(HomeScreen),
         findsOneWidget,
         reason: 'should land on the home screen after first sign-in',
+      );
+
+      // ---- Connectivity-alert push registration: verify a real FCM
+      // token round trip. ----
+      //
+      // HomeScreen's own registerForConnectivityAlerts call (see
+      // ems_alert_service.dart) fires once, unprompted, right on this
+      // mount — fire-and-forget, so debugLastRegisterForConnectivityAlertsFinished
+      // (a same-process, same-isolate debug flag — the same pattern
+      // amdash_core's own debugLastExportResult/Error already uses, and
+      // that ems_test.dart already reads directly) is what lets this wait
+      // for the real requestPermission -> getToken -> Firestore-write
+      // chain to actually finish, rather than racing it. This is the
+      // whole point of retrofitting this phase onto Android specifically:
+      // Test Lab's device runs genuine Google Play Services, so this can
+      // complete for real here — unlike Patrol's Playwright-backed web
+      // runner (see patient_flow_test.dart's identical rationale for its
+      // own Enable-button phase).
+      await pumpUntil(
+        $,
+        () => debugLastRegisterForConnectivityAlertsFinished,
+        maxIterations: 60,
+      );
+      expect(
+        debugLastRegisterForConnectivityAlertsError,
+        isNull,
+        reason:
+            'registerForConnectivityAlerts should succeed for real on a Test Lab device — '
+            'debugLastRegisterForConnectivityAlertsError: $debugLastRegisterForConnectivityAlertsError',
+      );
+
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      expect(uid, isNotNull, reason: 'should be signed in by this point');
+      // A signed-in user can read their own users/{uid} doc directly
+      // (firestore.rules: `allow get: if ... request.auth.uid == userId`)
+      // — no Admin SDK round trip needed to confirm this.
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final fcmTokens = userDoc.data()?['fcmTokens'];
+      expect(
+        fcmTokens is List && fcmTokens.isNotEmpty,
+        true,
+        reason: 'a real FCM token should have landed in users/$uid.fcmTokens, found: $fcmTokens',
       );
     },
   );

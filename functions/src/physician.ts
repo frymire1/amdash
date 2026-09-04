@@ -71,19 +71,32 @@ export function isUnregisteredError(error: { code?: string } | undefined): boole
   return error?.code === 'messaging/registration-token-not-registered';
 }
 
-// Shared by every physician-facing push alert this app sends — sends one
-// multicast to every token across every matching user doc, then prunes
-// whichever individual tokens FCM reports as permanently dead
+// Structural subset of FirebaseFirestore.QueryDocumentSnapshot that
+// sendAlertPush actually needs — just enough to read fcmTokens and write
+// back to the same doc. A real query's own `.docs` (QueryDocumentSnapshot[])
+// already satisfies this with no cast; ems.ts's notifyEmsConnectivityLoss
+// (a single doc from `.doc(uid).get()`, not a query result — its own
+// DocumentSnapshot has an optional `data()`, so it isn't a
+// QueryDocumentSnapshot) satisfies it too, by wrapping in a one-line
+// object literal instead of needing a whole fake QuerySnapshot.
+interface AlertRecipientDoc {
+  ref: FirebaseFirestore.DocumentReference;
+  data(): FirebaseFirestore.DocumentData;
+}
+
+// Shared by every push alert this app sends, physician- or EMS-facing —
+// sends one multicast to every token across every given user doc, then
+// prunes whichever individual tokens FCM reports as permanently dead
 // (unregistered/invalid) from their owning doc, so they don't keep
 // silently failing on every future alert. Extracted from the old
 // sendNewPatientAlerts (now deleted — see notifyPatientProximity below,
 // its replacement) so this logic has exactly one copy.
 export async function sendAlertPush(
-  matchingUsers: FirebaseFirestore.QuerySnapshot,
+  userDocs: AlertRecipientDoc[],
   title: string,
   body: string,
 ): Promise<void> {
-  const tokensByUser = matchingUsers.docs.map((userDoc) => ({
+  const tokensByUser = userDocs.map((userDoc) => ({
     ref: userDoc.ref,
     tokens: (userDoc.data()['fcmTokens'] as string[] | undefined) ?? [],
   }));
@@ -161,5 +174,5 @@ export async function notifyPatientProximity(
   const mostUrgentMinutes = Math.min(...crossedThresholdsMinutes);
   const body = `${demographicText(patient['age'], patient['gender'])} is about ${mostUrgentMinutes} minutes away.`;
 
-  await sendAlertPush(matching, 'Patient approaching', body);
+  await sendAlertPush(matching.docs, 'Patient approaching', body);
 }

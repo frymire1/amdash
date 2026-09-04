@@ -508,8 +508,8 @@ this repo grouped by caller, which produced a confusingly-named
 | Package | Gated in CI? | Threshold | Real coverage today |
 |---|---|---|---|
 | `functions/` | Yes (vitest self-enforces) | 100% per metric | 100%/100%/100%/100% (stmts/branch/funcs/lines) |
-| `amdash_core` | Yes (`very_good_coverage`) | 95% | 97.49% (1517/1556 lines) |
-| `ems` | Yes (`very_good_coverage`) | 98% | 98.76% (877/888 lines) |
+| `amdash_core` | Yes (`very_good_coverage`) | 95% | 97.50% (1558/1598 lines) |
+| `ems` | Yes (`very_good_coverage`) | 98% | 98.72% (928/940 lines) |
 | `physician` | Yes (`very_good_coverage`) | 100% | 100.00% (595/595 lines) |
 | `admin` | Yes (`very_good_coverage`) | 95% | 97.40% (1122/1152 lines) |
 

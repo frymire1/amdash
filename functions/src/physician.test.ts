@@ -171,19 +171,19 @@ describe('isUnregisteredError', () => {
 
 describe('sendAlertPush', () => {
   it('is a no-op when no matching user has an FCM token registered', async () => {
-    await sendAlertPush({ docs: [{ ref: {}, data: () => ({ fcmTokens: [] }) }] } as never, 'Title', 'Body');
+    await sendAlertPush([{ ref: {}, data: () => ({ fcmTokens: [] }) }] as never, 'Title', 'Body');
     expect(mockSendEachForMulticast).not.toHaveBeenCalled();
   });
 
   it('is also a no-op when a matching user doc has no fcmTokens field at all', async () => {
-    await sendAlertPush({ docs: [{ ref: {}, data: () => ({}) }] } as never, 'Title', 'Body');
+    await sendAlertPush([{ ref: {}, data: () => ({}) }] as never, 'Title', 'Body');
     expect(mockSendEachForMulticast).not.toHaveBeenCalled();
   });
 
   it('sends one multicast across every matching token', async () => {
     mockSendEachForMulticast.mockResolvedValue({ failureCount: 0, responses: [{ success: true }] });
 
-    await sendAlertPush({ docs: [{ ref: {}, data: () => ({ fcmTokens: ['token-1'] }) }] } as never, 'Title', 'Body');
+    await sendAlertPush([{ ref: {}, data: () => ({ fcmTokens: ['token-1'] }) }] as never, 'Title', 'Body');
 
     expect(mockSendEachForMulticast).toHaveBeenCalledWith({ tokens: ['token-1'], data: { title: 'Title', body: 'Body' } });
   });
@@ -199,7 +199,7 @@ describe('sendAlertPush', () => {
     });
 
     await sendAlertPush(
-      { docs: [{ ref: userRef, data: () => ({ fcmTokens: ['dead-token', 'live-token'] }) }] } as never,
+      [{ ref: userRef, data: () => ({ fcmTokens: ['dead-token', 'live-token'] }) }] as never,
       'Title',
       'Body',
     );
@@ -214,7 +214,7 @@ describe('sendAlertPush', () => {
       responses: [{ success: false, error: { code: 'messaging/internal-error' } }],
     });
 
-    await sendAlertPush({ docs: [{ ref: userRef, data: () => ({ fcmTokens: ['token-1'] }) }] } as never, 'Title', 'Body');
+    await sendAlertPush([{ ref: userRef, data: () => ({ fcmTokens: ['token-1'] }) }] as never, 'Title', 'Body');
 
     expect(userRef.update).not.toHaveBeenCalled();
   });

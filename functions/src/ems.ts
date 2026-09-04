@@ -1,6 +1,7 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onDocumentDeleted } from 'firebase-functions/v2/firestore';
 import { onMessagePublished } from 'firebase-functions/v2/pubsub';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { logger } from 'firebase-functions/v2';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { PubSub } from '@google-cloud/pubsub';
@@ -10,7 +11,7 @@ import { PublishLocationRequest } from './classes/publish-location-request';
 import { StopLocationRequest } from './classes/stop-location-request';
 import { REGION, getCallerProfile } from './auth';
 import { DIRECTIONS_API_KEY, callDirectionsApi, haversineDistanceKm, resolveDestinationHospitalLatLng } from './directions';
-import { notifyPatientProximity } from './physician';
+import { notifyPatientProximity, sendAlertPush } from './physician';
 import { patientLocationRef } from './patient-data';
 
 const LOCATION_TOPIC = 'ems-location-updates';
@@ -95,9 +96,23 @@ export const onEmsLocationEvent = onMessagePublished(
     if (hasFix) {
       update['latitude'] = data.latitude;
       update['longitude'] = data.longitude;
+      // A fresh fix proves connectivity is back — clears whatever
+      // checkEmsConnectivity may have stamped during a prior silence
+      // episode, so a *future* loss can alert again instead of staying
+      // permanently suppressed by a stale flag.
+      update['connectivityAlertSentAt'] = FieldValue.delete();
     }
 
     await patientLocationRef(data.patientId).set(update, { merge: true });
+
+    if (data.active === false) {
+      // stopEmsLocation is the only sender of active: false
+      // (publishEmsLocation always sends true) — an unambiguous, deliberate
+      // opt-out mid-transport, not a side effect of a missed tick, so this
+      // can notify immediately rather than waiting on checkEmsConnectivity's
+      // staleness polling below.
+      await notifyEmsConnectivityLoss(data.patientId, 'stopped_sharing');
+    }
 
     // Proximity-alert threshold check — only meaningful for an active,
     // freshly-positioned patient. A patient EMS never enables live
@@ -110,6 +125,40 @@ export const onEmsLocationEvent = onMessagePublished(
     }
   },
 );
+
+// Shared by the two connectivity-loss detectors below (explicit opt-out
+// above, silent-failure detection in checkEmsConnectivity further down) —
+// finds the EMS provider's own account (patients/{id}'s own createdBy, the
+// same uid resolveActor already resolves for audit entries — see
+// patient-data.ts) and sends them a push. Always exactly one recipient,
+// unlike physician.ts's notifyPatientProximity (which fans out to a whole
+// query of matching physicians) — exactly one EMS account ever created a
+// given patient. Deliberately PHI-free, like every other alert this
+// codebase sends over FCM (not a HIPAA-covered product) — the reason alone
+// is specific enough to be actionable without naming a patient.
+async function notifyEmsConnectivityLoss(patientId: string, reason: 'signal_lost' | 'stopped_sharing'): Promise<void> {
+  const patientSnapshot = await getFirestore().collection('patients').doc(patientId).get();
+  const emsUid = patientSnapshot.data()?.['createdBy'];
+  if (typeof emsUid !== 'string') {
+    return;
+  }
+
+  const userSnapshot = await getFirestore().collection('users').doc(emsUid).get();
+  if (!userSnapshot.exists) {
+    return;
+  }
+
+  const body =
+    reason === 'stopped_sharing'
+      ? 'Location sharing was turned off for a patient still marked active.'
+      : "A tracked patient's location hasn't updated recently — check the device's signal and battery.";
+
+  await sendAlertPush(
+    [{ ref: userSnapshot.ref, data: () => userSnapshot.data() as FirebaseFirestore.DocumentData }],
+    'Tracking interrupted',
+    body,
+  );
+}
 
 // At most one real ETA recheck per patient per minute — EMS's own GPS
 // publish cadence is ~15s (ems_tracking_service.dart's _updateInterval),
@@ -226,6 +275,62 @@ async function checkProximityAlertThresholds(patientId: string, latitude: number
     { merge: true },
   );
 }
+
+// How stale patients/{id}/location/current's updatedAt must be before this
+// counts as a real connectivity loss, not just a normal gap between GPS
+// ticks. ems_tracking_service.dart publishes roughly every 15s
+// (_updateInterval), and its own client-side EmsTrackingHealth chip already
+// flags staleness at 45s — this is set well past that (6x the normal
+// cadence) specifically so this server-side push never races or pre-empts
+// the in-app chip a paramedic might already be looking at; it only fires
+// once something has gone genuinely, sustainedly quiet.
+const CONNECTIVITY_STALE_MS = 90 * 1000;
+
+// Catches every silent-failure case onEmsLocationEvent's own event-driven
+// opt-out hook structurally can't: an app that's closed, killed, or has
+// lost signal never sends *any* event at all, so nothing there would ever
+// fire. Runs once a minute — far less often than GPS ticks themselves
+// (~15s) — since a real loss doesn't need sub-minute detection, keeping
+// the scheduled-function invocation count (and cost) low.
+//
+// region: 'northamerica-northeast1' (Montreal), not REGION
+// ('northamerica-northeast2'/Toronto) — Cloud Scheduler, which onSchedule
+// provisions under the hood, doesn't support Toronto (see
+// cleanupCompletedPatients in admin.ts for the same constraint).
+export const checkEmsConnectivity = onSchedule(
+  { schedule: 'every 1 minutes', region: 'northamerica-northeast1' },
+  async () => {
+    const activeSnapshot = await getFirestore().collection('patients').where('status', '==', 'active').get();
+
+    await Promise.all(
+      activeSnapshot.docs.map(async (patientDoc) => {
+        const locationSnapshot = await patientLocationRef(patientDoc.id).get();
+        const locationData = locationSnapshot.data();
+        if (!locationData) {
+          // No location subdocument at all yet — e.g. a patient created
+          // without an initial fix, tracking never actually started.
+          // Nothing to judge staleness against, and nothing was ever lost.
+          return;
+        }
+
+        // Already explicitly stopped (the opt-out hook above already
+        // handled that) or already alerted for this ongoing silence
+        // episode — either way, nothing new to do this tick.
+        if (locationData['active'] === false || locationData['connectivityAlertSentAt']) {
+          return;
+        }
+
+        const updatedAt = locationData['updatedAt'] as FirebaseFirestore.Timestamp | undefined;
+        if (!updatedAt || Date.now() - updatedAt.toMillis() < CONNECTIVITY_STALE_MS) {
+          return;
+        }
+
+        await notifyEmsConnectivityLoss(patientDoc.id, 'signal_lost');
+        await patientLocationRef(patientDoc.id).set({ connectivityAlertSentAt: FieldValue.serverTimestamp() }, { merge: true });
+      }),
+    );
+  },
+);
 
 // A patient doc's subcollections — location/current, vitalsHistory/* —
 // are only ever written by other Cloud Functions (firestore.rules blocks

@@ -104,6 +104,18 @@ class EmsTrackingController extends Notifier<Set<String>> {
 
   void _recordFix() => _lastFixMs = DateTime.now().millisecondsSinceEpoch;
 
+  // A device actively transmitting a patient's live GPS fix is not idle by
+  // any reasonable definition — registers this with amdash_core's
+  // externalActivityProvider (see idle_timeout_wrapper.dart) so
+  // IdleTimeoutWrapper's 15-minute pointer/keyboard-only idle timer doesn't
+  // sign a paramedic out mid-transport just because they haven't touched
+  // the screen. Called only after a *successful* publish (see both call
+  // sites below), never merely an attempt — a failing publish means
+  // tracking may already be broken, exactly the case checkEmsConnectivity
+  // (functions/src/ems.ts) exists to catch, not something this should mask
+  // by resetting the idle clock regardless.
+  void _registerIdleActivity() => ref.read(externalActivityProvider.notifier).register();
+
   void _onTaskData(Object data) {
     if (data == emsFixReportSignal) _recordFix();
   }
@@ -308,6 +320,7 @@ class EmsTrackingController extends Notifier<Set<String>> {
         'latitude': position.latitude,
         'longitude': position.longitude,
       });
+      _registerIdleActivity();
     } catch (_) {
       // Swallowed the same way the Android task handler's recurring
       // publishes are — a real failure surfaces via the confirming publish
@@ -381,6 +394,7 @@ class EmsTrackingController extends Notifier<Set<String>> {
       'latitude': position.latitude,
       'longitude': position.longitude,
     });
+    _registerIdleActivity();
   }
 
   Future<SharedPreferences> _prefsInstance() async {

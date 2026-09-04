@@ -66,6 +66,28 @@ void main() {
       expect(data?['etaAlertThresholdsMinutes'], [15, 5]);
     });
 
+    test('registerFcmToken unions a token without touching newPatientAlertsExpiresAt/'
+        'etaAlertThresholdsMinutes', () async {
+      final expiresAt = Timestamp.fromDate(DateTime(2026, 12, 31));
+      await firestore.collection('users').doc('uid-1').set({
+        'fcmTokens': ['existing-token'],
+        'newPatientAlertsExpiresAt': expiresAt,
+        'etaAlertThresholdsMinutes': [60],
+      });
+      await service.registerFcmToken('uid-1', 'ems-token');
+
+      final data = await readUser('uid-1');
+      expect(data?['fcmTokens'], containsAll(['existing-token', 'ems-token']));
+      expect(data?['newPatientAlertsExpiresAt'], expiresAt);
+      expect(data?['etaAlertThresholdsMinutes'], [60]);
+    });
+
+    test('registerFcmToken merge-creates the doc when none exists yet', () async {
+      await service.registerFcmToken('uid-2', 'ems-token');
+      final data = await readUser('uid-2');
+      expect(data?['fcmTokens'], ['ems-token']);
+    });
+
     test('disableNewPatientAlerts deletes the expiry field, leaving fcmTokens alone', () async {
       final expiresAt = Timestamp.fromDate(DateTime(2026, 12, 31));
       await firestore.collection('users').doc('uid-1').set({

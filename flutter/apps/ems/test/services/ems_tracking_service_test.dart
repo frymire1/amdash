@@ -352,6 +352,42 @@ void main() {
     });
   });
 
+  group('idle-timeout activity hook', () {
+    test("a successful publish registers activity with amdash_core's externalActivityProvider", () async {
+      when(() => geolocator.checkPermission()).thenAnswer((_) async => LocationPermission.always);
+      when(
+        () => geolocator.getCurrentPosition(locationSettings: any(named: 'locationSettings')),
+      ).thenAnswer((_) async => _position());
+      stubForegroundServiceLifecycle();
+      stubNotificationPermission(NotificationPermission.granted);
+
+      final container = containerFor();
+      final controller = container.read(emsTrackingProvider.notifier);
+      final before = container.read(externalActivityProvider);
+
+      await controller.startTracking('patient-1');
+
+      expect(container.read(externalActivityProvider), greaterThan(before));
+    });
+
+    test('a failed publish does not register activity — a broken publish should not mask itself '
+        'by resetting the idle clock', () async {
+      when(() => geolocator.checkPermission()).thenAnswer((_) async => LocationPermission.always);
+      when(
+        () => geolocator.getCurrentPosition(locationSettings: any(named: 'locationSettings')),
+      ).thenThrow(Exception('no fix available'));
+      stubNotificationPermission(NotificationPermission.granted);
+
+      final container = containerFor();
+      final controller = container.read(emsTrackingProvider.notifier);
+      final before = container.read(externalActivityProvider);
+
+      await expectLater(controller.startTracking('patient-1'), throwsA(isA<Exception>()));
+
+      expect(container.read(externalActivityProvider), before);
+    });
+  });
+
   group('stopTracking', () {
     test('deactivates even when the stopEmsLocation callable fails (fire-and-forget)', () async {
       when(() => geolocator.checkPermission()).thenAnswer((_) async => LocationPermission.always);
@@ -514,6 +550,8 @@ void main() {
       await controller.startTracking('patient-1');
       await controller.startTracking('patient-2');
 
+      final beforeStreamFix = container.read(externalActivityProvider);
+
       positionController.add(_position(latitude: 46, longitude: -76));
       await pumpEventQueue();
 
@@ -527,6 +565,11 @@ void main() {
           any(that: predicate<Map<Object?, Object?>>((m) => m['patientId'] == 'patient-2' && m['latitude'] == 46)),
         ),
       ).called(1);
+      // The stream-driven _publishPosition path registers idle activity
+      // too, not just _publishCurrentPosition's own confirming-publish path
+      // (already covered above) — both successful-publish call sites wire
+      // to the same hook.
+      expect(container.read(externalActivityProvider), greaterThan(beforeStreamFix));
     });
 
     test('throttles publishes within the same update interval, but lets a later one through', () async {

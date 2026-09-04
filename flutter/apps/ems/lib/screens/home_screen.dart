@@ -1,17 +1,49 @@
+import 'dart:async';
+
 import 'package:amdash_core/amdash_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../services/ems_alert_service.dart';
 import '../services/patient_session_service.dart';
+import '../widgets/battery_warning_banner.dart';
 import '../widgets/patient_summary_card.dart';
 
-/// Mirrors `home.component.ts`/`.html`.
-class HomeScreen extends ConsumerWidget {
+/// Mirrors `home.component.ts`/`.html`. A `ConsumerStatefulWidget`, not
+/// `ConsumerWidget` — needs `initState` as the "once per real
+/// HomeScreen mount" hook for connectivity-alert registration below,
+/// which a plain `build()` (re-run on every rebuild, not just mount)
+/// can't offer.
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Registers this device for EMS connectivity-loss push alerts
+    // (functions/src/ems.ts) once per HomeScreen mount — automatic, not an
+    // opt-in toggle (this is a safety net, not a preference; see
+    // ems_alert_service.dart's own doc comment). Fire-and-forget: a failed
+    // or dismissed permission prompt shouldn't block this screen's own
+    // first frame, and registerForConnectivityAlerts already swallows its
+    // own failures. valueOrNull?.uid is deliberately not asserted non-null
+    // — this screen is only ever reached once signed in (see the router's
+    // own guard chain), but a stray unauthenticated mount should silently
+    // skip registration rather than crash.
+    final uid = ref.read(authStateProvider).valueOrNull?.uid;
+    if (uid != null) {
+      unawaited(ref.read(emsAlertServiceProvider).registerForConnectivityAlerts(uid));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final uploadedPatients = ref.watch(uploadedPatientsProvider);
 
     // No Scaffold/NavBar of its own — this screen lives inside the app's
@@ -19,6 +51,7 @@ class HomeScreen extends ConsumerWidget {
     return Column(
       children: [
           const OfflineBanner(),
+          const BatteryWarningBanner(),
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),

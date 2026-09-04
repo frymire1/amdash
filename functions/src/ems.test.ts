@@ -17,7 +17,11 @@ const {
   mockHospitalsWhere2,
   mockHospitalsLimit,
   mockHospitalsGet,
+  mockPatientsWhere,
+  mockPatientsActiveGet,
+  mockUsersGet,
   mockNotifyPatientProximity,
+  mockSendAlertPush,
   mockLoggerError,
 } = vi.hoisted(() => {
   const mockPublishMessage = vi.fn();
@@ -30,11 +34,16 @@ const {
   const mockHospitalsWhere2 = vi.fn(() => ({ limit: mockHospitalsLimit }));
   const mockHospitalsWhere1 = vi.fn(() => ({ where: mockHospitalsWhere2 }));
 
+  const mockPatientsActiveGet = vi.fn();
+  const mockPatientsWhere = vi.fn(() => ({ get: mockPatientsActiveGet }));
+  const mockUsersGet = vi.fn();
+
   return {
     mockPatientGet,
     mockCollection: vi.fn((name: string) => {
-      if (name === 'patients') return { doc: (id: string) => ({ get: mockPatientGet, id }) };
+      if (name === 'patients') return { doc: (id: string) => ({ get: mockPatientGet, id }), where: mockPatientsWhere };
       if (name === 'hospitals') return { where: mockHospitalsWhere1 };
+      if (name === 'users') return { doc: (id: string) => ({ get: mockUsersGet, id, ref: `USER_REF_${id}` }) };
       throw new Error(`Unexpected collection in test: ${name}`);
     }),
     mockRecursiveDelete: vi.fn(),
@@ -48,7 +57,11 @@ const {
     mockHospitalsWhere2,
     mockHospitalsLimit,
     mockHospitalsGet,
+    mockPatientsWhere,
+    mockPatientsActiveGet,
+    mockUsersGet,
     mockNotifyPatientProximity: vi.fn(),
+    mockSendAlertPush: vi.fn(),
     mockLoggerError: vi.fn(),
   };
 });
@@ -64,6 +77,7 @@ vi.mock('firebase-admin/firestore', () => ({
   FieldValue: {
     serverTimestamp: () => 'SERVER_TIMESTAMP',
     arrayUnion: (...items: number[]) => ({ __arrayUnion: items }),
+    delete: () => 'FIELD_DELETED',
   },
 }));
 
@@ -86,9 +100,10 @@ vi.mock('./patient-data', () => ({
 
 vi.mock('./physician', () => ({
   notifyPatientProximity: mockNotifyPatientProximity,
+  sendAlertPush: mockSendAlertPush,
 }));
 
-import { onEmsLocationEvent, onPatientDeleted, publishEmsLocation, stopEmsLocation } from './ems';
+import { checkEmsConnectivity, onEmsLocationEvent, onPatientDeleted, publishEmsLocation, stopEmsLocation } from './ems';
 
 const EMS_PROFILE = { uid: 'ems-uid', email: 'ems@example.com', role: ['ems'], organizationId: 'org-1' };
 
@@ -127,6 +142,8 @@ beforeEach(() => {
   // organizationId/destination guard).
   mockLocationGet.mockResolvedValue({ data: () => undefined });
   mockPatientGet.mockResolvedValue({ data: () => undefined });
+  mockUsersGet.mockResolvedValue({ exists: false, data: () => undefined });
+  mockPatientsActiveGet.mockResolvedValue({ docs: [] });
 });
 
 describe('publishEmsLocation', () => {
@@ -237,12 +254,71 @@ describe('onEmsLocationEvent', () => {
     );
   });
 
+  it('clears connectivityAlertSentAt in the same merge when a real fix arrives', async () => {
+    await onEmsLocationEvent.run(activeLocationEvent());
+
+    expect(mockLocationSet).toHaveBeenCalledWith(
+      expect.objectContaining({ connectivityAlertSentAt: 'FIELD_DELETED' }),
+      { merge: true },
+    );
+  });
+
   it('does not run the proximity check when active but the event carries no fix', async () => {
     await onEmsLocationEvent.run({
       data: { message: { json: { patientId: 'p1', organizationId: 'org-1', active: true } } },
     } as never);
 
     expect(mockLocationGet).not.toHaveBeenCalled();
+  });
+
+  describe('explicit opt-out (active: false)', () => {
+    it('does nothing further when the patient has no (string) createdBy on record', async () => {
+      mockPatientGet.mockResolvedValue({ data: () => undefined });
+
+      await onEmsLocationEvent.run({
+        data: { message: { json: { patientId: 'p1', organizationId: 'org-1', active: false } } },
+      } as never);
+
+      expect(mockSendAlertPush).not.toHaveBeenCalled();
+    });
+
+    it('does nothing further when the EMS account on record has no user doc', async () => {
+      mockPatientGet.mockResolvedValue({ data: () => ({ createdBy: 'ems-uid' }) });
+      mockUsersGet.mockResolvedValue({ exists: false, data: () => undefined });
+
+      await onEmsLocationEvent.run({
+        data: { message: { json: { patientId: 'p1', organizationId: 'org-1', active: false } } },
+      } as never);
+
+      expect(mockSendAlertPush).not.toHaveBeenCalled();
+    });
+
+    it('sends a "stopped sharing" push to the patient-creating EMS account', async () => {
+      mockPatientGet.mockResolvedValue({ data: () => ({ createdBy: 'ems-uid' }) });
+      mockUsersGet.mockResolvedValue({ exists: true, ref: 'USER_REF_ems-uid', data: () => ({ fcmTokens: ['token-1'] }) });
+
+      await onEmsLocationEvent.run({
+        data: { message: { json: { patientId: 'p1', organizationId: 'org-1', active: false } } },
+      } as never);
+
+      expect(mockSendAlertPush).toHaveBeenCalledWith(
+        [{ ref: 'USER_REF_ems-uid', data: expect.any(Function) }],
+        'Tracking interrupted',
+        'Location sharing was turned off for a patient still marked active.',
+      );
+      // Confirms the wrapped data() actually forwards the real doc data,
+      // not just a matching shape.
+      expect(mockSendAlertPush.mock.calls[0][0][0].data()).toEqual({ fcmTokens: ['token-1'] });
+    });
+
+    it('does not fire the opt-out push for an active: true event', async () => {
+      mockPatientGet.mockResolvedValue({ data: () => ({ createdBy: 'ems-uid' }) });
+      mockUsersGet.mockResolvedValue({ exists: true, ref: 'USER_REF_ems-uid', data: () => ({ fcmTokens: ['token-1'] }) });
+
+      await onEmsLocationEvent.run(activeLocationEvent());
+
+      expect(mockSendAlertPush).not.toHaveBeenCalled();
+    });
   });
 
   describe('proximity-alert threshold check', () => {
@@ -365,6 +441,101 @@ describe('onEmsLocationEvent', () => {
 
       expect(mockNotifyPatientProximity).toHaveBeenCalledWith(expect.anything(), [15]);
     });
+  });
+});
+
+describe('checkEmsConnectivity', () => {
+  it('queries only active patients, and does nothing when none are being tracked', async () => {
+    mockPatientsActiveGet.mockResolvedValue({ docs: [] });
+
+    await checkEmsConnectivity.run({} as never);
+
+    expect(mockPatientsWhere).toHaveBeenCalledWith('status', '==', 'active');
+    expect(mockSendAlertPush).not.toHaveBeenCalled();
+  });
+
+  it('skips a patient with no location/current doc at all yet', async () => {
+    mockPatientsActiveGet.mockResolvedValue({ docs: [{ id: 'p1' }] });
+    mockLocationGet.mockResolvedValue({ data: () => undefined });
+
+    await checkEmsConnectivity.run({} as never);
+
+    expect(mockSendAlertPush).not.toHaveBeenCalled();
+    expect(mockLocationSet).not.toHaveBeenCalled();
+  });
+
+  it('skips a patient already explicitly stopped (active: false) — the opt-out hook already covered it', async () => {
+    mockPatientsActiveGet.mockResolvedValue({ docs: [{ id: 'p1' }] });
+    mockLocationGet.mockResolvedValue({
+      data: () => ({ active: false, updatedAt: { toMillis: () => Date.now() - 10 * 60 * 1000 } }),
+    });
+
+    await checkEmsConnectivity.run({} as never);
+
+    expect(mockSendAlertPush).not.toHaveBeenCalled();
+  });
+
+  it('skips a patient already alerted for this ongoing silence episode', async () => {
+    mockPatientsActiveGet.mockResolvedValue({ docs: [{ id: 'p1' }] });
+    mockLocationGet.mockResolvedValue({
+      data: () => ({
+        active: true,
+        connectivityAlertSentAt: 'ALREADY_SET',
+        updatedAt: { toMillis: () => Date.now() - 10 * 60 * 1000 },
+      }),
+    });
+
+    await checkEmsConnectivity.run({} as never);
+
+    expect(mockSendAlertPush).not.toHaveBeenCalled();
+  });
+
+  it('skips a patient whose last fix is not yet stale', async () => {
+    mockPatientsActiveGet.mockResolvedValue({ docs: [{ id: 'p1' }] });
+    mockLocationGet.mockResolvedValue({
+      data: () => ({ active: true, updatedAt: { toMillis: () => Date.now() - 5_000 } }),
+    });
+
+    await checkEmsConnectivity.run({} as never);
+
+    expect(mockSendAlertPush).not.toHaveBeenCalled();
+  });
+
+  it('skips a patient whose location has no updatedAt at all', async () => {
+    mockPatientsActiveGet.mockResolvedValue({ docs: [{ id: 'p1' }] });
+    mockLocationGet.mockResolvedValue({ data: () => ({ active: true }) });
+
+    await checkEmsConnectivity.run({} as never);
+
+    expect(mockSendAlertPush).not.toHaveBeenCalled();
+  });
+
+  it('notifies and stamps connectivityAlertSentAt once a fix has gone stale past the threshold', async () => {
+    mockPatientsActiveGet.mockResolvedValue({ docs: [{ id: 'p1' }] });
+    mockLocationGet.mockResolvedValue({
+      data: () => ({ active: true, updatedAt: { toMillis: () => Date.now() - 120_000 } }),
+    });
+    mockPatientGet.mockResolvedValue({ data: () => ({ createdBy: 'ems-uid' }) });
+    mockUsersGet.mockResolvedValue({ exists: true, ref: 'USER_REF_ems-uid', data: () => ({ fcmTokens: ['token-1'] }) });
+
+    await checkEmsConnectivity.run({} as never);
+
+    expect(mockSendAlertPush).toHaveBeenCalledWith(
+      [{ ref: 'USER_REF_ems-uid', data: expect.any(Function) }],
+      'Tracking interrupted',
+      "A tracked patient's location hasn't updated recently — check the device's signal and battery.",
+    );
+    expect(mockLocationSet).toHaveBeenCalledWith({ connectivityAlertSentAt: 'SERVER_TIMESTAMP' }, { merge: true });
+  });
+
+  it('checks every active patient independently, in parallel', async () => {
+    mockPatientsActiveGet.mockResolvedValue({ docs: [{ id: 'p1' }, { id: 'p2' }] });
+    mockLocationGet.mockResolvedValue({ data: () => undefined });
+
+    await checkEmsConnectivity.run({} as never);
+
+    expect(mockPatientLocationRef).toHaveBeenCalledWith('p1');
+    expect(mockPatientLocationRef).toHaveBeenCalledWith('p2');
   });
 });
 

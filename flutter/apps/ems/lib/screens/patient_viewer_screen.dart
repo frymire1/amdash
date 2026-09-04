@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../services/patient_session_service.dart';
+import '../widgets/battery_warning_banner.dart';
 
 /// Read-only patient detail screen — EMS previously had no way to review a
 /// patient's full record short of opening the edit form
@@ -40,6 +41,7 @@ class PatientViewerScreen extends ConsumerWidget {
     return Column(
       children: [
         const OfflineBanner(),
+        const BatteryWarningBanner(),
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),

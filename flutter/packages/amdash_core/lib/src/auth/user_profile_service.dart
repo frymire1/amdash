@@ -53,6 +53,17 @@ class UserProfileService {
       uid,
     ).set({'newPatientAlertsExpiresAt': FieldValue.delete()}, SetOptions(merge: true));
   }
+
+  /// Registers one more FCM token for push delivery to this user, without
+  /// touching `newPatientAlertsExpiresAt`/`etaAlertThresholdsMinutes` —
+  /// those are physician-specific proximity-alert preferences (see
+  /// [enableNewPatientAlerts] above). This is the plain "add me a token"
+  /// write EMS's own connectivity-loss alerts need instead — registered
+  /// automatically at sign-in, not an opt-in preference with an expiry
+  /// (see `ems`'s `ems_alert_service.dart`).
+  Future<void> registerFcmToken(String uid, String fcmToken) {
+    return _doc(uid).set({'fcmTokens': FieldValue.arrayUnion([fcmToken])}, SetOptions(merge: true));
+  }
 }
 
 final userProfileServiceProvider = Provider<UserProfileService>((ref) {
