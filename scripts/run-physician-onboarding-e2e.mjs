@@ -1,15 +1,27 @@
 #!/usr/bin/env node
-// Cross-app e2e: an admin account creates a new physician user through
-// the admin app's own real UI (no password, no work-location, nothing
-// pre-seeded — see admin/patrol_test/create_user_test.dart), and that
-// exact account then completes its own real first-ever sign-in (set a
+// Cross-app e2e: a new physician user, seeded with no password (mirroring
+// exactly what admin's real createUser Cloud Function itself would have
+// produced — see below), completes its own real first-ever sign-in (set a
 // password, enroll MFA, set a work location) through the physician app's
-// own UI (see physician/patrol_test/first_login_test.dart). Unlike every
-// other run-*-patrol-test.mjs (each scoped to one app verifying its own
-// UI against Admin-SDK-seeded state, including an already-set password),
-// this one verifies the real onboarding path every actual new physician
-// goes through — admin's createUser call is what makes the account exist
-// and passwordless, not a seed script standing in for it.
+// own UI (see physician/patrol_test/first_login_test.dart).
+//
+// The account is seeded directly via the Admin SDK now, not by driving
+// the admin app's real create-user UI (create_user_test.dart) the way an
+// earlier version of this script did. That real UI flow's own createUser
+// Cloud Function (functions/src/admin.ts) does exactly two things beyond
+// creating the Auth user itself: writes users/{uid}, and sends a real
+// welcome email via Resend. This script's own job — verifying physician's
+// real first-login flow — only depends on the *resulting account state*
+// (no password, correct role/org), which a direct
+// getAuth().createUser({ email }) produces identically, with no callable
+// and no email. Only user_flow_test.dart (admin's own canonical
+// create-user test, run by run-admin-patrol-test.mjs) needs to verify the
+// real createUser flow itself, including its real email side effect —
+// this script, its own wrong-app sibling, and both EMS-side equivalents
+// were redundantly re-triggering that same real send on every CI run
+// until this was noticed. Dropping the real UI drive here also means this
+// script no longer needs a throwaway admin account at all, or Chrome
+// against the admin app.
 //
 // The matching failure-state leg (an admin-created *ems*-role account
 // attempting to sign into the physician app instead) used to live here
@@ -46,7 +58,6 @@ import { runPatrolTest } from './lib/run-patrol.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
-const ADMIN_APP_DIR = path.join(REPO_ROOT, 'flutter', 'apps', 'admin');
 const PHYSICIAN_APP_DIR = path.join(REPO_ROOT, 'flutter', 'apps', 'physician');
 
 const RUN_ID = Date.now();
@@ -68,34 +79,34 @@ async function seed(db) {
     organizationId,
   });
 
-  // Mirrors run-admin-patrol-test.mjs's own createSmokeAdminAccount. The
-  // new physician account itself is never seeded here directly — it's a
-  // real output of the admin app's own createUser flow, not something
-  // this script writes to Firestore/Auth itself.
-  const email = `smoke-admin-onboarding-${RUN_ID}@amdash-e2e.test`;
-  const password = 'SmokeTest123';
-  const user = await getAuth().createUser({ email, password, emailVerified: true });
-  await db.doc(`users/${user.uid}`).set(
-    { email, role: ['admin'], organizationId, firstName: 'Smoke', lastName: 'Admin' },
-    { merge: true },
-  );
+  // Mirrors createUser's own real side effects (functions/src/admin.ts) —
+  // an Auth user with no password, plus a matching users/{uid} doc —
+  // without driving the real admin UI/callable to get there. See this
+  // file's own header comment for why. emailVerified: true directly
+  // (unlike real createUser, which never sets it) — MfaSetupScreen gates
+  // TOTP enrollment on exactly that flag, and there's no way for an
+  // automated test to click a real inbox-verification link (see the old
+  // version of this comment, previously attached to a separate post-hoc
+  // auth.updateUser flip, for that reasoning in full) — nothing here
+  // depends on the account starting out unverified, so setting it at
+  // creation time is equally correct and one Admin SDK call cheaper.
+  const user = await getAuth().createUser({ email: NEW_USER_EMAIL, emailVerified: true });
+  await db.doc(`users/${user.uid}`).set({
+    email: NEW_USER_EMAIL,
+    firstName: 'Patrol',
+    lastName: 'Onboarding',
+    role: ['physician'],
+    organizationId,
+  });
 
-  return { hospitalId: hospitalRef.id, admin: { email, password, uid: user.uid } };
+  return { hospitalId: hospitalRef.id, uid: user.uid };
 }
 
 async function cleanup(db, auth, seeded) {
   if (seeded) {
-    await auth.deleteUser(seeded.admin.uid).catch(() => {});
-    await db.doc(`users/${seeded.admin.uid}`).delete().catch(() => {});
+    await auth.deleteUser(seeded.uid).catch(() => {});
+    await db.doc(`users/${seeded.uid}`).delete().catch(() => {});
     await db.doc(`hospitals/${seeded.hospitalId}`).delete().catch(() => {});
-    // The new physician account was never created by this script (see
-    // seed()'s own comment) — look it up by its known, deterministic
-    // email instead of an id this script never had.
-    const newUser = await auth.getUserByEmail(NEW_USER_EMAIL).catch(() => null);
-    if (newUser) {
-      await auth.deleteUser(newUser.uid).catch(() => {});
-      await db.doc(`users/${newUser.uid}`).delete().catch(() => {});
-    }
   }
 
   // Age-guarded broad sweep for anything an interrupted run left behind —
@@ -106,11 +117,7 @@ async function cleanup(db, auth, seeded) {
   do {
     const page = await auth.listUsers(1000, pageToken);
     for (const user of page.users) {
-      if (
-        user.email &&
-        (user.email.startsWith('smoke-admin-onboarding-') || user.email.startsWith('smoke-physician-onboarding-')) &&
-        isOldEnoughToSweep(user.email)
-      ) {
+      if (user.email?.startsWith('smoke-physician-onboarding-') && isOldEnoughToSweep(user.email)) {
         await auth.deleteUser(user.uid);
         await db.doc(`users/${user.uid}`).delete().catch(() => {});
         deletedUsers++;
@@ -143,56 +150,18 @@ let seeded;
 let exitCode = 1;
 try {
   seeded = await seed(db);
-  console.log('Created throwaway admin account:', seeded.admin.email);
   console.log('Seeded hospital:', HOSPITAL_NAME);
-  console.log('New physician account (created by the test itself):', NEW_USER_EMAIL);
+  console.log('Seeded new physician account (Admin SDK, no real welcome email):', NEW_USER_EMAIL);
 
-  const createPhysicianExitCode = await runPatrolTest({
-    appDir: ADMIN_APP_DIR,
-    target: 'patrol_test/create_user_test.dart',
+  exitCode = await runPatrolTest({
+    appDir: PHYSICIAN_APP_DIR,
+    target: 'patrol_test/first_login_test.dart',
     dartDefines: {
-      SMOKE_EMAIL: seeded.admin.email,
-      SMOKE_PASSWORD: seeded.admin.password,
-      SMOKE_NEW_USER_EMAIL: NEW_USER_EMAIL,
-      SMOKE_NEW_USER_ROLE: 'physician',
+      SMOKE_EMAIL: NEW_USER_EMAIL,
+      SMOKE_NEW_PASSWORD: NEW_USER_PASSWORD,
+      SMOKE_HOSPITAL: HOSPITAL_NAME,
     },
   });
-
-  if (createPhysicianExitCode !== 0) {
-    console.log('\n❌ Admin create-user step failed — skipping the physician first-login step (account was never created).');
-    exitCode = createPhysicianExitCode;
-  } else {
-    // createUser (functions/src/admin.ts) deliberately never sets
-    // emailVerified — a real admin-created employee genuinely needs to
-    // verify their real inbox, same as production. But MfaSetupScreen
-    // gates TOTP enrollment on exactly that flag (Firebase itself
-    // requires a verified email before it'll enroll a factor) and
-    // there's no way for an automated test to click a real email link —
-    // the same class of gap as TOTP having no server-side shortcut, just
-    // the opposite direction: there the Admin SDK can't help at all,
-    // here it's the one thing that *can* stand in for a real click.
-    // Confirmed for real: an ems-side sibling of this exact scenario
-    // (run-ems-onboarding-e2e.mjs) failed completeMfaEnrollment "Bad
-    // state: No element" on every single attempt of its own retry budget
-    // (2026-08-31 CI run) — not a timing race at all, the account just
-    // never got past the static "Verify your email" screen, which never
-    // renders mfa_secret_key. first_login_test.dart's own job is testing
-    // the real set-password/MFA flow, not email verification, so this
-    // flips the one flag standing in its way rather than trying to
-    // fabricate a fake inbox click.
-    const newUser = await auth.getUserByEmail(NEW_USER_EMAIL);
-    await auth.updateUser(newUser.uid, { emailVerified: true });
-
-    exitCode = await runPatrolTest({
-      appDir: PHYSICIAN_APP_DIR,
-      target: 'patrol_test/first_login_test.dart',
-      dartDefines: {
-        SMOKE_EMAIL: NEW_USER_EMAIL,
-        SMOKE_NEW_PASSWORD: NEW_USER_PASSWORD,
-        SMOKE_HOSPITAL: HOSPITAL_NAME,
-      },
-    });
-  }
 } finally {
   await cleanup(db, auth, seeded);
   if (credentialPath) fs.unlinkSync(credentialPath);

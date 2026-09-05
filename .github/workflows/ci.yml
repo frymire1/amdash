@@ -957,30 +957,18 @@ jobs:
     runs-on: ubuntu-latest
     needs: flutter-analyze-test
     if: github.ref == 'refs/heads/master'
-    # Only the Firebase Admin SDK (service-account-key secret, not WIF) and
-    # a Chrome-based admin UI run happen in this job — no Test Lab/gcloud
-    # calls at all, so unlike the three run jobs below, no id-token: write
-    # is needed here.
+    # Only the Firebase Admin SDK (service-account-key secret, not WIF)
+    # happens in this job — no Test Lab/gcloud calls at all, so unlike the
+    # three run jobs below, no id-token: write is needed here. Used to also
+    # run a Chrome-based admin UI step (see run-ems-onboarding-e2e.mjs's own
+    # header comment for why that was removed — it was redundantly
+    # triggering a real welcome-email send on every CI run for no reason
+    # once noticed), which is why xvfb/Playwright/LANG-LC_ALL no longer
+    # need to live here either.
     permissions:
       contents: read
-    # LANG/LC_ALL: same fix as flutter-web-e2e-admin's identical job-level
-    # env — only needed here because of the admin-onboarding Chrome step
-    # below (see its own comment).
-    env:
-      LANG: en_US.UTF-8
-      LC_ALL: en_US.UTF-8
     steps:
       - uses: actions/checkout@v7
-
-      # Belt-and-suspenders alongside the job-level LANG/LC_ALL above —
-      # see flutter-web-e2e-admin's identical step.
-      - name: Ensure en_US.UTF-8 locale is generated
-        run: sudo locale-gen en_US.UTF-8
-
-      # The admin-onboarding Chrome step below needs a display — see
-      # flutter-web-e2e-admin's identical step for why xvfb specifically.
-      - name: Ensure xvfb is installed
-        run: sudo apt-get update && sudo apt-get install -y xvfb
 
       - uses: actions/setup-node@v7
         with:
@@ -988,31 +976,13 @@ jobs:
           cache: npm
           cache-dependency-path: scripts/package-lock.json
 
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - uses: actions/cache@v6
-        with:
-          path: ~/.pub-cache
-          key: pub-cache-${{ runner.os }}-patrol-cli
-
-      - name: Install patrol_cli
-        # Pinned — see the matching comment in flutter-web-e2e-admin above.
-        run: |
-          dart pub global activate patrol_cli 4.7.0
-          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
-
+      # No Flutter/patrol_cli setup here — every --seed-only call below is
+      # a plain Admin SDK write, never runPatrolTest (confirmed by reading
+      # each script directly); that only changed once the Chrome-based
+      # create-user step above was removed, which used to be this job's one
+      # real Patrol run.
       - name: Install scripts dependencies
         run: npm ci
-        working-directory: scripts
-
-      # The admin-onboarding Chrome step below needs this — see
-      # flutter-web-e2e-admin's identical step for why this is needed
-      # ahead of time rather than left to patrol's own on-demand setup.
-      - name: Install Playwright browser + OS dependencies
-        run: npx playwright install --with-deps chromium
         working-directory: scripts
 
       - name: Authenticate to Firebase Admin SDK
@@ -1032,24 +1002,10 @@ jobs:
           node run-ems-onboarding-e2e.mjs --seed-only --account-json="$RUNNER_TEMP/ems-onboarding-account.json"
         working-directory: scripts
 
-      # The admin half of the cross-app onboarding flow — see
-      # run-ems-onboarding-e2e.mjs's own header comment for why this,
-      # unlike everything else in this job, runs on Chrome rather than a
-      # Test Lab device (admin has no native Android/iOS build at all).
-      # Must run before flutter-android-e2e-ems-onboarding's build (a
-      # separate downstream job): patrol build android needs the new EMS
-      # account's email baked in as a --dart-define at build time, so it
-      # has to actually exist first.
-      - name: Create ems onboarding user via admin UI (Chrome)
-        run: node run-ems-onboarding-e2e.mjs --create-user --account-json="$RUNNER_TEMP/ems-onboarding-account.json"
-        working-directory: scripts
-
       # `if: always()` + if-no-files-found: warn so a failure partway
-      # through the steps above (e.g. the Chrome create-user step) still
-      # uploads whatever account JSON *did* get written — the physician/ems
-      # accounts are seeded before that step ever runs, and the teardown
-      # job below needs them regardless of whether the rest of this job
-      # succeeded.
+      # through the steps above still uploads whatever account JSON *did*
+      # get written — the teardown job below needs them regardless of
+      # whether the rest of this job succeeded.
       - name: Upload seeded account JSON
         if: always()
         uses: actions/upload-artifact@v7
@@ -1408,14 +1364,13 @@ jobs:
           name: android-e2e-accounts
           path: ${{ runner.temp }}
 
-      # The real onboarding leg — the seed job's Chrome-based create-user
-      # step already ran (see run-ems-onboarding-e2e.mjs's own header
-      # comment for why that has to happen before this build, not after);
-      # this is that new account's own first-ever sign-in, on a real
-      # device. No --grant-permissions=none needed here, unlike the ems
-      # suite above — first_login_test.dart never reaches
-      # PatientUploadScreen, so LocationTrackingSection's permission
-      # dialog is never in play.
+      # The real onboarding leg — the seed job already seeded the new EMS
+      # account directly via the Admin SDK (see run-ems-onboarding-e2e.mjs's
+      # own header comment); this is that account's own first-ever sign-in,
+      # on a real device. No --grant-permissions=none needed here, unlike
+      # the ems suite above — first_login_test.dart never reaches
+      # PatientUploadScreen, so LocationTrackingSection's permission dialog
+      # is never in play.
       - name: Build + run ems onboarding Test Lab suite (Android)
         run: |
           set -o pipefail
