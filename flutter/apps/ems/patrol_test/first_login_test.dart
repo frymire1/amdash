@@ -100,6 +100,18 @@ void main() {
         () => debugLastRegisterForConnectivityAlertsFinished,
         maxIterations: 60,
       );
+      // pumpUntil never throws on its own timeout — it just stops polling
+      // and returns — so this has to be checked explicitly, or a genuine
+      // timeout (registerForConnectivityAlerts never actually finishing)
+      // would silently pass the isNull check below (an error that was
+      // never set reads as null too) instead of reporting what actually
+      // happened. The fcmTokens check further down would eventually catch
+      // a real failure anyway, just with a less direct message.
+      expect(
+        debugLastRegisterForConnectivityAlertsFinished,
+        true,
+        reason: 'registerForConnectivityAlerts should have finished (success or failure) within the wait budget',
+      );
       expect(
         debugLastRegisterForConnectivityAlertsError,
         isNull,

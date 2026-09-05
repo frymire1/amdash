@@ -419,6 +419,21 @@ void main() {
           () => debugLastExportResult != null || debugLastExportError != null,
           maxIterations: 100,
         );
+        // pumpUntil never throws on its own timeout — it just stops
+        // polling and returns (confirmed by reading its source) — so
+        // without this, a genuine timeout (neither value ever got set)
+        // silently fell through to the null-check below instead of
+        // reporting what actually happened. Hit for real in CI
+        // (2026-09-05): the export call never resolved either way within
+        // the wait budget, and this crashed with a confusing "Unexpected
+        // null value" instead of a diagnosable timeout message.
+        expect(
+          debugLastExportResult != null || debugLastExportError != null,
+          true,
+          reason:
+              'exportPatientFhirBundle should have resolved (success or error) within the wait budget, '
+              'got neither — the export call itself may be slow/hung, not just this assertion',
+        );
         if (debugLastExportError != null) {
           fail('Export failed: $debugLastExportError');
         }
