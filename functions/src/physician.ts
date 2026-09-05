@@ -105,8 +105,25 @@ export async function sendAlertPush(
     return;
   }
 
+  // notification (not just data) is required for this to actually display
+  // anything on a backgrounded/killed app without any app-side handler —
+  // confirmed for real (a manual iOS test received the permission prompt,
+  // registered a token successfully, but no notification ever appeared).
+  // Neither app registers a FirebaseMessaging.onMessage/onBackgroundMessage
+  // Dart handler (nor an equivalent native one) to manually build a
+  // notification from a data-only message the way this used to be sent —
+  // that's the standard, required way to receive a *data-only* push
+  // silently and show something yourself, and nothing here ever did it.
+  // A `notification` field is what lets the OS (Android's system tray,
+  // iOS's APNs alert) display it automatically instead, the same way any
+  // other app's push notifications work, with zero custom handling code
+  // needed. `data` is kept alongside it, unchanged — the web service
+  // worker (web/firebase-messaging-sw.js) still reads `payload.data`
+  // directly off the raw Push API event exactly as before; adding
+  // `notification` doesn't change what reaches it.
   const response = await getMessaging().sendEachForMulticast({
     tokens: allTokens,
+    notification: { title, body },
     data: { title, body },
   });
 

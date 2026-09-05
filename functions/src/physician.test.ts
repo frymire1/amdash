@@ -185,7 +185,11 @@ describe('sendAlertPush', () => {
 
     await sendAlertPush([{ ref: {}, data: () => ({ fcmTokens: ['token-1'] }) }] as never, 'Title', 'Body');
 
-    expect(mockSendEachForMulticast).toHaveBeenCalledWith({ tokens: ['token-1'], data: { title: 'Title', body: 'Body' } });
+    expect(mockSendEachForMulticast).toHaveBeenCalledWith({
+      tokens: ['token-1'],
+      notification: { title: 'Title', body: 'Body' },
+      data: { title: 'Title', body: 'Body' },
+    });
   });
 
   it('prunes a token FCM reports as unregistered from the owning user doc', async () => {
@@ -246,6 +250,7 @@ describe('notifyPatientProximity', () => {
 
     expect(mockSendEachForMulticast).toHaveBeenCalledWith({
       tokens: ['token-1'],
+      notification: { title: 'Patient approaching', body: '42, Male is about 15 minutes away.' },
       data: { title: 'Patient approaching', body: '42, Male is about 15 minutes away.' },
     });
   });

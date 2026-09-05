@@ -37,10 +37,17 @@
 		<string>AmDash shares this patient's location with the receiving hospital while you're actively using the app.</string>
 		<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 		<string>AmDash shares this patient's location with the receiving hospital for the duration of the transport, even while your phone is locked.</string>
+		<!-- remote-notification: required for ems_alert_service.dart's
+		     connectivity-loss push to be delivered/displayed at all while
+		     backgrounded or killed — confirmed missing for real (a manual
+		     iOS test registered a token successfully but never received a
+		     notification). Matches physician's own identical entry, which
+		     its own proximity-alert push depends on the same way. -->
 		<key>UIBackgroundModes</key>
 		<array>
 			<string>location</string>
 			<string>fetch</string>
+			<string>remote-notification</string>
 		</array>
 		<key>BGTaskSchedulerPermittedIdentifiers</key>
 		<array>
