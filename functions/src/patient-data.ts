@@ -454,5 +454,27 @@ export const onPatientUpdated = onDocumentUpdated({ document: 'patients/{patient
   if (!vitalsEqual(before['vitals'] as FirebaseFirestore.DocumentData, after['vitals'] as FirebaseFirestore.DocumentData)) {
     tasks.push(appendVitalsHistory(event.params.patientId, (after['vitals'] as FirebaseFirestore.DocumentData) ?? {}, after['updatedBy']));
   }
+  // A mid-transport reroute (EMS changes the destination hospital) has to
+  // clear the *old* hospital's proximity-alert bookkeeping — otherwise
+  // ems.ts's checkProximityAlertThresholds silently starves the *new*
+  // hospital's physician of alerts it should get fresh. notifiedThresholds
+  // is a flat "which minute-thresholds has this patient already crossed"
+  // set with no awareness of which destination they were crossed for
+  // (confirmed by reading that function directly): if the vehicle already
+  // crossed 30/15 minutes on the way to hospital A, then reroutes to a
+  // farther hospital B, `alreadyNotified` still has {30, 15} marked once
+  // this patient gets close to B — those thresholds then never fire again
+  // for B's physician, who could end up with only (at best) the 5-minute
+  // alert, or none at all. The ETA calculation itself doesn't have this
+  // bug (it already re-reads `destination` fresh on every check), only the
+  // "have we already told someone" bookkeeping does.
+  if (before['destination'] !== after['destination']) {
+    tasks.push(
+      patientLocationRef(event.params.patientId).set(
+        { notifiedThresholds: FieldValue.delete(), lastEtaCheckAt: FieldValue.delete() },
+        { merge: true },
+      ),
+    );
+  }
   await Promise.all(tasks);
 });

@@ -14,6 +14,7 @@ const {
   mockCollection,
   mockBatch,
   mockLocationDocRef,
+  mockLocationSet,
   mockGetCallerProfile,
   mockVitalsHistoryOrderBy,
   mockVitalsHistoryGet,
@@ -26,11 +27,14 @@ const {
   mockBuildPatientFhirBundle,
 } = vi.hoisted(() => {
   const mockNewPatientId = 'new-patient-id';
+  const mockLocationSet = vi.fn();
   // A fixed sentinel object identity (not a fresh {} each call) — lets
   // tests assert "batch.set was called with *this exact* location doc
   // ref" by reference, the same way real Firestore doc refs are stable
-  // objects you can compare.
-  const mockLocationDocRef = { __ref: 'location-current-doc' };
+  // objects you can compare. Also carries its own .set — onPatientUpdated's
+  // reroute fix calls patientLocationRef(id).set(...) directly (not
+  // through the batch), unlike uploadPatientDocument's batch.set(ref, ...).
+  const mockLocationDocRef = { __ref: 'location-current-doc', set: mockLocationSet };
   // A minimal stand-in for firebase-admin's real Timestamp class — needs
   // to support `instanceof` (patient-data.ts's toDateOrNull checks
   // `value instanceof Timestamp`) and .toDate(), nothing else.
@@ -55,6 +59,7 @@ const {
     mockBatchSet: vi.fn(),
     mockBatchCommit: vi.fn(),
     mockLocationDocRef,
+    mockLocationSet,
     mockVitalsHistoryOrderBy,
     mockVitalsHistoryGet,
     mockVitalsHistoryAdd,
@@ -97,7 +102,7 @@ const {
 
 vi.mock('firebase-admin/firestore', () => ({
   getFirestore: () => ({ collection: mockCollection, batch: mockBatch }),
-  FieldValue: { serverTimestamp: () => 'SERVER_TIMESTAMP' },
+  FieldValue: { serverTimestamp: () => 'SERVER_TIMESTAMP', delete: () => 'FIELD_DELETED' },
   Timestamp: FakeTimestamp,
 }));
 
@@ -753,5 +758,46 @@ describe('onPatientUpdated', () => {
     );
 
     expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({ organizationId: undefined }));
+  });
+
+  describe('destination reroute', () => {
+    it('clears notifiedThresholds/lastEtaCheckAt on the location doc when destination changes', async () => {
+      await onPatientUpdated.run(
+        fakeDocumentUpdatedEvent(
+          { status: 'active', vitals: {}, destination: 'General Hospital' },
+          { status: 'active', vitals: {}, destination: 'St. Michael\'s Hospital', organizationId: 'org-1', updatedBy: 'ems-uid' },
+          { patientId: 'p1' },
+        ) as never,
+      );
+
+      expect(mockLocationSet).toHaveBeenCalledWith(
+        { notifiedThresholds: 'FIELD_DELETED', lastEtaCheckAt: 'FIELD_DELETED' },
+        { merge: true },
+      );
+    });
+
+    it('does nothing to the location doc when destination is unchanged', async () => {
+      await onPatientUpdated.run(
+        fakeDocumentUpdatedEvent(
+          { status: 'active', vitals: {}, destination: 'General Hospital' },
+          { status: 'active', vitals: {}, destination: 'General Hospital', organizationId: 'org-1', updatedBy: 'ems-uid' },
+          { patientId: 'p1' },
+        ) as never,
+      );
+
+      expect(mockLocationSet).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when neither side ever had a destination (an edit unrelated to it)', async () => {
+      await onPatientUpdated.run(
+        fakeDocumentUpdatedEvent(
+          { status: 'active', vitals: { heartRate: 80 } },
+          { status: 'active', vitals: { heartRate: 95 }, organizationId: 'org-1', updatedBy: 'ems-uid' },
+          { patientId: 'p1' },
+        ) as never,
+      );
+
+      expect(mockLocationSet).not.toHaveBeenCalled();
+    });
   });
 });
