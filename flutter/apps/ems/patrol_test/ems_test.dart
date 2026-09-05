@@ -317,13 +317,26 @@ void main() {
         await tapFinder($, find.byType(SwitchListTile));
         await settleLocationPrompts($);
         await tapKey($, 'patient_upload_submit');
+        // Scoped to the home screen's own PatientSummaryCard, not a bare
+        // find.text(exportPatientName) — same real race as phase 1's
+        // identical fix above (_onSubmit's success path navigates away via
+        // context.go('/') without first clearing the Name field's
+        // controller, so for a moment both the outgoing screen's
+        // still-filled TextField and the new card show the same text).
+        // Phase 1 already had this fix; this occurrence didn't, and hit
+        // the exact same "Found 2 widgets" failure for real on Android
+        // Test Lab (2026-09-04 CI run) as a result.
+        final exportPatientCard = find.descendant(
+          of: find.byType(PatientSummaryCard),
+          matching: find.text(exportPatientName),
+        );
         await pumpUntil(
           $,
-          () => find.text(exportPatientName).evaluate().isNotEmpty,
+          () => exportPatientCard.evaluate().isNotEmpty,
           maxIterations: 40,
         );
         expect(
-          find.text(exportPatientName),
+          exportPatientCard,
           findsOneWidget,
           reason: 'patient should appear on the home screen after upload',
         );
