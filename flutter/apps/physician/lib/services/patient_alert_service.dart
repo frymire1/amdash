@@ -62,6 +62,7 @@ class PatientAlertService {
     try {
       final settings = await _messaging.requestPermission();
       if (settings.authorizationStatus == AuthorizationStatus.denied) {
+        await _recordFailure(uid, 'Notification permission denied (authorizationStatus: ${settings.authorizationStatus}).');
         return const EnableAlertsResult(granted: false);
       }
 
@@ -69,6 +70,11 @@ class PatientAlertService {
 
       final token = await _messaging.getToken(vapidKey: _vapidKey);
       if (token == null) {
+        await _recordFailure(
+          uid,
+          'getToken() returned null after permission was granted (authorizationStatus: '
+          '${settings.authorizationStatus}).',
+        );
         return const EnableAlertsResult(granted: false);
       }
 
@@ -79,7 +85,23 @@ class PatientAlertService {
       return const EnableAlertsResult(granted: true);
     } catch (error) {
       debugLastEnableAlertsError = error;
+      await _recordFailure(uid, error.toString());
       rethrow;
+    }
+  }
+
+  /// Best-effort mirror of *why* enabling didn't end in a token being
+  /// written — see UserProfileService.recordFcmRegistrationError's own doc
+  /// comment for why this exists at all (debugLastEnableAlertsError
+  /// doesn't exist in a real production build, so a real device's silent
+  /// failure was otherwise completely unobservable). Never lets a failure
+  /// to record a failure escape — a broken diagnostic write shouldn't turn
+  /// into a *second*, different exception on top of the real one.
+  Future<void> _recordFailure(String uid, String reason) async {
+    try {
+      await _userProfileService.recordFcmRegistrationError(uid, reason);
+    } catch (_) {
+      // Best-effort only — see doc comment above.
     }
   }
 

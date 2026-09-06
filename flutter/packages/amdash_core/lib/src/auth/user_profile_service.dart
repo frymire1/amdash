@@ -45,6 +45,11 @@ class UserProfileService {
       'newPatientAlertsExpiresAt': expiresAt,
       'fcmTokens': FieldValue.arrayUnion([fcmToken]),
       'etaAlertThresholdsMinutes': etaAlertThresholdsMinutes,
+      // Clears whatever recordFcmRegistrationError may have stamped during
+      // a prior failed attempt — a fresh success means whatever was wrong
+      // no longer is, so a stale error shouldn't keep reading as current.
+      'lastFcmRegistrationError': FieldValue.delete(),
+      'lastFcmRegistrationErrorAt': FieldValue.delete(),
     }, SetOptions(merge: true));
   }
 
@@ -62,7 +67,31 @@ class UserProfileService {
   /// automatically at sign-in, not an opt-in preference with an expiry
   /// (see `ems`'s `ems_alert_service.dart`).
   Future<void> registerFcmToken(String uid, String fcmToken) {
-    return _doc(uid).set({'fcmTokens': FieldValue.arrayUnion([fcmToken])}, SetOptions(merge: true));
+    return _doc(uid).set({
+      'fcmTokens': FieldValue.arrayUnion([fcmToken]),
+      // See enableNewPatientAlerts' identical clear — same reasoning.
+      'lastFcmRegistrationError': FieldValue.delete(),
+      'lastFcmRegistrationErrorAt': FieldValue.delete(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Records why the most recent FCM registration attempt failed, on the
+  /// same `users/{uid}` doc `fcmTokens` itself lives on. Both
+  /// `EmsAlertService.registerForConnectivityAlerts` and
+  /// `PatientAlertService.enableAlerts` deliberately swallow/only
+  /// debug-capture the real exception (see those methods' own doc
+  /// comments) — a debug-only global doesn't exist in a real production
+  /// build, so a real device's silent registration failure was otherwise
+  /// completely unobservable to anyone without an attached debugger.
+  /// Firestore is somewhere a developer can actually check without
+  /// Xcode/adb/device console access. Best-effort by design (called from
+  /// inside an already-caught error path in both call sites) — if this
+  /// write itself fails too, that's swallowed there, not here.
+  Future<void> recordFcmRegistrationError(String uid, String error) {
+    return _doc(uid).set({
+      'lastFcmRegistrationError': error,
+      'lastFcmRegistrationErrorAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 }
 

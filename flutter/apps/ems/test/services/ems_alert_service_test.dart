@@ -25,7 +25,8 @@ void main() {
 
   group('registerForConnectivityAlerts', () {
     test('requestPermission throwing is captured in '
-        'debugLastRegisterForConnectivityAlertsError and swallowed (not rethrown)', () async {
+        'debugLastRegisterForConnectivityAlertsError and swallowed (not rethrown), and mirrored '
+        'to Firestore', () async {
       final thrown = Exception('service worker registration failed');
       when(() => messaging.requestPermission()).thenThrow(thrown);
 
@@ -35,8 +36,13 @@ void main() {
       await service.registerForConnectivityAlerts('ems-1');
 
       expect(debugLastRegisterForConnectivityAlertsError, thrown);
+      // Mirrored to Firestore too — debugLastRegisterForConnectivityAlertsError
+      // doesn't exist in a real production build, so this is the only way
+      // a real device's failure is ever observable at all (see
+      // recordFcmRegistrationError's own doc comment).
       final doc = await firestore.collection('users').doc('ems-1').get();
-      expect(doc.exists, false);
+      expect(doc.data()?['lastFcmRegistrationError'], thrown.toString());
+      expect(doc.data()?['lastFcmRegistrationErrorAt'], isNotNull);
     });
 
     test('debugLastRegisterForConnectivityAlertsFinished is false while in flight, '
@@ -53,7 +59,7 @@ void main() {
       expect(debugLastRegisterForConnectivityAlertsFinished, true);
     });
 
-    test('permission denied -> never requests a token, never writes anything', () async {
+    test('permission denied -> never requests a token, records why in Firestore', () async {
       final settings = _MockNotificationSettings();
       when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.denied);
       when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
@@ -62,10 +68,11 @@ void main() {
 
       verifyNever(() => messaging.getToken(vapidKey: any(named: 'vapidKey')));
       final doc = await firestore.collection('users').doc('ems-1').get();
-      expect(doc.exists, false);
+      expect(doc.data()?['fcmTokens'], isNull);
+      expect(doc.data()?['lastFcmRegistrationError'], contains('denied'));
     });
 
-    test('permission granted but no token available -> writes nothing', () async {
+    test('permission granted but no token available -> records why, writes no token', () async {
       final settings = _MockNotificationSettings();
       when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.authorized);
       when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
@@ -74,7 +81,8 @@ void main() {
       await service.registerForConnectivityAlerts('ems-1');
 
       final doc = await firestore.collection('users').doc('ems-1').get();
-      expect(doc.exists, false);
+      expect(doc.data()?['fcmTokens'], isNull);
+      expect(doc.data()?['lastFcmRegistrationError'], contains('getToken() returned null'));
     });
 
     test('permission granted with a token -> registers it via fcmTokens, without an expiry or '

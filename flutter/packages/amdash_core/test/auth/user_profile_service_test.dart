@@ -88,6 +88,50 @@ void main() {
       expect(data?['fcmTokens'], ['ems-token']);
     });
 
+    test('registerFcmToken clears a previously-recorded registration error', () async {
+      await firestore.collection('users').doc('uid-1').set({
+        'lastFcmRegistrationError': 'getToken() returned null',
+        'lastFcmRegistrationErrorAt': Timestamp.now(),
+      });
+      await service.registerFcmToken('uid-1', 'ems-token');
+
+      final data = await readUser('uid-1');
+      expect(data?.containsKey('lastFcmRegistrationError'), false);
+      expect(data?.containsKey('lastFcmRegistrationErrorAt'), false);
+    });
+
+    test('enableNewPatientAlerts clears a previously-recorded registration error', () async {
+      await firestore.collection('users').doc('uid-1').set({
+        'lastFcmRegistrationError': 'getToken() returned null',
+        'lastFcmRegistrationErrorAt': Timestamp.now(),
+      });
+      final expiresAt = Timestamp.fromDate(DateTime(2026, 12, 31));
+      await service.enableNewPatientAlerts('uid-1', expiresAt, 'new-token', [60]);
+
+      final data = await readUser('uid-1');
+      expect(data?.containsKey('lastFcmRegistrationError'), false);
+      expect(data?.containsKey('lastFcmRegistrationErrorAt'), false);
+    });
+
+    test('recordFcmRegistrationError writes the reason and a timestamp, without touching '
+        'fcmTokens', () async {
+      await firestore.collection('users').doc('uid-1').set({
+        'fcmTokens': ['existing-token'],
+      });
+      await service.recordFcmRegistrationError('uid-1', 'Notification permission denied.');
+
+      final data = await readUser('uid-1');
+      expect(data?['lastFcmRegistrationError'], 'Notification permission denied.');
+      expect(data?['lastFcmRegistrationErrorAt'], isNotNull);
+      expect(data?['fcmTokens'], ['existing-token']);
+    });
+
+    test('recordFcmRegistrationError merge-creates the doc when none exists yet', () async {
+      await service.recordFcmRegistrationError('uid-2', 'getToken() returned null.');
+      final data = await readUser('uid-2');
+      expect(data?['lastFcmRegistrationError'], 'getToken() returned null.');
+    });
+
     test('disableNewPatientAlerts deletes the expiry field, leaving fcmTokens alone', () async {
       final expiresAt = Timestamp.fromDate(DateTime(2026, 12, 31));
       await firestore.collection('users').doc('uid-1').set({

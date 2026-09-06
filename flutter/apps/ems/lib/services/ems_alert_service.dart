@@ -73,6 +73,7 @@ class EmsAlertService {
     try {
       final settings = await _messaging.requestPermission();
       if (settings.authorizationStatus == AuthorizationStatus.denied) {
+        await _recordFailure(uid, 'Notification permission denied (authorizationStatus: ${settings.authorizationStatus}).');
         return;
       }
 
@@ -80,6 +81,11 @@ class EmsAlertService {
 
       final token = await _messaging.getToken(vapidKey: _vapidKey);
       if (token == null) {
+        await _recordFailure(
+          uid,
+          'getToken() returned null after permission was granted (authorizationStatus: '
+          '${settings.authorizationStatus}).',
+        );
         return;
       }
 
@@ -87,8 +93,25 @@ class EmsAlertService {
     } catch (error) {
       debugLastRegisterForConnectivityAlertsError = error;
       // Deliberately not rethrown — see this method's own doc comment.
+      await _recordFailure(uid, error.toString());
     } finally {
       debugLastRegisterForConnectivityAlertsFinished = true;
+    }
+  }
+
+  /// Best-effort mirror of *why* registration didn't end in a token being
+  /// written — see UserProfileService.recordFcmRegistrationError's own doc
+  /// comment for why this exists at all (debugLastRegisterForConnectivityAlertsError
+  /// doesn't exist in a real production build, so a real device's silent
+  /// failure was otherwise completely unobservable). Never lets a failure
+  /// to record a failure escape — that would defeat this method's own
+  /// "never blocks sign-in" contract just as surely as rethrowing the
+  /// original error would.
+  Future<void> _recordFailure(String uid, String reason) async {
+    try {
+      await _userProfileService.recordFcmRegistrationError(uid, reason);
+    } catch (_) {
+      // Best-effort only — see doc comment above.
     }
   }
 

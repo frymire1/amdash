@@ -24,15 +24,23 @@ void main() {
   });
 
   group('enableAlerts', () {
-    test('requestPermission throwing is captured in debugLastEnableAlertsError and rethrown', () async {
+    test('requestPermission throwing is captured in debugLastEnableAlertsError and rethrown, '
+        'and mirrored to Firestore', () async {
       final thrown = Exception('service worker registration failed');
       when(() => messaging.requestPermission()).thenThrow(thrown);
 
       await expectLater(() => service.enableAlerts('user-1', 24), throwsA(thrown));
       expect(debugLastEnableAlertsError, thrown);
+      // Mirrored to Firestore too — debugLastEnableAlertsError doesn't
+      // exist in a real production build, so this is the only way a real
+      // device's failure is ever observable at all (see
+      // recordFcmRegistrationError's own doc comment).
+      final doc = await firestore.collection('users').doc('user-1').get();
+      expect(doc.data()?['lastFcmRegistrationError'], thrown.toString());
+      expect(doc.data()?['lastFcmRegistrationErrorAt'], isNotNull);
     });
 
-    test('permission denied -> not granted, never requests a token', () async {
+    test('permission denied -> not granted, never requests a token, records why in Firestore', () async {
       final settings = _MockNotificationSettings();
       when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.denied);
       when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
@@ -41,9 +49,11 @@ void main() {
 
       expect(result.granted, false);
       verifyNever(() => messaging.getToken(vapidKey: any(named: 'vapidKey')));
+      final doc = await firestore.collection('users').doc('user-1').get();
+      expect(doc.data()?['lastFcmRegistrationError'], contains('denied'));
     });
 
-    test('permission granted but no token available -> not granted', () async {
+    test('permission granted but no token available -> not granted, records why in Firestore', () async {
       final settings = _MockNotificationSettings();
       when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.authorized);
       when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
@@ -52,6 +62,8 @@ void main() {
       final result = await service.enableAlerts('user-1', 24);
 
       expect(result.granted, false);
+      final doc = await firestore.collection('users').doc('user-1').get();
+      expect(doc.data()?['lastFcmRegistrationError'], contains('getToken() returned null'));
     });
 
     test('permission granted with a token -> writes fcmTokens/newPatientAlertsExpiresAt and reports granted', () async {
