@@ -1,5 +1,6 @@
 import 'package:amdash_core/amdash_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// Same public Web Push certificate key physician's own
@@ -8,6 +9,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// per app). Only used on the web target; native platforms don't take a
 /// vapidKey.
 const _vapidKey = 'BOyziwdy1IYAaRdmBO0KZlyCwrRtxPoacISCqUoJiTYPkTpgVAAlAw7ScAVqUC4uCs2JTYn7cifydpr-I1XpGlQ';
+
+/// How long, and how many times, [_ensureApnsTokenReady] polls
+/// getAPNSToken() before giving up and calling getToken() anyway.
+const _apnsTokenMaxAttempts = 10;
+const _apnsTokenRetryDelay = Duration(seconds: 1);
 
 /// The real Object thrown by the most recent
 /// [EmsAlertService.registerForConnectivityAlerts] call, if any — same
@@ -70,6 +76,8 @@ class EmsAlertService {
         return;
       }
 
+      await _ensureApnsTokenReady();
+
       final token = await _messaging.getToken(vapidKey: _vapidKey);
       if (token == null) {
         return;
@@ -82,6 +90,32 @@ class EmsAlertService {
     } finally {
       debugLastRegisterForConnectivityAlertsFinished = true;
     }
+  }
+
+  /// getToken() needs the native APNs device token to already be
+  /// registered — a separate async round trip through Apple's push
+  /// servers (`application:didRegisterForRemoteNotificationsWithDeviceToken:`)
+  /// that often hasn't finished yet on a fresh cold start right after
+  /// permission is granted, and getToken() throws if called before it has.
+  /// Confirmed for real: a manual iOS test granted permission and reached
+  /// this call, but no token was ever written to Firestore — the resulting
+  /// exception was silently swallowed by the catch block above (by design,
+  /// per this method's own doc comment), leaving zero visible symptom.
+  /// getAPNSToken() is iOS/macOS-only and resolves null immediately on
+  /// every other platform, so this is a no-op everywhere else.
+  Future<void> _ensureApnsTokenReady() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return;
+    }
+    for (var attempt = 0; attempt < _apnsTokenMaxAttempts; attempt++) {
+      if (await _messaging.getAPNSToken() != null) {
+        return;
+      }
+      await Future.delayed(_apnsTokenRetryDelay);
+    }
+    // Gives up and calls getToken() anyway rather than waiting forever —
+    // if it still throws, the catch block above swallows it exactly as
+    // before this fix existed, no worse off than the original behavior.
   }
 }
 

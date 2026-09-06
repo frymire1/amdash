@@ -1,7 +1,9 @@
 import 'package:amdash_core/amdash_core.dart';
 import 'package:ems/services/ems_alert_service.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart' show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -89,6 +91,12 @@ void main() {
       expect(data['fcmTokens'], contains('ems-fcm-token'));
       expect(data.containsKey('newPatientAlertsExpiresAt'), false);
       expect(data.containsKey('etaAlertThresholdsMinutes'), false);
+      // On every platform but iOS, _ensureApnsTokenReady is a pure no-op —
+      // this is the default test platform (never iOS unless overridden,
+      // see the 'waits for a native APNs token on iOS' group below), so
+      // this proves the gate actually skips the call rather than it just
+      // happening to return non-null.
+      verifyNever(() => messaging.getAPNSToken());
     });
 
     test('a Firestore write failure is captured, not rethrown', () async {
@@ -103,6 +111,64 @@ void main() {
       await failingService.registerForConnectivityAlerts('ems-1');
 
       expect(debugLastRegisterForConnectivityAlertsError, thrown);
+    });
+  });
+
+  group('waits for a native APNs token on iOS before requesting one', () {
+    setUp(() => debugDefaultTargetPlatformOverride = TargetPlatform.iOS);
+    tearDown(() => debugDefaultTargetPlatformOverride = null);
+
+    test('APNs token already available -> registers immediately, no retry delay', () async {
+      final settings = _MockNotificationSettings();
+      when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.authorized);
+      when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
+      when(() => messaging.getAPNSToken()).thenAnswer((_) async => 'apns-token');
+      when(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).thenAnswer((_) async => 'ems-fcm-token');
+
+      await service.registerForConnectivityAlerts('ems-1');
+
+      verify(() => messaging.getAPNSToken()).called(1);
+      final doc = await firestore.collection('users').doc('ems-1').get();
+      expect(doc.data()!['fcmTokens'], contains('ems-fcm-token'));
+    });
+
+    test('APNs token arrives after a couple of retries -> waits, then registers', () {
+      final settings = _MockNotificationSettings();
+      when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.authorized);
+      when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
+      when(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).thenAnswer((_) async => 'ems-fcm-token');
+      var apnsCallCount = 0;
+      when(() => messaging.getAPNSToken()).thenAnswer((_) async {
+        apnsCallCount++;
+        return apnsCallCount < 3 ? null : 'apns-token';
+      });
+
+      // A plain test() has no flutter_test fake-async binding driving the
+      // real Future.delayed retry loop — fakeAsync lets this advance
+      // exactly as far as the loop's own real delays without waiting out
+      // real wall-clock time (same pattern as battery_watch_service_test.dart).
+      fakeAsync((async) {
+        service.registerForConnectivityAlerts('ems-1');
+        async.elapse(const Duration(seconds: 3));
+
+        expect(apnsCallCount, 3);
+      });
+    });
+
+    test('APNs token never arrives -> gives up after the max attempts and calls getToken() anyway', () {
+      final settings = _MockNotificationSettings();
+      when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.authorized);
+      when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
+      when(() => messaging.getAPNSToken()).thenAnswer((_) async => null);
+      when(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).thenAnswer((_) async => 'ems-fcm-token');
+
+      fakeAsync((async) {
+        service.registerForConnectivityAlerts('ems-1');
+        async.elapse(const Duration(seconds: 15));
+
+        verify(() => messaging.getAPNSToken()).called(10);
+        verify(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).called(1);
+      });
     });
   });
 
