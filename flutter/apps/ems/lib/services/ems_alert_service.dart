@@ -1,4 +1,5 @@
 import 'package:amdash_core/amdash_core.dart';
+import 'package:firebase_core/firebase_core.dart' show FirebaseException;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -137,13 +138,31 @@ class EmsAlertService {
   /// per this method's own doc comment), leaving zero visible symptom.
   /// getAPNSToken() is iOS/macOS-only and resolves null immediately on
   /// every other platform, so this is a no-op everywhere else.
+  ///
+  /// getAPNSToken() itself does *not* simply return null while the
+  /// handshake is still pending, despite that being this method's whole
+  /// original premise — it throws a FirebaseException
+  /// (`apns-token-not-set`) instead. Confirmed for real (this exact
+  /// code/message, via lastFcmRegistrationError, on the very first
+  /// attempt of a real device's very first registration after a fresh
+  /// install): an unguarded call here meant the very first loop iteration
+  /// always threw and escaped straight to the outer catch block, aborting
+  /// the whole registration attempt before it ever reached getToken() at
+  /// all — silently, on every single cold start, since the handshake is
+  /// essentially never already done that early. Caught and treated
+  /// exactly like a null result (keep retrying) so the loop actually
+  /// waits out the handshake instead of aborting on its first iteration.
   Future<void> _ensureApnsTokenReady() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
       return;
     }
     for (var attempt = 0; attempt < _apnsTokenMaxAttempts; attempt++) {
-      if (await _messaging.getAPNSToken() != null) {
-        return;
+      try {
+        if (await _messaging.getAPNSToken() != null) {
+          return;
+        }
+      } on FirebaseException catch (error) {
+        if (error.code != 'apns-token-not-set') rethrow;
       }
       await Future.delayed(_apnsTokenRetryDelay);
     }

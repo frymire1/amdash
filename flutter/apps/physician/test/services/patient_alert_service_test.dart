@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:amdash_core/amdash_core.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart' show FirebaseException;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart' show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -190,6 +191,44 @@ void main() {
         verify(() => messaging.getAPNSToken()).called(10);
         verify(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).called(1);
       });
+    });
+
+    test('getAPNSToken() throwing apns-token-not-set is treated like a null result (keeps '
+        'retrying instead of aborting) — mirrors ems_alert_service_test.dart\'s identical case, '
+        'found via a real device', () {
+      final settings = _MockNotificationSettings();
+      when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.authorized);
+      when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
+      when(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).thenAnswer((_) async => 'fcm-token-1');
+      var apnsCallCount = 0;
+      when(() => messaging.getAPNSToken()).thenAnswer((_) async {
+        apnsCallCount++;
+        if (apnsCallCount < 3) {
+          throw FirebaseException(plugin: 'firebase_messaging', code: 'apns-token-not-set');
+        }
+        return 'apns-token';
+      });
+
+      fakeAsync((async) {
+        service.enableAlerts('user-1', 24);
+        async.elapse(const Duration(seconds: 3));
+
+        expect(apnsCallCount, 3);
+        verify(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).called(1);
+      });
+    });
+
+    test('getAPNSToken() throwing any other FirebaseException code is not swallowed', () async {
+      final settings = _MockNotificationSettings();
+      when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.authorized);
+      when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
+      final thrown = FirebaseException(plugin: 'firebase_messaging', code: 'unknown', message: 'boom');
+      when(() => messaging.getAPNSToken()).thenThrow(thrown);
+
+      await expectLater(() => service.enableAlerts('user-1', 24), throwsA(thrown));
+
+      expect(debugLastEnableAlertsError, thrown);
+      verifyNever(() => messaging.getToken(vapidKey: any(named: 'vapidKey')));
     });
   });
 

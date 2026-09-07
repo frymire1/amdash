@@ -120,13 +120,26 @@ class PatientAlertService {
   /// EMS app's equivalent flow). getAPNSToken() is iOS/macOS-only and
   /// resolves null immediately on every other platform, so this is a
   /// no-op everywhere else.
+  ///
+  /// getAPNSToken() itself does *not* simply return null while the
+  /// handshake is still pending, despite that being this method's whole
+  /// original premise — it throws a FirebaseException
+  /// (`apns-token-not-set`) instead. Mirrors ems_alert_service.dart's
+  /// identical fix — see that file's own doc comment for the full story
+  /// (found via a real device's lastFcmRegistrationError showing this
+  /// exact code/message on the very first registration attempt after a
+  /// fresh install).
   Future<void> _ensureApnsTokenReady() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
       return;
     }
     for (var attempt = 0; attempt < _apnsTokenMaxAttempts; attempt++) {
-      if (await _messaging.getAPNSToken() != null) {
-        return;
+      try {
+        if (await _messaging.getAPNSToken() != null) {
+          return;
+        }
+      } on FirebaseException catch (error) {
+        if (error.code != 'apns-token-not-set') rethrow;
       }
       await Future.delayed(_apnsTokenRetryDelay);
     }
