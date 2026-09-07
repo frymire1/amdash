@@ -73,6 +73,8 @@ class PatientAlertService {
         return const EnableAlertsResult(granted: false);
       }
 
+      await _reregisterForRemoteNotifications();
+
       final token = await _getTokenWaitingForApns();
       if (token == null) {
         await _recordFailure(
@@ -108,6 +110,24 @@ class PatientAlertService {
     } catch (_) {
       // Best-effort only — see doc comment above.
     }
+  }
+
+  /// registerForRemoteNotifications() only otherwise fires once,
+  /// automatically, at app launch — before this method's own
+  /// requestPermission() call above has ever had a chance to grant
+  /// anything. Mirrors ems_alert_service.dart's identical fix — see that
+  /// file's own doc comment for the full story (found by reading
+  /// FLTFirebaseMessagingPlugin.m's requestPermission implementation
+  /// directly: it never re-triggers registerForRemoteNotifications after
+  /// a fresh grant). Toggling setAutoInitEnabled off then back on
+  /// re-triggers it as a documented side effect — the closest thing to a
+  /// manual trigger this plugin's public API offers.
+  Future<void> _reregisterForRemoteNotifications() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return;
+    }
+    await _messaging.setAutoInitEnabled(false);
+    await _messaging.setAutoInitEnabled(true);
   }
 
   /// getToken() needs the native APNs device token to already be

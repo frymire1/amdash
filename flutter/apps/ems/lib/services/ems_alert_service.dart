@@ -96,6 +96,8 @@ class EmsAlertService {
         return;
       }
 
+      await _reregisterForRemoteNotifications();
+
       final token = await _getTokenWaitingForApns();
       if (token == null) {
         await _recordFailure(
@@ -130,6 +132,45 @@ class EmsAlertService {
     } catch (_) {
       // Best-effort only — see doc comment above.
     }
+  }
+
+  /// registerForRemoteNotifications() — the actual native call that asks
+  /// Apple for a device token — only otherwise fires once, automatically,
+  /// at app launch (as part of firebase_messaging's own plugin
+  /// registration), which necessarily happens *before* this method's own
+  /// requestPermission() call above has ever had a chance to grant
+  /// anything — no app has notification permission before its own launch
+  /// finishes. Nothing in the plugin re-triggers that call later once
+  /// permission is actually granted (confirmed by reading
+  /// FLTFirebaseMessagingPlugin.m's requestPermission implementation
+  /// directly: it only calls requestAuthorizationWithOptions, never
+  /// registerForRemoteNotifications). If Apple didn't hand over a token
+  /// during that first, pre-permission attempt, nothing ever asks again —
+  /// a real, previously-unconsidered explanation for a real device's
+  /// registration staying permanently stuck on
+  /// [firebase_messaging/apns-token-not-set], unmoved by every other fix
+  /// tried (retry timing, the AppDelegate delegate cleanup, the
+  /// sandbox/production entitlement fix, even a full device restart).
+  ///
+  /// firebase_messaging exposes no direct Dart-level
+  /// "registerForRemoteNotifications now" call, but toggling
+  /// setAutoInitEnabled off then back on re-triggers it as a documented
+  /// side effect (see messagingSetAutoInitEnabled: in
+  /// FLTFirebaseMessagingPlugin.m, which calls
+  /// registerForRemoteNotifications() + ensureAPNSTokenSetting()
+  /// whenever re-enabled) — the closest thing to a manual trigger this
+  /// plugin's public API offers. iOS-only: Android's FCM token doesn't
+  /// have this same registration-must-happen-after-permission gap (see
+  /// _getTokenWaitingForApns' own doc comment for why this whole APNs
+  /// dance is iOS-specific to begin with), so this would just be a
+  /// pointless round trip through a platform channel on every other
+  /// platform.
+  Future<void> _reregisterForRemoteNotifications() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return;
+    }
+    await _messaging.setAutoInitEnabled(false);
+    await _messaging.setAutoInitEnabled(true);
   }
 
   /// getToken() needs the native APNs device token to already be

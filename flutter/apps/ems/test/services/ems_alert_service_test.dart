@@ -24,6 +24,11 @@ void main() {
     messaging = _MockFirebaseMessaging();
     firestore = FakeFirebaseFirestore();
     service = EmsAlertService(messaging, UserProfileService(firestore));
+    // Default success stub — only actually exercised by iOS-targeted
+    // tests (the platform gate makes this a no-op everywhere else), but
+    // stubbed globally so every test in this file that reaches past
+    // permission-granted doesn't need to repeat it individually.
+    when(() => messaging.setAutoInitEnabled(any())).thenAnswer((_) async {});
   });
 
   group('registerForConnectivityAlerts', () {
@@ -131,6 +136,9 @@ void main() {
       // proves the apns-token-not-set retry path is a genuine no-op here,
       // not that it just happened to succeed on its first try.
       verify(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).called(1);
+      // Same for _reregisterForRemoteNotifications — see the dedicated
+      // group below for its iOS behavior.
+      verifyNever(() => messaging.setAutoInitEnabled(any()));
     });
 
     test('a Firestore write failure is captured, not rethrown', () async {
@@ -145,6 +153,43 @@ void main() {
       await failingService.registerForConnectivityAlerts('ems-1');
 
       expect(debugLastRegisterForConnectivityAlertsError, thrown);
+    });
+  });
+
+  group('re-registers for remote notifications on iOS after permission is granted', () {
+    setUp(() => debugDefaultTargetPlatformOverride = TargetPlatform.iOS);
+    tearDown(() => debugDefaultTargetPlatformOverride = null);
+
+    test('toggles setAutoInitEnabled off then on, before calling getToken() — '
+        'registerForRemoteNotifications() otherwise only ever fires once, automatically, at app '
+        'launch, before permission has ever had a chance to be granted', () async {
+      final settings = _MockNotificationSettings();
+      when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.authorized);
+      when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
+      when(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).thenAnswer((_) async => 'ems-fcm-token');
+
+      final calls = <String>[];
+      when(() => messaging.setAutoInitEnabled(any())).thenAnswer((invocation) async {
+        calls.add('setAutoInitEnabled(${invocation.positionalArguments.first})');
+      });
+      when(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).thenAnswer((_) async {
+        calls.add('getToken()');
+        return 'ems-fcm-token';
+      });
+
+      await service.registerForConnectivityAlerts('ems-1');
+
+      expect(calls, ['setAutoInitEnabled(false)', 'setAutoInitEnabled(true)', 'getToken()']);
+    });
+
+    test('permission denied -> never reaches setAutoInitEnabled at all', () async {
+      final settings = _MockNotificationSettings();
+      when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.denied);
+      when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
+
+      await service.registerForConnectivityAlerts('ems-1');
+
+      verifyNever(() => messaging.setAutoInitEnabled(any()));
     });
   });
 
