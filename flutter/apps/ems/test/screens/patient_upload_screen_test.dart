@@ -394,6 +394,13 @@ void main() {
         tester,
         patientId: 'patient-1',
         uploadedPatients: [UploadedPatient(id: 'patient-1', patient: _patient())],
+        // Seeded as already-tracked so this submits through the
+        // (unrelated) startTracking path — an unseeded edit-mode section
+        // starts with tracking off, which would otherwise route this
+        // through stopTracking and its own new confirmation dialog (see
+        // the dedicated "toggled off" test below), which isn't this
+        // test's own concern at all.
+        trackedPatients: const {'patient-1'},
       );
       await tester.pumpAndSettle();
 
@@ -478,10 +485,25 @@ void main() {
       // tap lands outside the render tree entirely and _onSubmit never runs.
       await tester.ensureVisible(find.byKey(const Key('patient_upload_submit')));
       await tester.tap(find.byKey(const Key('patient_upload_submit')));
-      await tester.pumpAndSettle();
+      // Bounded pumps, not pumpAndSettle() — showInfoDialog awaits real
+      // user dismissal (same as showErrorDialog's identical "live tracking
+      // failing to start" test above), so pumpAndSettle would just time out
+      // waiting for a settle that isn't coming until the OK tap below.
+      await tester.pump();
+      await tester.pump();
 
       expect(stoppedId, 'patient-1');
       expect(startCalled, false);
+
+      // Confirms the real confirmation copy, not just that *some* dialog
+      // appeared.
+      expect(find.text('Live tracking is off'), findsOneWidget);
+      expect(
+        find.text('Live location tracking is off for this patient. Turn it back on from this page anytime.'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
     });
 
     testWidgets('the Destination Hospital dropdown selection round-trips through submit', (tester) async {

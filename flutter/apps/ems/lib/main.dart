@@ -1,6 +1,7 @@
 import 'package:amdash_core/amdash_core.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -38,6 +39,24 @@ Future<void> main() async {
         : const AppleAppAttestWithDeviceCheckFallbackProvider(),
     // Enterprise, not classic v3 — see admin/lib/main.dart's identical note.
     providerWeb: ReCaptchaEnterpriseProvider(_appCheckRecaptchaSiteKey),
+  );
+
+  // iOS/macOS default to *not* displaying a push at all while the app is
+  // in the foreground — it's silently delivered to the app process with
+  // no banner/sound/badge unless explicitly opted into, which nothing
+  // here otherwise does (no onMessage/foreground handler exists). Without
+  // this, a connectivity-loss alert triggered by something the paramedic
+  // just did in-app (e.g. toggling tracking off and saving) would arrive
+  // successfully — confirmed for real via Cloud Functions' own logs
+  // showing a clean send — yet never visibly appear, because the one
+  // moment it's guaranteed to be sent is also the one moment the app is
+  // guaranteed to be in the foreground. No-op on Android/web (a
+  // foreground push already shows there by default; this call only
+  // matches iOS/macOS's own opt-in requirement).
+  await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+    alert: true,
+    badge: true,
+    sound: true,
   );
 
   // Required before any FlutterForegroundTask.startService/sendDataToTask

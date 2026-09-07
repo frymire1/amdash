@@ -112,6 +112,32 @@ void main() {
     });
   });
 
+  group('showInfoDialog', () {
+    testWidgets('renders the title/message and OK dismisses it', (tester) async {
+      final result = ValueNotifier<void>(null);
+      var completed = false;
+      await pumpApp(
+        tester,
+        _Trigger<void>(
+          action: (context) async {
+            await showInfoDialog(context, title: 'Live tracking is off', message: 'This patient is no longer tracked.');
+            completed = true;
+          },
+          result: result,
+        ),
+      );
+
+      await tester.tap(find.text('trigger'));
+      await tester.pumpAndSettle();
+      expect(find.text('Live tracking is off'), findsOneWidget);
+      expect(find.text('This patient is no longer tracked.'), findsOneWidget);
+
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(completed, true);
+    });
+  });
+
   group('showReauthPasswordDialog', () {
     testWidgets('the obscure-toggle icon flips TextField.obscureText', (tester) async {
       final result = ValueNotifier<String?>(null);

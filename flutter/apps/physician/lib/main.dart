@@ -1,6 +1,7 @@
 import 'package:amdash_core/amdash_core.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -29,6 +30,19 @@ Future<void> main() async {
         : const AppleAppAttestWithDeviceCheckFallbackProvider(),
     // Enterprise, not classic v3 — see admin/lib/main.dart's identical note.
     providerWeb: ReCaptchaEnterpriseProvider(_appCheckRecaptchaSiteKey),
+  );
+
+  // iOS/macOS default to *not* displaying a push at all while the app is
+  // in the foreground — silently delivered with no banner/sound/badge
+  // unless explicitly opted into, which nothing here otherwise does (no
+  // onMessage/foreground handler exists). Mirrors ems/lib/main.dart's
+  // identical fix — see that file's own doc comment for the full
+  // reasoning (found chasing the same real-device investigation this
+  // mirrors). No-op on Android/web.
+  await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+    alert: true,
+    badge: true,
+    sound: true,
   );
 
   // Required for background push delivery on web (and PWA installability —

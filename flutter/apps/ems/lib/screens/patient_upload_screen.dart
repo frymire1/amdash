@@ -352,6 +352,21 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
         await trackingController.startTracking(id);
       } else {
         await trackingController.stopTracking(id);
+        // Immediate, reliable, in-app confirmation that tracking is off —
+        // for the paramedic who just turned it off themselves, right here,
+        // this is more useful and more dependable than the server-side
+        // "Tracking interrupted" push the same event also triggers (see
+        // functions/src/ems.ts's onEmsLocationEvent): that one exists for
+        // when *nobody* is looking at the app (a real background/killed-app
+        // safety net), not for the person actively looking at this exact
+        // screen right now.
+        if (mounted) {
+          await showInfoDialog(
+            context,
+            title: 'Live tracking is off',
+            message: 'Live location tracking is off for this patient. Turn it back on from this page anytime.',
+          );
+        }
       }
       if (mounted) context.go('/');
     } catch (error) {

@@ -49,6 +49,32 @@ Future<void> showErrorDialog(
   );
 }
 
+/// Same shape as [showErrorDialog] (a dismissable single-button modal), for
+/// a non-error confirmation instead — e.g. EMS's patient_upload_screen.dart
+/// confirming live tracking is now off right after a save, immediately and
+/// reliably in-app rather than depending on a push notification for
+/// feedback about something the same user on the same screen just did
+/// themselves.
+Future<void> showInfoDialog(
+  BuildContext context, {
+  required String title,
+  required String message,
+}) {
+  return showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: Text(message),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('OK'),
+        ),
+      ],
+    ),
+  );
+}
+
 /// Prompts for the current password and returns it, or `null` if cancelled.
 /// Firebase treats MFA enroll/unenroll as a "sensitive operation" that can
 /// throw `requires-recent-login` once a session is a while old — the mfa
