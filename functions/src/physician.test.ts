@@ -189,6 +189,8 @@ describe('sendAlertPush', () => {
       tokens: ['token-1'],
       notification: { title: 'Title', body: 'Body' },
       data: { title: 'Title', body: 'Body' },
+      apns: { payload: { aps: { sound: 'default' } } },
+      android: { notification: { sound: 'default' } },
     });
   });
 
@@ -252,6 +254,8 @@ describe('notifyPatientProximity', () => {
       tokens: ['token-1'],
       notification: { title: 'Patient approaching', body: '42, Male is about 15 minutes away.' },
       data: { title: 'Patient approaching', body: '42, Male is about 15 minutes away.' },
+      apns: { payload: { aps: { sound: 'default' } } },
+      android: { notification: { sound: 'default' } },
     });
   });
 

@@ -102,6 +102,15 @@ export async function sendAlertPush(
   }));
   const allTokens = tokensByUser.flatMap((user) => user.tokens);
   if (allTokens.length === 0) {
+    // Previously silent — found while chasing a real "no notification
+    // arrived" report that turned out to have no log trace at all on
+    // either the success or no-op path, only on a partial send failure.
+    // A genuine send success is logged too, just below, for the same
+    // reason: this function's own caller (notifyEmsConnectivityLoss/
+    // notifyPatientProximity) has no return value to report success or
+    // failure back through either, so Cloud Logging is the only place
+    // any of this is ever visible at all.
+    console.log(`sendAlertPush "${title}": no fcmTokens on any of ${userDocs.length} recipient doc(s) — nothing to send`);
     return;
   }
 
@@ -121,11 +130,26 @@ export async function sendAlertPush(
   // worker (web/firebase-messaging-sw.js) still reads `payload.data`
   // directly off the raw Push API event exactly as before; adding
   // `notification` doesn't change what reaches it.
+  // sound: 'default' on both platforms — without it, a notification
+  // displays silently with no vibration. On iOS specifically, vibration
+  // is tied to sound (there's no separate "vibrate only" flag on a
+  // remote/APNs notification); on Android, the default channel FCM
+  // auto-creates already vibrates for a sound-carrying notification, but
+  // doesn't for a silent one. Confirmed for real: a manual test received
+  // and displayed alerts correctly (see the notification field comment
+  // above) but with no sound or vibration at all until this was added.
   const response = await getMessaging().sendEachForMulticast({
     tokens: allTokens,
     notification: { title, body },
     data: { title, body },
+    apns: { payload: { aps: { sound: 'default' } } },
+    android: { notification: { sound: 'default' } },
   });
+
+  console.log(
+    `sendAlertPush "${title}": sent to ${allTokens.length} token(s) across ${userDocs.length} recipient(s) — ` +
+      `${response.successCount} succeeded, ${response.failureCount} failed`,
+  );
 
   if (response.failureCount > 0) {
     response.responses.forEach((result, index) => {

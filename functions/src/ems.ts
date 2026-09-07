@@ -137,14 +137,19 @@ export const onEmsLocationEvent = onMessagePublished(
 // codebase sends over FCM (not a HIPAA-covered product) — the reason alone
 // is specific enough to be actionable without naming a patient.
 async function notifyEmsConnectivityLoss(patientId: string, reason: 'signal_lost' | 'stopped_sharing'): Promise<void> {
+  // Every branch below logs something — previously silent throughout,
+  // found while chasing a real "no notification arrived" report that
+  // left zero trace anywhere to explain why.
   const patientSnapshot = await getFirestore().collection('patients').doc(patientId).get();
   const emsUid = patientSnapshot.data()?.['createdBy'];
   if (typeof emsUid !== 'string') {
+    console.log(`notifyEmsConnectivityLoss (${reason}): patient ${patientId} has no valid createdBy — skipping`);
     return;
   }
 
   const userSnapshot = await getFirestore().collection('users').doc(emsUid).get();
   if (!userSnapshot.exists) {
+    console.log(`notifyEmsConnectivityLoss (${reason}): creator ${emsUid} of patient ${patientId} has no users doc — skipping`);
     return;
   }
 
