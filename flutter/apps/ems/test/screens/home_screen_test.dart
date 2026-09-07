@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:amdash_core/amdash_core.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:ems/classes/uploaded_patient.dart';
@@ -182,6 +184,48 @@ void main() {
       await tester.pumpAndSettle();
 
       verifyNever(() => alertService.registerForConnectivityAlerts(any()));
+    });
+
+    testWidgets('a uid that only resolves after this screen has already mounted still registers '
+        '— not just one already resolved beforehand', (tester) async {
+      final alertService = _MockEmsAlertService();
+      when(() => alertService.registerForConnectivityAlerts(any())).thenAnswer((_) async {});
+      final authController = StreamController<User?>();
+      addTearDown(authController.close);
+
+      // Unlike the first test above (which pre-resolves authStateProvider
+      // before HomeScreen ever mounts, matching real production ordering),
+      // this one deliberately mounts with authStateProvider still
+      // AsyncLoading — proving initState's listenManual (not a one-time
+      // ref.read, which could never recover from this) still catches a
+      // uid that only shows up after the fact. See home_screen.dart's own
+      // doc comment on why this matters even though real production
+      // ordering shouldn't normally hit it.
+      await pumpApp(
+        tester,
+        const SizedBox(),
+        overrides: [
+          uploadedPatientsProvider.overrideWithValue(const AsyncValue.data([])),
+          isOfflineProvider.overrideWithValue(false),
+          emsTrackingProvider.overrideWith(() => _FakeEmsTrackingController(const {})),
+          emsTrackingHealthProvider.overrideWith((ref) => Stream.value(EmsTrackingHealth.online)),
+          ownOrganizationProvider.overrideWith((ref) => Stream.value(null)),
+          patientUploadServiceProvider.overrideWithValue(_MockPatientUploadService()),
+          fhirExportFunctionsProvider.overrideWithValue(_MockFirebaseFunctions()),
+          authStateProvider.overrideWith((ref) => authController.stream),
+          emsAlertServiceProvider.overrideWithValue(alertService),
+        ],
+        routes: {'/home': (_) => const HomeScreen()},
+        initialLocation: '/home',
+      );
+      await tester.pump();
+
+      verifyNever(() => alertService.registerForConnectivityAlerts(any()));
+
+      authController.add(MockUser(uid: 'late-uid'));
+      await tester.pumpAndSettle();
+
+      verify(() => alertService.registerForConnectivityAlerts('late-uid')).called(1);
     });
   });
 }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:amdash_core/amdash_core.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
@@ -38,6 +40,29 @@ void main() {
       final doc = await firestore.collection('users').doc('user-1').get();
       expect(doc.data()?['lastFcmRegistrationError'], thrown.toString());
       expect(doc.data()?['lastFcmRegistrationErrorAt'], isNotNull);
+    });
+
+    test('writes an "attempt started" marker before requestPermission() even resolves, so a '
+        'hung/never-resolving native call is still visible in Firestore', () async {
+      final settingsCompleter = Completer<NotificationSettings>();
+      when(() => messaging.requestPermission()).thenAnswer((_) => settingsCompleter.future);
+
+      final future = service.enableAlerts('user-1', 24);
+      // Lets the marker write (itself async, but not gated on
+      // requestPermission() resolving) actually land, without ever
+      // resolving requestPermission() at all — proving this doesn't wait
+      // on it.
+      await pumpEventQueue();
+
+      final doc = await firestore.collection('users').doc('user-1').get();
+      expect(doc.data()?['lastFcmRegistrationError'], contains('has not yet reached an outcome'));
+
+      // Let the still-in-flight call actually finish so it doesn't leak an
+      // unresolved Future into a later test.
+      final settings = _MockNotificationSettings();
+      when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.denied);
+      settingsCompleter.complete(settings);
+      await future;
     });
 
     test('permission denied -> not granted, never requests a token, records why in Firestore', () async {

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:amdash_core/amdash_core.dart';
+import 'package:firebase_auth/firebase_auth.dart' show User;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -33,10 +34,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // ems_alert_service.dart's own doc comment). Fire-and-forget: a failed
     // or dismissed permission prompt shouldn't block this screen's own
     // first frame, and registerForConnectivityAlerts already swallows its
-    // own failures. valueOrNull?.uid is deliberately not asserted non-null
-    // — this screen is only ever reached once signed in (see the router's
-    // own guard chain), but a stray unauthenticated mount should silently
-    // skip registration rather than crash.
+    // own failures.
     //
     // Skipped entirely on web: there's no production EMS web app (kept
     // only for this repo's own Chrome e2e coverage — see ems_test.dart's
@@ -50,10 +48,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // finding) tying up test/browser resources during this suite's
     // longest, most Firestore-heavy run.
     if (kIsWeb) return;
-    final uid = ref.read(authStateProvider).valueOrNull?.uid;
-    if (uid != null) {
+
+    // listenManual (unlike ref.listen, safe to call outside build() — see
+    // its own doc comment) rather than a one-time ref.read: this screen is
+    // only ever reached once signed in (AppRouteGuard's own guard chain),
+    // but initState() runs exactly once, synchronously, the instant this
+    // State object is first inserted into the tree — if authStateProvider's
+    // resolved value hasn't propagated to *this* widget subtree in that
+    // exact instant (a one-frame-late race, not something a plain
+    // ref.read here could ever recover from), a real device could reach
+    // this screen with a signed-in user yet still see uid read as null
+    // right here, silently skipping registration for this screen
+    // instance's entire remaining lifetime — every later frame's build()
+    // still renders this same authenticated user's data just fine, so
+    // nothing about that would look broken from the UI. fireImmediately:
+    // true handles the normal case (uid already resolved) in the very
+    // same call that also covers that race — the subscription is closed
+    // as soon as registration is kicked off, so this can't double-fire
+    // registerFcmToken's arrayUnion write forever (harmless if it did —
+    // arrayUnion is idempotent — but there's no reason to keep listening
+    // once a uid has actually been seen).
+    ProviderSubscription<AsyncValue<User?>>? subscription;
+    subscription = ref.listenManual(authStateProvider, (previous, next) {
+      final uid = next.valueOrNull?.uid;
+      if (uid == null) return;
       unawaited(ref.read(emsAlertServiceProvider).registerForConnectivityAlerts(uid));
-    }
+      subscription?.close();
+    }, fireImmediately: true);
   }
 
   @override

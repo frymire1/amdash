@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:amdash_core/amdash_core.dart';
 import 'package:ems/services/ems_alert_service.dart';
 import 'package:fake_async/fake_async.dart';
@@ -43,6 +45,29 @@ void main() {
       final doc = await firestore.collection('users').doc('ems-1').get();
       expect(doc.data()?['lastFcmRegistrationError'], thrown.toString());
       expect(doc.data()?['lastFcmRegistrationErrorAt'], isNotNull);
+    });
+
+    test('writes an "attempt started" marker before requestPermission() even resolves, so a '
+        'hung/never-resolving native call is still visible in Firestore', () async {
+      final settingsCompleter = Completer<NotificationSettings>();
+      when(() => messaging.requestPermission()).thenAnswer((_) => settingsCompleter.future);
+
+      final future = service.registerForConnectivityAlerts('ems-1');
+      // Lets the marker write (itself async, but not gated on
+      // requestPermission() resolving) actually land, without ever
+      // resolving requestPermission() at all — proving this doesn't wait
+      // on it.
+      await pumpEventQueue();
+
+      final doc = await firestore.collection('users').doc('ems-1').get();
+      expect(doc.data()?['lastFcmRegistrationError'], contains('has not yet reached an outcome'));
+
+      // Let the still-in-flight call actually finish so it doesn't leak an
+      // unresolved Future into a later test.
+      final settings = _MockNotificationSettings();
+      when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.denied);
+      settingsCompleter.complete(settings);
+      await future;
     });
 
     test('debugLastRegisterForConnectivityAlertsFinished is false while in flight, '

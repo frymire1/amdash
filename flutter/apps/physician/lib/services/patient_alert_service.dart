@@ -59,6 +59,11 @@ class PatientAlertService {
     int hours, {
     List<int> etaAlertThresholdsMinutes = const [],
   }) async {
+    // Written unconditionally, before anything below that could ever hang
+    // rather than merely fail — see ems_alert_service.dart's identical
+    // write for the full rationale (found chasing the same real-device
+    // investigation this mirrors).
+    await _recordFailure(uid, 'Registration attempt started but has not yet reached an outcome.');
     try {
       final settings = await _messaging.requestPermission();
       if (settings.authorizationStatus == AuthorizationStatus.denied) {

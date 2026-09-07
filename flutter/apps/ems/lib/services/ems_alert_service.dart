@@ -70,6 +70,17 @@ class EmsAlertService {
   /// needed.
   Future<void> registerForConnectivityAlerts(String uid) async {
     debugLastRegisterForConnectivityAlertsFinished = false;
+    // Written unconditionally, before anything below that could ever hang
+    // rather than merely fail — every other line in this method already
+    // ends in a write to Firestore, on every path, once reached (success
+    // clears this; any denial/null-token/exception overwrites it with a
+    // more specific reason). If a real device ever shows *only* this
+    // message and nothing more specific, that pins the native
+    // requestPermission()/getToken() call itself as the thing that never
+    // returned at all (a real, if rare, class of iOS plugin-delegate bug),
+    // not merely one that failed — a distinction nothing else here could
+    // otherwise ever surface.
+    await _recordFailure(uid, 'Registration attempt started but has not yet reached an outcome.');
     try {
       final settings = await _messaging.requestPermission();
       if (settings.authorizationStatus == AuthorizationStatus.denied) {
