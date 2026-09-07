@@ -2,7 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- production, not development — matches the Ad Hoc distribution
+	     profile Codemagic now builds this with (see codemagic.yaml's
+	     ios_signing.distribution_type for the full reasoning: Firebase
+	     App Distribution testing is Ad Hoc's use case, not Development's,
+	     and firebase_messaging's own plugin hardcodes "production" for
+	     any non-Debug build regardless of what this value says, so this
+	     needs to actually match a real Ad Hoc/production-scoped profile
+	     rather than a Development/sandbox-scoped one. -->
 	<key>aps-environment</key>
-	<string>development</string>
+	<string>production</string>
 </dict>
 </plist>

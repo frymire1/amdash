@@ -195,8 +195,24 @@ workflows:
       flutter: stable
       xcode: latest
       node: latest
+      # ad_hoc, not development — Firebase App Distribution testing is
+      # exactly what an Ad Hoc profile is for (a pre-built, signed IPA
+      # shared with registered test devices outside the App Store), not a
+      # Development profile (meant for direct Xcode-to-device deploys
+      # during active development). This matters beyond terminology:
+      # firebase_messaging's iOS plugin hardcodes sandbox-vs-production
+      # APNs token type purely off Xcode's DEBUG build flag (see
+      # FLTFirebaseMessagingPlugin.m), with no override — `flutter build
+      # ipa --release` below never defines DEBUG, so the plugin always
+      # tells Firebase's SDK "this is a production token." A Development
+      # profile's aps-environment is sandbox, so that claim was always
+      # false — confirmed for real (a device stuck on
+      # [firebase_messaging/apns-token-not-set] no matter how long
+      # getToken() was retried, unaffected by every app-code fix tried).
+      # Ad Hoc's aps-environment is production, matching what the release
+      # build already assumes — see Runner.entitlements' matching change.
       ios_signing:
-        distribution_type: development
+        distribution_type: ad_hoc
         bundle_identifier: com.amdash.ems
       groups:
         - firebase_deploy
