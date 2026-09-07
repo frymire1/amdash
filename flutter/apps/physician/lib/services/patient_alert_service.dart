@@ -10,10 +10,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// (Android/iOS) don't take a vapidKey.
 const _vapidKey = 'BOyziwdy1IYAaRdmBO0KZlyCwrRtxPoacISCqUoJiTYPkTpgVAAlAw7ScAVqUC4uCs2JTYn7cifydpr-I1XpGlQ';
 
-/// How long, and how many times, [_ensureApnsTokenReady] polls
-/// getAPNSToken() before giving up and calling getToken() anyway. Mirrors
-/// ems_alert_service.dart's identical constants.
-const _apnsTokenMaxAttempts = 10;
+/// How long, and how many times, [_getTokenWaitingForApns] retries
+/// getToken() on an apns-token-not-set error before giving up and letting
+/// a final attempt's outcome stand as-is. Mirrors ems_alert_service.dart's
+/// identical constants (see that file's own doc comment for why this was
+/// bumped up from an earlier, smaller budget).
+const _apnsTokenMaxAttempts = 20;
 const _apnsTokenRetryDelay = Duration(seconds: 1);
 
 class EnableAlertsResult {
@@ -71,9 +73,7 @@ class PatientAlertService {
         return const EnableAlertsResult(granted: false);
       }
 
-      await _ensureApnsTokenReady();
-
-      final token = await _messaging.getToken(vapidKey: _vapidKey);
+      final token = await _getTokenWaitingForApns();
       if (token == null) {
         await _recordFailure(
           uid,
@@ -114,38 +114,34 @@ class PatientAlertService {
   /// registered — a separate async round trip through Apple's push
   /// servers (`application:didRegisterForRemoteNotificationsWithDeviceToken:`)
   /// that often hasn't finished yet on a fresh cold start right after
-  /// permission is granted, and getToken() throws if called before it has.
-  /// Mirrors ems_alert_service.dart's identical fix — see that file's own
-  /// doc comment for how this was found (a real manual iOS test of the
-  /// EMS app's equivalent flow). getAPNSToken() is iOS/macOS-only and
-  /// resolves null immediately on every other platform, so this is a
-  /// no-op everywhere else.
-  ///
-  /// getAPNSToken() itself does *not* simply return null while the
-  /// handshake is still pending, despite that being this method's whole
-  /// original premise — it throws a FirebaseException
-  /// (`apns-token-not-set`) instead. Mirrors ems_alert_service.dart's
-  /// identical fix — see that file's own doc comment for the full story
-  /// (found via a real device's lastFcmRegistrationError showing this
-  /// exact code/message on the very first registration attempt after a
-  /// fresh install).
-  Future<void> _ensureApnsTokenReady() async {
+  /// permission is granted. While it hasn't, getToken() throws a
+  /// FirebaseException (`apns-token-not-set`) rather than merely returning
+  /// null. Mirrors ems_alert_service.dart's identical fix — see that
+  /// file's own doc comment for the full story (an earlier version of
+  /// this instead polled getAPNSToken() separately as a pre-check,
+  /// assuming *it* would return null while pending and that getToken()
+  /// would then reliably succeed once it stopped — confirmed for real,
+  /// twice, that neither assumption holds). Retrying getToken() itself
+  /// directly targets the call that actually needs to succeed. iOS-only:
+  /// on every other platform this makes exactly one call, exactly like a
+  /// plain `_messaging.getToken(vapidKey: _vapidKey)` would.
+  Future<String?> _getTokenWaitingForApns() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
-      return;
+      return _messaging.getToken(vapidKey: _vapidKey);
     }
-    for (var attempt = 0; attempt < _apnsTokenMaxAttempts; attempt++) {
+    for (var attempt = 1; attempt < _apnsTokenMaxAttempts; attempt++) {
       try {
-        if (await _messaging.getAPNSToken() != null) {
-          return;
-        }
+        return await _messaging.getToken(vapidKey: _vapidKey);
       } on FirebaseException catch (error) {
         if (error.code != 'apns-token-not-set') rethrow;
       }
       await Future.delayed(_apnsTokenRetryDelay);
     }
-    // Gives up and calls getToken() anyway rather than waiting forever —
-    // if it still throws, the catch block above rethrows exactly as
-    // before this fix existed, no worse off than the original behavior.
+    // Final attempt: stop waiting and just try — its outcome (a token, or
+    // a real throw) propagates normally, same "don't wait forever"
+    // philosophy as before, now on the call that's actually the one that
+    // needs to succeed.
+    return _messaging.getToken(vapidKey: _vapidKey);
   }
 
   Future<void> disableAlerts(String uid) {

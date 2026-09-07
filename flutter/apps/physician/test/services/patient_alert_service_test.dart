@@ -105,10 +105,12 @@ void main() {
       final data = doc.data()!;
       expect(data['fcmTokens'], contains('fcm-token-1'));
       expect(data['newPatientAlertsExpiresAt'], isNotNull);
-      // On every platform but iOS, _ensureApnsTokenReady is a pure no-op —
-      // this is the default test platform (never iOS unless overridden,
-      // see the 'waits for a native APNs token on iOS' group below).
-      verifyNever(() => messaging.getAPNSToken());
+      // On every platform but iOS, _getTokenWaitingForApns makes exactly
+      // one plain getToken() call — this is the default test platform
+      // (never iOS unless overridden, see the retry group below), so this
+      // proves the apns-token-not-set retry path is a genuine no-op here,
+      // not that it just happened to succeed on its first try.
+      verify(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).called(1);
     });
 
     test('etaAlertThresholdsMinutes defaults to empty when not passed', () async {
@@ -136,32 +138,35 @@ void main() {
     });
   });
 
-  group('waits for a native APNs token on iOS before requesting one', () {
+  group('retries getToken() on an apns-token-not-set error on iOS', () {
     setUp(() => debugDefaultTargetPlatformOverride = TargetPlatform.iOS);
     tearDown(() => debugDefaultTargetPlatformOverride = null);
 
-    test('APNs token already available -> registers immediately, no retry delay', () async {
+    test('getToken() succeeds immediately -> registers immediately, no retry delay', () async {
       final settings = _MockNotificationSettings();
       when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.authorized);
       when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
-      when(() => messaging.getAPNSToken()).thenAnswer((_) async => 'apns-token');
       when(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).thenAnswer((_) async => 'fcm-token-1');
 
       final result = await service.enableAlerts('user-1', 24);
 
       expect(result.granted, true);
-      verify(() => messaging.getAPNSToken()).called(1);
+      verify(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).called(1);
     });
 
-    test('APNs token arrives after a couple of retries -> waits, then registers', () {
+    test('getToken() throws apns-token-not-set a couple of times, then succeeds -> waits, then '
+        'registers — mirrors ems_alert_service_test.dart\'s identical case, found via a real '
+        'device', () {
       final settings = _MockNotificationSettings();
       when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.authorized);
       when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
-      when(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).thenAnswer((_) async => 'fcm-token-1');
-      var apnsCallCount = 0;
-      when(() => messaging.getAPNSToken()).thenAnswer((_) async {
-        apnsCallCount++;
-        return apnsCallCount < 3 ? null : 'apns-token';
+      var callCount = 0;
+      when(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).thenAnswer((_) async {
+        callCount++;
+        if (callCount < 3) {
+          throw FirebaseException(plugin: 'firebase_messaging', code: 'apns-token-not-set');
+        }
+        return 'fcm-token-1';
       });
 
       // A plain test() has no flutter_test fake-async binding driving the
@@ -173,62 +178,47 @@ void main() {
         service.enableAlerts('user-1', 24);
         async.elapse(const Duration(seconds: 3));
 
-        expect(apnsCallCount, 3);
+        expect(callCount, 3);
       });
     });
 
-    test('APNs token never arrives -> gives up after the max attempts and calls getToken() anyway', () {
+    test('getToken() always throws apns-token-not-set -> gives up after the max attempts, and '
+        'the final attempt\'s own throw is what gets recorded (and rethrown, unlike '
+        'ems_alert_service_test.dart\'s identical-shaped case — enableAlerts rethrows by '
+        'design; a plain unawaited call here would otherwise leak an unhandled rejection)', () {
       final settings = _MockNotificationSettings();
       when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.authorized);
       when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
-      when(() => messaging.getAPNSToken()).thenAnswer((_) async => null);
-      when(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).thenAnswer((_) async => 'fcm-token-1');
+      final thrown = FirebaseException(plugin: 'firebase_messaging', code: 'apns-token-not-set');
+      when(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).thenThrow(thrown);
 
       fakeAsync((async) {
-        service.enableAlerts('user-1', 24);
-        async.elapse(const Duration(seconds: 15));
+        Object? caughtError;
+        unawaited(
+          service.enableAlerts('user-1', 24).catchError((error) {
+            caughtError = error;
+            return const EnableAlertsResult(granted: false);
+          }),
+        );
+        async.elapse(const Duration(seconds: 20));
 
-        verify(() => messaging.getAPNSToken()).called(10);
-        verify(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).called(1);
+        verify(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).called(20);
+        expect(caughtError, thrown);
+        expect(debugLastEnableAlertsError, thrown);
       });
     });
 
-    test('getAPNSToken() throwing apns-token-not-set is treated like a null result (keeps '
-        'retrying instead of aborting) — mirrors ems_alert_service_test.dart\'s identical case, '
-        'found via a real device', () {
-      final settings = _MockNotificationSettings();
-      when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.authorized);
-      when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
-      when(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).thenAnswer((_) async => 'fcm-token-1');
-      var apnsCallCount = 0;
-      when(() => messaging.getAPNSToken()).thenAnswer((_) async {
-        apnsCallCount++;
-        if (apnsCallCount < 3) {
-          throw FirebaseException(plugin: 'firebase_messaging', code: 'apns-token-not-set');
-        }
-        return 'apns-token';
-      });
-
-      fakeAsync((async) {
-        service.enableAlerts('user-1', 24);
-        async.elapse(const Duration(seconds: 3));
-
-        expect(apnsCallCount, 3);
-        verify(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).called(1);
-      });
-    });
-
-    test('getAPNSToken() throwing any other FirebaseException code is not swallowed', () async {
+    test('getToken() throwing any other FirebaseException code is not retried', () async {
       final settings = _MockNotificationSettings();
       when(() => settings.authorizationStatus).thenReturn(AuthorizationStatus.authorized);
       when(() => messaging.requestPermission()).thenAnswer((_) async => settings);
       final thrown = FirebaseException(plugin: 'firebase_messaging', code: 'unknown', message: 'boom');
-      when(() => messaging.getAPNSToken()).thenThrow(thrown);
+      when(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).thenThrow(thrown);
 
       await expectLater(() => service.enableAlerts('user-1', 24), throwsA(thrown));
 
       expect(debugLastEnableAlertsError, thrown);
-      verifyNever(() => messaging.getToken(vapidKey: any(named: 'vapidKey')));
+      verify(() => messaging.getToken(vapidKey: any(named: 'vapidKey'))).called(1);
     });
   });
 

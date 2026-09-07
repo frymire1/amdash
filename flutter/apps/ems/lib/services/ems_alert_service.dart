@@ -11,9 +11,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// vapidKey.
 const _vapidKey = 'BOyziwdy1IYAaRdmBO0KZlyCwrRtxPoacISCqUoJiTYPkTpgVAAlAw7ScAVqUC4uCs2JTYn7cifydpr-I1XpGlQ';
 
-/// How long, and how many times, [_ensureApnsTokenReady] polls
-/// getAPNSToken() before giving up and calling getToken() anyway.
-const _apnsTokenMaxAttempts = 10;
+/// How long, and how many times, [_getTokenWaitingForApns] retries
+/// getToken() on an apns-token-not-set error before giving up and letting
+/// a final attempt's outcome (success or a real throw) stand as-is. 20
+/// attempts (~20s worst case) — bumped up from an earlier, smaller budget
+/// once that one was confirmed for real (via a second real-device test,
+/// after the first fix had already shipped) to still not always be
+/// enough. Runs unattended in the background either way (see
+/// registerForConnectivityAlerts' own `unawaited` call site), so a longer
+/// worst case costs nothing visible.
+const _apnsTokenMaxAttempts = 20;
 const _apnsTokenRetryDelay = Duration(seconds: 1);
 
 /// The real Object thrown by the most recent
@@ -89,9 +96,7 @@ class EmsAlertService {
         return;
       }
 
-      await _ensureApnsTokenReady();
-
-      final token = await _messaging.getToken(vapidKey: _vapidKey);
+      final token = await _getTokenWaitingForApns();
       if (token == null) {
         await _recordFailure(
           uid,
@@ -131,44 +136,42 @@ class EmsAlertService {
   /// registered — a separate async round trip through Apple's push
   /// servers (`application:didRegisterForRemoteNotificationsWithDeviceToken:`)
   /// that often hasn't finished yet on a fresh cold start right after
-  /// permission is granted, and getToken() throws if called before it has.
-  /// Confirmed for real: a manual iOS test granted permission and reached
-  /// this call, but no token was ever written to Firestore — the resulting
-  /// exception was silently swallowed by the catch block above (by design,
-  /// per this method's own doc comment), leaving zero visible symptom.
-  /// getAPNSToken() is iOS/macOS-only and resolves null immediately on
-  /// every other platform, so this is a no-op everywhere else.
-  ///
-  /// getAPNSToken() itself does *not* simply return null while the
-  /// handshake is still pending, despite that being this method's whole
-  /// original premise — it throws a FirebaseException
-  /// (`apns-token-not-set`) instead. Confirmed for real (this exact
-  /// code/message, via lastFcmRegistrationError, on the very first
-  /// attempt of a real device's very first registration after a fresh
-  /// install): an unguarded call here meant the very first loop iteration
-  /// always threw and escaped straight to the outer catch block, aborting
-  /// the whole registration attempt before it ever reached getToken() at
-  /// all — silently, on every single cold start, since the handshake is
-  /// essentially never already done that early. Caught and treated
-  /// exactly like a null result (keep retrying) so the loop actually
-  /// waits out the handshake instead of aborting on its first iteration.
-  Future<void> _ensureApnsTokenReady() async {
+  /// permission is granted. While it hasn't, getToken() throws a
+  /// FirebaseException (`apns-token-not-set`) rather than merely returning
+  /// null. Confirmed for real, twice now: first via a manual iOS test
+  /// whose registration silently vanished entirely (an earlier version of
+  /// this fix instead polled getAPNSToken() separately as a pre-check,
+  /// assuming *it* would return null — not throw — while pending, and
+  /// that once it stopped throwing, getToken() would then reliably
+  /// succeed); then, after that shipped, a second real-device test still
+  /// hit this identical error via lastFcmRegistrationError — getAPNSToken()
+  /// throws the same error rather than returning null, *and* even once
+  /// that fix silently absorbed those throws and gave up after its own
+  /// budget, the subsequent getToken() call still failed the same way.
+  /// The two calls' readiness doesn't reliably agree, so polling
+  /// getAPNSToken() as a proxy for getToken()'s own readiness doesn't
+  /// actually work — retrying getToken() itself, on this exact error
+  /// code, directly targets the one call that actually needs to succeed.
+  /// iOS-only: this error code is specific to the APNs handshake, so on
+  /// every other platform this makes exactly one call, exactly like a
+  /// plain `_messaging.getToken(vapidKey: _vapidKey)` would.
+  Future<String?> _getTokenWaitingForApns() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
-      return;
+      return _messaging.getToken(vapidKey: _vapidKey);
     }
-    for (var attempt = 0; attempt < _apnsTokenMaxAttempts; attempt++) {
+    for (var attempt = 1; attempt < _apnsTokenMaxAttempts; attempt++) {
       try {
-        if (await _messaging.getAPNSToken() != null) {
-          return;
-        }
+        return await _messaging.getToken(vapidKey: _vapidKey);
       } on FirebaseException catch (error) {
         if (error.code != 'apns-token-not-set') rethrow;
       }
       await Future.delayed(_apnsTokenRetryDelay);
     }
-    // Gives up and calls getToken() anyway rather than waiting forever —
-    // if it still throws, the catch block above swallows it exactly as
-    // before this fix existed, no worse off than the original behavior.
+    // Final attempt: stop waiting and just try — its outcome (a token, or
+    // a real throw) propagates normally, same "don't wait forever"
+    // philosophy as before, now on the call that's actually the one that
+    // needs to succeed.
+    return _messaging.getToken(vapidKey: _vapidKey);
   }
 }
 
