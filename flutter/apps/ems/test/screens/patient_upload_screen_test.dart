@@ -485,25 +485,71 @@ void main() {
       // tap lands outside the render tree entirely and _onSubmit never runs.
       await tester.ensureVisible(find.byKey(const Key('patient_upload_submit')));
       await tester.tap(find.byKey(const Key('patient_upload_submit')));
-      // Bounded pumps, not pumpAndSettle() — showInfoDialog awaits real
+      // Bounded pumps, not pumpAndSettle() — _confirmTrackingOff awaits real
       // user dismissal (same as showErrorDialog's identical "live tracking
       // failing to start" test above), so pumpAndSettle would just time out
-      // waiting for a settle that isn't coming until the OK tap below.
+      // waiting for a settle that isn't coming until the Continue tap below.
+      await tester.pump();
+      await tester.pump();
+
+      // The dialog gates the save entirely — it's shown before stopTracking
+      // is ever called, not as a recap of something that already happened.
+      expect(stoppedId, '');
+      expect(startCalled, false);
+      expect(
+        find.text(
+          'You have location sharing turned off, if this was a mistake, click back, if was intentional, click continue',
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('Continue'));
       await tester.pump();
       await tester.pump();
 
       expect(stoppedId, 'patient-1');
       expect(startCalled, false);
+    });
 
-      // Confirms the real confirmation copy, not just that *some* dialog
-      // appeared.
-      expect(find.text('Live tracking is off'), findsOneWidget);
-      expect(
-        find.text('Live location tracking is off for this patient. Turn it back on from this page anytime.'),
-        findsOneWidget,
+    testWidgets('with live tracking toggled off, tapping Back on the confirmation cancels the submit', (
+      tester,
+    ) async {
+      when(() => uploadService.updatePatient(any(), any())).thenAnswer(
+        (_) async => const PatientSaveResult(id: 'patient-1'),
       );
-      await tester.tap(find.text('OK'));
+      when(() => decryptionService.decryptFields(any())).thenAnswer((_) async => {});
+      var stoppedId = '';
+      var startCalled = false;
+
+      await pumpScreen(
+        tester,
+        patientId: 'patient-1',
+        uploadedPatients: [UploadedPatient(id: 'patient-1', patient: _patient())],
+        trackedPatients: const {'patient-1'},
+        onStartTracking: (_) async => startCalled = true,
+        onStopTracking: (id) async => stoppedId = id,
+      );
       await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byType(SwitchListTile));
+      await tester.tap(find.byType(SwitchListTile));
+      await tester.pump();
+
+      await tester.ensureVisible(find.byKey(const Key('patient_upload_submit')));
+      await tester.tap(find.byKey(const Key('patient_upload_submit')));
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.text('Back'));
+      await tester.pumpAndSettle();
+
+      // Backing out aborts the submit entirely — neither stopTracking nor
+      // updatePatient/uploadPatient runs, and the paramedic stays on the
+      // form to fix the toggle.
+      expect(stoppedId, '');
+      expect(startCalled, false);
+      verifyNever(() => uploadService.updatePatient(any(), any()));
+      expect(find.byKey(const Key('patient_upload_submit')), findsOneWidget);
     });
 
     testWidgets('the Destination Hospital dropdown selection round-trips through submit', (tester) async {

@@ -271,54 +271,17 @@ describe('onEmsLocationEvent', () => {
     expect(mockLocationGet).not.toHaveBeenCalled();
   });
 
-  describe('explicit opt-out (active: false)', () => {
-    it('does nothing further when the patient has no (string) createdBy on record', async () => {
-      mockPatientGet.mockResolvedValue({ data: () => undefined });
+  it('an explicit opt-out (active: false) no longer pushes anything on its own — patient_upload_' +
+      "screen.dart's own confirmation dialog covers that now; checkEmsConnectivity's own staleness " +
+      'check still covers signal genuinely being lost', async () => {
+    mockPatientGet.mockResolvedValue({ data: () => ({ createdBy: 'ems-uid' }) });
+    mockUsersGet.mockResolvedValue({ exists: true, ref: 'USER_REF_ems-uid', data: () => ({ fcmTokens: ['token-1'] }) });
 
-      await onEmsLocationEvent.run({
-        data: { message: { json: { patientId: 'p1', organizationId: 'org-1', active: false } } },
-      } as never);
+    await onEmsLocationEvent.run({
+      data: { message: { json: { patientId: 'p1', organizationId: 'org-1', active: false } } },
+    } as never);
 
-      expect(mockSendAlertPush).not.toHaveBeenCalled();
-    });
-
-    it('does nothing further when the EMS account on record has no user doc', async () => {
-      mockPatientGet.mockResolvedValue({ data: () => ({ createdBy: 'ems-uid' }) });
-      mockUsersGet.mockResolvedValue({ exists: false, data: () => undefined });
-
-      await onEmsLocationEvent.run({
-        data: { message: { json: { patientId: 'p1', organizationId: 'org-1', active: false } } },
-      } as never);
-
-      expect(mockSendAlertPush).not.toHaveBeenCalled();
-    });
-
-    it('sends a "stopped sharing" push to the patient-creating EMS account', async () => {
-      mockPatientGet.mockResolvedValue({ data: () => ({ createdBy: 'ems-uid' }) });
-      mockUsersGet.mockResolvedValue({ exists: true, ref: 'USER_REF_ems-uid', data: () => ({ fcmTokens: ['token-1'] }) });
-
-      await onEmsLocationEvent.run({
-        data: { message: { json: { patientId: 'p1', organizationId: 'org-1', active: false } } },
-      } as never);
-
-      expect(mockSendAlertPush).toHaveBeenCalledWith(
-        [{ ref: 'USER_REF_ems-uid', data: expect.any(Function) }],
-        'Tracking interrupted',
-        'Location sharing was turned off for a patient still marked active.',
-      );
-      // Confirms the wrapped data() actually forwards the real doc data,
-      // not just a matching shape.
-      expect(mockSendAlertPush.mock.calls[0][0][0].data()).toEqual({ fcmTokens: ['token-1'] });
-    });
-
-    it('does not fire the opt-out push for an active: true event', async () => {
-      mockPatientGet.mockResolvedValue({ data: () => ({ createdBy: 'ems-uid' }) });
-      mockUsersGet.mockResolvedValue({ exists: true, ref: 'USER_REF_ems-uid', data: () => ({ fcmTokens: ['token-1'] }) });
-
-      await onEmsLocationEvent.run(activeLocationEvent());
-
-      expect(mockSendAlertPush).not.toHaveBeenCalled();
-    });
+    expect(mockSendAlertPush).not.toHaveBeenCalled();
   });
 
   describe('proximity-alert threshold check', () => {
@@ -464,7 +427,7 @@ describe('checkEmsConnectivity', () => {
     expect(mockLocationSet).not.toHaveBeenCalled();
   });
 
-  it('skips a patient already explicitly stopped (active: false) — the opt-out hook already covered it', async () => {
+  it('skips a patient already explicitly stopped (active: false) — nothing to alert about signal loss for', async () => {
     mockPatientsActiveGet.mockResolvedValue({ docs: [{ id: 'p1' }] });
     mockLocationGet.mockResolvedValue({
       data: () => ({ active: false, updatedAt: { toMillis: () => Date.now() - 10 * 60 * 1000 } }),
@@ -510,6 +473,31 @@ describe('checkEmsConnectivity', () => {
     expect(mockSendAlertPush).not.toHaveBeenCalled();
   });
 
+  it("does nothing further when the stale patient has no (string) createdBy on record", async () => {
+    mockPatientsActiveGet.mockResolvedValue({ docs: [{ id: 'p1' }] });
+    mockLocationGet.mockResolvedValue({
+      data: () => ({ active: true, updatedAt: { toMillis: () => Date.now() - 120_000 } }),
+    });
+    mockPatientGet.mockResolvedValue({ data: () => undefined });
+
+    await checkEmsConnectivity.run({} as never);
+
+    expect(mockSendAlertPush).not.toHaveBeenCalled();
+  });
+
+  it('does nothing further when the stale patient\'s EMS creator has no user doc', async () => {
+    mockPatientsActiveGet.mockResolvedValue({ docs: [{ id: 'p1' }] });
+    mockLocationGet.mockResolvedValue({
+      data: () => ({ active: true, updatedAt: { toMillis: () => Date.now() - 120_000 } }),
+    });
+    mockPatientGet.mockResolvedValue({ data: () => ({ createdBy: 'ems-uid' }) });
+    mockUsersGet.mockResolvedValue({ exists: false, data: () => undefined });
+
+    await checkEmsConnectivity.run({} as never);
+
+    expect(mockSendAlertPush).not.toHaveBeenCalled();
+  });
+
   it('notifies and stamps connectivityAlertSentAt once a fix has gone stale past the threshold', async () => {
     mockPatientsActiveGet.mockResolvedValue({ docs: [{ id: 'p1' }] });
     mockLocationGet.mockResolvedValue({
@@ -525,6 +513,10 @@ describe('checkEmsConnectivity', () => {
       'Tracking interrupted',
       "A tracked patient's location hasn't updated recently — check the device's signal and battery.",
     );
+    // Confirms the wrapped data() actually forwards the real doc data, not
+    // just a matching shape — mockSendAlertPush is a mock, so nothing
+    // else ever actually calls this closure.
+    expect(mockSendAlertPush.mock.calls[0][0][0].data()).toEqual({ fcmTokens: ['token-1'] });
     expect(mockLocationSet).toHaveBeenCalledWith({ connectivityAlertSentAt: 'SERVER_TIMESTAMP' }, { merge: true });
   });
 

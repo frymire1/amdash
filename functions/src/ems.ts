@@ -105,14 +105,15 @@ export const onEmsLocationEvent = onMessagePublished(
 
     await patientLocationRef(data.patientId).set(update, { merge: true });
 
-    if (data.active === false) {
-      // stopEmsLocation is the only sender of active: false
-      // (publishEmsLocation always sends true) — an unambiguous, deliberate
-      // opt-out mid-transport, not a side effect of a missed tick, so this
-      // can notify immediately rather than waiting on checkEmsConnectivity's
-      // staleness polling below.
-      await notifyEmsConnectivityLoss(data.patientId, 'stopped_sharing');
-    }
+    // An explicit opt-out (data.active === false — stopEmsLocation is the
+    // only sender of that) used to also trigger notifyEmsConnectivityLoss
+    // here. Removed: patient_upload_screen.dart's own confirmation dialog,
+    // shown to the paramedic before the stop is ever submitted, is more
+    // immediate and more reliable than a push round trip for feedback
+    // about something they just did themselves on the very screen they're
+    // looking at — the push was redundant with it, not complementary.
+    // checkEmsConnectivity below still covers the case this dialog
+    // structurally can't: signal actually being lost with nobody looking.
 
     // Proximity-alert threshold check — only meaningful for an active,
     // freshly-positioned patient. A patient EMS never enables live
@@ -126,42 +127,43 @@ export const onEmsLocationEvent = onMessagePublished(
   },
 );
 
-// Shared by the two connectivity-loss detectors below (explicit opt-out
-// above, silent-failure detection in checkEmsConnectivity further down) —
-// finds the EMS provider's own account (patients/{id}'s own createdBy, the
-// same uid resolveActor already resolves for audit entries — see
-// patient-data.ts) and sends them a push. Always exactly one recipient,
-// unlike physician.ts's notifyPatientProximity (which fans out to a whole
-// query of matching physicians) — exactly one EMS account ever created a
-// given patient. Deliberately PHI-free, like every other alert this
-// codebase sends over FCM (not a HIPAA-covered product) — the reason alone
-// is specific enough to be actionable without naming a patient.
-async function notifyEmsConnectivityLoss(patientId: string, reason: 'signal_lost' | 'stopped_sharing'): Promise<void> {
+// Called by checkEmsConnectivity below when a tracked patient's location
+// has gone quiet — signal lost, app closed/killed, phone died. The
+// explicit-opt-out case (EMS deliberately toggling tracking off) used to
+// also call this from onEmsLocationEvent above; removed once
+// patient_upload_screen.dart got its own upfront confirmation dialog for
+// that specific case, which is more immediate and more reliable than a
+// push round trip for feedback about something the same paramedic just
+// did themselves on the very screen they're looking at. This function
+// covers what that dialog structurally can't: nobody looking at the app
+// at all. Finds the EMS provider's own account (patients/{id}'s own
+// createdBy, the same uid resolveActor already resolves for audit entries
+// — see patient-data.ts) and sends them a push. Always exactly one
+// recipient, unlike physician.ts's notifyPatientProximity (which fans out
+// to a whole query of matching physicians) — exactly one EMS account ever
+// created a given patient. Deliberately PHI-free, like every other alert
+// this codebase sends over FCM (not a HIPAA-covered product).
+async function notifyEmsConnectivityLoss(patientId: string): Promise<void> {
   // Every branch below logs something — previously silent throughout,
   // found while chasing a real "no notification arrived" report that
   // left zero trace anywhere to explain why.
   const patientSnapshot = await getFirestore().collection('patients').doc(patientId).get();
   const emsUid = patientSnapshot.data()?.['createdBy'];
   if (typeof emsUid !== 'string') {
-    console.log(`notifyEmsConnectivityLoss (${reason}): patient ${patientId} has no valid createdBy — skipping`);
+    console.log(`notifyEmsConnectivityLoss: patient ${patientId} has no valid createdBy — skipping`);
     return;
   }
 
   const userSnapshot = await getFirestore().collection('users').doc(emsUid).get();
   if (!userSnapshot.exists) {
-    console.log(`notifyEmsConnectivityLoss (${reason}): creator ${emsUid} of patient ${patientId} has no users doc — skipping`);
+    console.log(`notifyEmsConnectivityLoss: creator ${emsUid} of patient ${patientId} has no users doc — skipping`);
     return;
   }
-
-  const body =
-    reason === 'stopped_sharing'
-      ? 'Location sharing was turned off for a patient still marked active.'
-      : "A tracked patient's location hasn't updated recently — check the device's signal and battery.";
 
   await sendAlertPush(
     [{ ref: userSnapshot.ref, data: () => userSnapshot.data() as FirebaseFirestore.DocumentData }],
     'Tracking interrupted',
-    body,
+    "A tracked patient's location hasn't updated recently — check the device's signal and battery.",
   );
 }
 
@@ -330,7 +332,7 @@ export const checkEmsConnectivity = onSchedule(
           return;
         }
 
-        await notifyEmsConnectivityLoss(patientDoc.id, 'signal_lost');
+        await notifyEmsConnectivityLoss(patientDoc.id);
         await patientLocationRef(patientDoc.id).set({ connectivityAlertSentAt: FieldValue.serverTimestamp() }, { merge: true });
       }),
     );

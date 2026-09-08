@@ -92,6 +92,28 @@ void main() {
         maxIterations: 50,
       );
 
+      // patient_upload_screen.dart's own _onSubmit now shows this
+      // confirmation dialog *before* it does any save work at all,
+      // whenever a submit ends up on the stopTracking path — every submit
+      // below does, either by explicitly toggling live tracking off or by
+      // staying off from an earlier submit in this same flow. Tapping
+      // Continue is what makes the save (and thus the stopTracking call,
+      // and eventual home navigation) actually happen — this isn't just
+      // dismissing a recap of something already done.
+      Future<void> confirmTrackingOff() async {
+        await pumpUntil(
+          $,
+          () => find
+              .text(
+                'You have location sharing turned off, if this was a mistake, click back, if was intentional, click continue',
+              )
+              .evaluate()
+              .isNotEmpty,
+          maxIterations: 40,
+        );
+        await tapText($, 'Continue');
+      }
+
       // ---- Phase 1: add a patient, edit it, delete it. ----
 
       final patientName =
@@ -126,6 +148,7 @@ void main() {
       // settleLocationPrompts call had already returned).
       await settleLocationPrompts($);
       await tapKey($, 'patient_upload_submit');
+      await confirmTrackingOff();
       // Scoped to the home screen's own PatientSummaryCard, not a bare
       // find.text(patientName) — _onSubmit's success path (patient_upload_
       // screen.dart) navigates away via context.go('/') without first
@@ -245,6 +268,11 @@ void main() {
         // real GHA failure confirmed it happening).
         await settleLocationPrompts($);
         await tapKey($, 'patient_upload_submit');
+        // This patient's tracking was already off from phase 1's own
+        // create step above, and this edit never touches the switch — so
+        // it's still off, still routing through the same
+        // confirmTrackingOff-needing path.
+        await confirmTrackingOff();
         await pumpUntil(
           $,
           () => find.text('95 bpm').evaluate().isNotEmpty,
@@ -317,6 +345,7 @@ void main() {
         await tapFinder($, find.byType(SwitchListTile));
         await settleLocationPrompts($);
         await tapKey($, 'patient_upload_submit');
+        await confirmTrackingOff();
         // Scoped to the home screen's own PatientSummaryCard, not a bare
         // find.text(exportPatientName) — same real race as phase 1's
         // identical fix above (_onSubmit's success path navigates away via

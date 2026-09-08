@@ -200,6 +200,38 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     );
   }
 
+  // A local, purpose-built dialog rather than amdash_core's own
+  // showConfirmDialog — that shared one always styles its *confirm* action
+  // as the filled/primary button (every other caller wants the
+  // affirmative choice emphasized), but this dialog deliberately inverts
+  // that: Back (i.e. don't submit with tracking off) is the one styled as
+  // primary, nudging a paramedic who toggled this off by mistake toward
+  // fixing it rather than toward plowing ahead. Returns true only for an
+  // explicit "Continue" tap; dismissing any other way (the barrier, a
+  // device back gesture) falls back to false, the same safer-default
+  // convention showConfirmDialog itself uses.
+  Future<bool> _confirmTrackingOff() async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        content: const Text(
+          'You have location sharing turned off, if this was a mistake, click back, if was intentional, click continue',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Back'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
   // Only network-shaped failures get the offline-specific popup — anything
   // else (validation, permission-denied, etc.) keeps surfacing as today's
   // generic error message. uploadPatient wraps the callable's own error in
@@ -262,6 +294,16 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
     final isCreate = _editingId == null;
     if (isCreate && ref.read(isOfflineProvider)) {
       await _showOfflineDialog();
+      return;
+    }
+
+    // Shown immediately, before any save work even starts — not as a
+    // confirmation of something that already happened (an earlier version
+    // of this saved first, then showed a dismissable info dialog after).
+    // A paramedic who toggled this off by mistake gets a chance to back
+    // out and fix it before anything is actually submitted, rather than
+    // having to notice and go fix it after the fact.
+    if (!_liveTrackingEnabled && !(await _confirmTrackingOff())) {
       return;
     }
 
@@ -351,22 +393,9 @@ class _PatientUploadScreenState extends ConsumerState<PatientUploadScreen> {
       if (_liveTrackingEnabled) {
         await trackingController.startTracking(id);
       } else {
+        // Already confirmed with the paramedic up front, before any of
+        // this method's save work even started — see _confirmTrackingOff.
         await trackingController.stopTracking(id);
-        // Immediate, reliable, in-app confirmation that tracking is off —
-        // for the paramedic who just turned it off themselves, right here,
-        // this is more useful and more dependable than the server-side
-        // "Tracking interrupted" push the same event also triggers (see
-        // functions/src/ems.ts's onEmsLocationEvent): that one exists for
-        // when *nobody* is looking at the app (a real background/killed-app
-        // safety net), not for the person actively looking at this exact
-        // screen right now.
-        if (mounted) {
-          await showInfoDialog(
-            context,
-            title: 'Live tracking is off',
-            message: 'Live location tracking is off for this patient. Turn it back on from this page anytime.',
-          );
-        }
       }
       if (mounted) context.go('/');
     } catch (error) {
