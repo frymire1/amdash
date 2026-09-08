@@ -20,7 +20,7 @@ name: Deploy web app to Cloud Run
 # One-time GCP setup required before this can run (can't be done from
 # here — see the migration plan / PR description for the exact
 # commands): a `github-actions-web-deploy` service account, WIF-trusted
-# for this repo (same pool as ci.yml's flutter-android-e2e-* jobs), granted
+# for this repo (same pool as ci.yml's flutter-android-e2e job), granted
 # roles/run.admin + roles/artifactregistry.writer + roles/logging.viewer
 # on the amdash-dev project and roles/iam.serviceAccountUser on its
 # default compute service account (Cloud Run's default runtime
@@ -105,9 +105,9 @@ jobs:
 
       # google-github-actions/auth sets up Application Default
       # Credentials via WIF from the short-lived OIDC token GitHub
-      # issues for this run — see ci.yml's flutter-android-e2e-physician/
-      # -ems/-ems-onboarding jobs for the identical pattern this mirrors
-      # (same pool/provider, different service account).
+      # issues for this run — see ci.yml's flutter-android-e2e job for the
+      # identical pattern this mirrors (same pool/provider, different
+      # service account).
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
         with:
