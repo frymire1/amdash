@@ -8,14 +8,31 @@
 // pumpAndSettle()'s "wait for zero pending frames" — which would otherwise
 // hang for its full 10-minute timeout once MainViewScreen's permanent 5s
 // EmsLocationService staleness-sweep Timer starts firing (a real,
-// intentional feature, not a bug). The throwaway account and the patient
-// it signs in to see are both created directly via the Firebase Admin
-// SDK, not by this test — pass the account's email/password via
-// --dart-define, same convention as EMS's own flutter_driver tests.
+// intentional feature, not a bug). The patient this test signs in to see
+// is created directly via the Firebase Admin SDK, not by this test — pass
+// its name/hospital via --dart-define, same convention as EMS's own
+// flutter_driver tests.
 //
-// tapFinder/enterTextAt/pumpUntil/completeMfaEnrollment come from
-// amdash_patrol_helpers, shared across every app's patrol_test/ suite —
-// see that package for the full rationale/history behind each one.
+// The account differs by platform, unlike ems_test.dart's equivalent file
+// (see that file's own header comment for why EMS *can* safely share one
+// account across both, and this one deliberately doesn't): web signs into
+// the one persistent physician e2e account (see run-physician-patrol-
+// test.mjs's own header comment), always enrolled from a previous run by
+// the time this runs, so sign-in goes through the real second-factor
+// challenge (signInWithTotp) rather than first-time enrollment. Android
+// keeps its own fresh, never-enrolled throwaway account per run instead —
+// see this file's own sign-in block for the full reasoning (a real,
+// confirmed race, not a hypothetical one, once workLocation enters the
+// picture). Phase 0 (web only, below) is a wrong-app rejection using the
+// *other* persistent account's email — only works ahead of the real
+// sign-in, never after it, since nothing here ever signs out (see
+// ems/patrol_test/ems_test.dart's own header comment for the fuller
+// reasoning, identical here).
+//
+// tapFinder/enterTextAt/pumpUntil/signIn/signInWithTotp/
+// completeMfaEnrollment come from amdash_patrol_helpers, shared across
+// every app's patrol_test/ suite — see that package for the full
+// rationale/history behind each one.
 import 'package:amdash_patrol_helpers/amdash_patrol_helpers.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -32,7 +49,7 @@ import 'package:physician/services/patient_alert_service.dart';
 
 void main() {
   patrolTest(
-    'signs in, sets work location, and views a patient with a live map',
+    'rejects the wrong app (web only), signs in, sets work location, and views a patient with a live map',
     ($) async {
       const email = String.fromEnvironment('SMOKE_EMAIL');
       const password = String.fromEnvironment('SMOKE_PASSWORD');
@@ -41,6 +58,13 @@ void main() {
         'SMOKE_PATIENT_NAME',
         defaultValue: 'Physician Verify Patient',
       );
+      // Both only actually read on the kIsWeb branches below — Android
+      // signs into a different, throwaway account that's never enrolled
+      // ahead of time and never attempts the wrong-app phase at all (see
+      // this file's own sign-in comment for why the two platforms
+      // diverge), so its own build doesn't need real values for either.
+      const totpSecret = String.fromEnvironment('SMOKE_TOTP_SECRET');
+      const wrongAppEmail = String.fromEnvironment('WRONG_APP_EMAIL');
       expect(email, isNotEmpty, reason: 'pass --dart-define=SMOKE_EMAIL=...');
       expect(
         password,
@@ -58,15 +82,63 @@ void main() {
       );
       await $.pumpWidgetAndSettle(const ProviderScope(child: PhysicianApp()));
 
-      // Sign in.
-      await enterTextAt($, 0, email);
-      await tapText($, 'Continue');
+      // ---- Phase 0 (web only): an ems-role account is rejected at
+      // physician's own login screen. See ems_test.dart's identical phase
+      // for the fuller comment — same reasoning, mirrored here with the
+      // roles swapped. ----
+      if (kIsWeb) {
+        expect(wrongAppEmail, isNotEmpty, reason: 'pass --dart-define=WRONG_APP_EMAIL=...');
+        await enterTextAt($, 0, wrongAppEmail);
+        await tapText($, 'Continue');
+        await pumpUntil(
+          $,
+          () => find.text('Access denied').evaluate().isNotEmpty,
+          maxIterations: 40,
+        );
+        expect(find.text('Access denied'), findsOneWidget);
+        expect(
+          find.textContaining("doesn't have access to the AmDash — Physician app"),
+          findsOneWidget,
+        );
+        expect(
+          find.byType(MainViewScreen),
+          findsNothing,
+          reason: 'must never reach the real physician main view',
+        );
+        expect(find.text('EMS app'), findsOneWidget);
+        expect(find.text('Physician app'), findsNothing);
+        await tapText($, 'Use a different email');
+        await pumpUntil(
+          $,
+          () => find.text('Access denied').evaluate().isEmpty,
+          maxIterations: 40,
+        );
+      }
 
-      await pumpUntil($, () => find.text('Sign In').evaluate().isNotEmpty);
-      await enterTextAt($, 0, password);
-      await tapText($, 'Sign In');
-
-      await completeMfaEnrollment($);
+      // ---- Sign in for real. ----
+      //
+      // Platform-gated, unlike ems_test.dart's identical-looking call:
+      // physician's own default patient-list filter defaults to
+      // profile.workLocation (see patient_list.dart), a single mutable
+      // field — sharing one persistent account between this file's own
+      // web run and the *concurrently-running* flutter-android-e2e job's
+      // own run of this same file would mean each one's workLocation
+      // write could race the other's read, with no way to tell which
+      // wrote last (confirmed as a real risk, not hypothetical, once this
+      // file started sharing an account across scenarios at all — EMS has
+      // no such shared single-value state, which is why ems_test.dart
+      // *can* safely use one persistent account on both platforms). Web
+      // uses the persistent, already-enrolled account (signInWithTotp);
+      // Android keeps its own fresh, never-enrolled throwaway account per
+      // run (signIn + completeMfaEnrollment, the original mechanism) —
+      // see run-physician-patrol-test.mjs's own header comment.
+      if (kIsWeb) {
+        expect(totpSecret, isNotEmpty, reason: 'pass --dart-define=SMOKE_TOTP_SECRET=...');
+        await signInWithTotp($, email, password, totpSecret);
+      } else {
+        await signIn($, email, password);
+        await completeMfaEnrollment($);
+      }
 
       // Work location — only asked once; skip if this account already has
       // one from a previous run.
@@ -124,6 +196,42 @@ void main() {
         () => find.byType(MainViewScreen).evaluate().isNotEmpty,
         maxIterations: 100,
       );
+
+      // Explicitly select this run's own hospital in PatientList's own
+      // destination filter, rather than relying on its *default* selection
+      // (which comes from profile.workLocation — see patient_list.dart).
+      // That default is exactly right for a throwaway, single-use account,
+      // but this one is the shared persistent physician account (see this
+      // file's own header comment) — and now that Android's own
+      // flutter-android-e2e job signs into a genuinely *different*,
+      // throwaway account instead of this one (see run-physician-patrol-
+      // test.mjs's own header comment for why the two platforms diverge
+      // here specifically), there's no cross-job workLocation race left to
+      // worry about even without this — but web itself still has no
+      // guarantee this exact hospital was the *last* one written to
+      // workLocation by some earlier run of this same script, since nothing
+      // resets it between runs. Driving the real Filter UI instead makes
+      // this assertion depend only on what this run itself just selected,
+      // not on whatever workLocation happened to already be.
+      await tapFinder($, find.byTooltip('Filter'));
+      await pumpUntil(
+        $,
+        () => find.byType(DropdownButtonFormField<String>).evaluate().isNotEmpty,
+        maxIterations: 20,
+      );
+      await tapFinder($, find.byType(DropdownButtonFormField<String>));
+      await pumpUntil(
+        $,
+        () => find.text(hospitalName).evaluate().length > 1,
+        maxIterations: 20,
+      );
+      // Same lazy-finder-race reasoning as the hospital-autocomplete tap
+      // above — no `await` between computing the index and tapping it.
+      final destinationMatches = find.text(hospitalName);
+      await $.tester.tap(
+        destinationMatches.at(destinationMatches.evaluate().length - 1),
+      );
+      await $.pump(const Duration(milliseconds: 400));
 
       // The seeded patient should appear in the list.
       await pumpUntil(

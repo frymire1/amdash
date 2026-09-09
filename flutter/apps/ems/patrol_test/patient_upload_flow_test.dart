@@ -14,9 +14,15 @@
 // for incoming_patient_test.dart to find; run-patient-flow-e2e.mjs's own
 // orchestration owns tearing it down once both halves are done.
 //
+// Web only (this scenario never runs on Android — see
+// run-patient-flow-e2e.mjs's own header comment), so this always signs
+// into the persistent EMS account (signInWithTotp) — no platform branch
+// needed the way patient_flow_test.dart/ems_test.dart's own shared-file
+// scenarios need one.
+//
 // tapFinder/enterTextAt/pumpUntil/dismissNativeLocationAccuracyDialog/
-// completeMfaEnrollment come from amdash_patrol_helpers, shared across
-// every app's patrol_test/ suite — see that package for the full
+// signInWithTotp come from amdash_patrol_helpers, shared across every
+// app's patrol_test/ suite — see that package for the full
 // rationale/history behind each one.
 import 'package:amdash_patrol_helpers/amdash_patrol_helpers.dart';
 import 'package:ems/firebase_options.dart';
@@ -35,6 +41,7 @@ void main() {
   ) async {
     const email = String.fromEnvironment('SMOKE_EMAIL');
     const password = String.fromEnvironment('SMOKE_PASSWORD');
+    const totpSecret = String.fromEnvironment('SMOKE_TOTP_SECRET');
     const hospitalName = String.fromEnvironment('SMOKE_HOSPITAL');
     const patientName = String.fromEnvironment('SMOKE_PATIENT_NAME');
     expect(email, isNotEmpty, reason: 'pass --dart-define=SMOKE_EMAIL=...');
@@ -42,6 +49,11 @@ void main() {
       password,
       isNotEmpty,
       reason: 'pass --dart-define=SMOKE_PASSWORD=...',
+    );
+    expect(
+      totpSecret,
+      isNotEmpty,
+      reason: 'pass --dart-define=SMOKE_TOTP_SECRET=...',
     );
     expect(
       hospitalName,
@@ -67,13 +79,7 @@ void main() {
     await $.pumpWidgetAndSettle(const ProviderScope(child: EmsApp()));
 
     // Sign in.
-    await $(TextField).at(0).enterText(email);
-    await tapText($, 'Continue');
-    await pumpUntil($, () => find.text('Sign In').evaluate().isNotEmpty);
-    await $(TextField).at(0).enterText(password);
-    await tapText($, 'Sign In');
-
-    await completeMfaEnrollment($);
+    await signInWithTotp($, email, password, totpSecret);
 
     await pumpUntil(
       $,

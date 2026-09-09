@@ -1,38 +1,39 @@
 // Phase 5-ish verification (added after Phases 1-4): runs via `patrol test
 // --device chrome` against real Chrome, real Firebase Auth/Firestore on
-// amdash-dev. Unlike physician/admin's Patrol tests, this one creates,
-// edits, and deletes its own throwaway patient entirely through the app's
-// own UI — the runner script only needs to create/delete the throwaway EMS
-// account itself (see nx-monorepo/scripts/run-ems-patrol-test.mjs).
+// amdash-dev (and, unlike originally, also against real Android via
+// Firebase Test Lab — see the kIsWeb gating below). Unlike physician/
+// admin's Patrol tests, this one creates, edits, and deletes its own
+// throwaway patient entirely through the app's own UI — the runner script
+// only needs to point it at a real EMS account (see
+// scripts/run-ems-patrol-test.mjs).
 //
-// Two phases, one `patrolTest` block: the second phase (FHIR export) used
-// to be its own separate file (complete_and_export_test.dart), run via a
-// *second* `patrol test` process against a *second* throwaway account —
-// not for isolation's own sake, but because of a real Firebase limitation:
-// once one process enrolls TOTP MFA on an account, Firebase never
-// re-exposes the secret, so a genuinely separate process has no way to
-// pass the MFA *challenge* on a later sign-in to that same account.
-//
-// A first attempt at merging just split them into two separate
-// `patrolTest` blocks in this same file, on the theory that they'd share
-// one process/browser tab (`patrolTest` is `testWidgets` underneath).
-// Confirmed for real that's wrong: Patrol's own native test dispatcher
-// does a full page reload *between* `patrolTest` blocks — a second
-// block's fresh `pumpWidgetAndSettle` landed back on LoginScreen even
-// though the first block had just signed in — so nothing about session
-// state actually carries across a block boundary. The fix is what's
-// below instead: both phases inside *one* `patrolTest` block, which is
-// one continuous execution with no reload in the middle at all (the same
-// reason phase 1's own multi-step add/edit/delete flow already worked
-// fine as one continuous ~50s run before this merge). Patrol reports this
-// as one named result, not two — a real trade-off versus the old two-file
-// version's separate pass/fail per scenario, accepted here since a
+// Three phases, one `patrolTest` block, one continuous execution with no
+// reload in the middle at any point — the whole reason any of this can
+// share one process/browser tab at all (Patrol's own native test
+// dispatcher does a full page reload *between* separate `patrolTest`
+// blocks, confirmed for real: a second block's fresh `pumpWidgetAndSettle`
+// landed back on LoginScreen even though an earlier block had just signed
+// in, so nothing about session state carries across a block boundary —
+// see amdash_patrol_helpers' session.dart for the fuller account of that
+// finding). Patrol reports this as one named result, not three — a real
+// trade-off versus separate pass/fail per scenario, accepted here since a
 // failure's own exception/stack trace still says which phase broke.
 //
-// signIn/tapFinder/enterTextAt/pumpUntil/settleLocationPrompts/
-// completeMfaEnrollment come from amdash_patrol_helpers, shared across
-// every app's patrol_test/ suite — see that package for the full
-// rationale/history behind each one.
+// Phase 0 (web only) uses a *different* account than phases 1-2 — the
+// persistent physician account, attempting to sign into EMS and getting
+// rejected — which only works ahead of phase 1's own sign-in, never after
+// it: nothing here ever signs out (there's no working way to, mid-test —
+// see session.dart again), so once phase 1 signs in for real, the session
+// can only ever be that one account from then on. Phases 1-2 both reuse
+// that one persistent EMS account (and its one MFA enrollment) rather
+// than a fresh throwaway one — this account is deliberately never torn
+// down between runs; see scripts/run-ems-patrol-test.mjs's own header
+// comment for the full reasoning and how its TOTP secret is supplied.
+//
+// signInWithTotp/tapFinder/enterTextAt/pumpUntil/settleLocationPrompts
+// come from amdash_patrol_helpers, shared across every app's patrol_test/
+// suite — see that package for the full rationale/history behind each
+// one.
 import 'package:amdash_core/amdash_core.dart';
 import 'package:amdash_patrol_helpers/amdash_patrol_helpers.dart';
 import 'package:ems/firebase_options.dart';
@@ -42,6 +43,7 @@ import 'package:ems/screens/patient_upload_screen.dart';
 import 'package:ems/services/patient_upload_service.dart';
 import 'package:ems/widgets/patient_summary_card.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -49,15 +51,27 @@ import 'package:patrol/patrol.dart';
 
 void main() {
   patrolTest(
-    'signs in, adds/edits/deletes a patient, then completes transport and exports a FHIR record',
+    'rejects the wrong app (web only), signs in, adds/edits/deletes a patient, then completes transport and exports a FHIR record',
     ($) async {
       const email = String.fromEnvironment('SMOKE_EMAIL');
       const password = String.fromEnvironment('SMOKE_PASSWORD');
+      const totpSecret = String.fromEnvironment('SMOKE_TOTP_SECRET');
+      // Only actually read on the kIsWeb branch below — Android's own
+      // flutter-android-e2e build still has to pass *something* for every
+      // dart-define this file declares, but doesn't need a real value
+      // (see ci.yml's own android build step, which passes an empty
+      // string here on purpose).
+      const wrongAppEmail = String.fromEnvironment('WRONG_APP_EMAIL');
       expect(email, isNotEmpty, reason: 'pass --dart-define=SMOKE_EMAIL=...');
       expect(
         password,
         isNotEmpty,
         reason: 'pass --dart-define=SMOKE_PASSWORD=...',
+      );
+      expect(
+        totpSecret,
+        isNotEmpty,
+        reason: 'pass --dart-define=SMOKE_TOTP_SECRET=...',
       );
 
       await Firebase.initializeApp(
@@ -65,17 +79,70 @@ void main() {
       );
       await $.pumpWidgetAndSettle(const ProviderScope(child: EmsApp()));
 
-      // Sign in once, for both phases below. Was Patrol's own
-      // $(TextField).at(0).enterText() — reliable all session on Chrome,
-      // but this was the first time this exact line ever ran for real on
-      // Android (Firebase Test Lab's Android e2e job had been silently
-      // running zero tests until the native Patrol setup was fixed — see
-      // android/app/src/androidTest/.../MainActivityTest.java). First real
-      // run hit the identical hit-test unreliability signIn's own
-      // enterTextAt call already covers, just on a different
-      // platform/renderer than where it was originally found.
-      await signIn($, email, password);
-      await completeMfaEnrollment($);
+      // ---- Phase 0 (web only): a physician-role account is rejected at
+      // EMS's own login screen. ---
+      //
+      // Not run on Android: nothing about "enter email, tap Continue, wait
+      // for 'Access denied' text, assert the right app link shows" is
+      // platform-specific (see wrong_app_login_test.dart's own git
+      // history — this used to be that file, folded in here once it
+      // became clear its own real cost was a redundant account+process,
+      // not anything this phase itself needed Android for), and Android's
+      // own flutter-android-e2e job already runs this exact file for
+      // phases 1-2 — adding this phase there too would just be a second,
+      // pointless account-switch attempt with no working way to get back
+      // to a clean LoginScreen afterward (see this file's own header
+      // comment on why nothing here ever signs out).
+      if (kIsWeb) {
+        expect(wrongAppEmail, isNotEmpty, reason: 'pass --dart-define=WRONG_APP_EMAIL=...');
+        await enterTextAt($, 0, wrongAppEmail);
+        await tapText($, 'Continue');
+        await pumpUntil(
+          $,
+          () => find.text('Access denied').evaluate().isNotEmpty,
+          maxIterations: 40,
+        );
+        expect(find.text('Access denied'), findsOneWidget);
+        expect(
+          find.textContaining("doesn't have access to the AmDash — EMS app"),
+          findsOneWidget,
+        );
+        expect(
+          find.byType(HomeScreen),
+          findsNothing,
+          reason: 'must never reach the real EMS home screen',
+        );
+        expect(find.text('Physician app'), findsOneWidget);
+        expect(find.text('EMS app'), findsNothing);
+        // Back to a clean, nobody-signed-in-yet email step — a plain local
+        // UI reset (LoginScreen's own _useDifferentEmail), not a sign-out:
+        // no real auth was ever attempted for this rejected account, so
+        // there's no session to tear down and no reload risk here.
+        await tapText($, 'Use a different email');
+        await pumpUntil(
+          $,
+          () => find.text('Access denied').evaluate().isEmpty,
+          maxIterations: 40,
+        );
+      }
+
+      // ---- Sign in for real, as the one persistent EMS account, for all
+      // phases below. ----
+      //
+      // signInWithTotp, not signIn+completeMfaEnrollment — this account
+      // stays enrolled from run to run (see this file's own header
+      // comment), so every sign-in hits the real second-factor *challenge*
+      // an already-enrolled account gets, not the one-time setup screen.
+      // Was Patrol's own $(TextField).at(0).enterText() — reliable all
+      // session on Chrome, but this was the first time this exact line
+      // ever ran for real on Android (Firebase Test Lab's Android e2e job
+      // had been silently running zero tests until the native Patrol
+      // setup was fixed — see android/app/src/androidTest/.../
+      // MainActivityTest.java). First real run hit the identical hit-test
+      // unreliability signIn's own enterTextAt call already covers, just
+      // on a different platform/renderer than where it was originally
+      // found.
+      await signInWithTotp($, email, password, totpSecret);
 
       // Was $(HomeScreen).waitUntilVisible(...) — Patrol's own hit-test
       // check proved unreliable on Flutter Web here (confirmed for the

@@ -1,13 +1,26 @@
 #!/usr/bin/env node
-// Cross-app e2e: an EMS account uploads a real patient (through the EMS
-// app's own UI, live-tracking enabled, GPS mocked via Playwright's
-// geolocation override — see runPatrolTest's webGeolocation param) and a
-// physician account in the same org then signs in and confirms that exact
-// patient shows up with a live map centered on the mocked coordinates.
-// Unlike run-admin/physician/ems-patrol-test.mjs (each scoped to one app
-// verifying its own UI against Firebase Admin SDK-seeded state), this one
-// verifies the real cross-app path: EMS's upload is genuinely what makes
-// the patient visible to physician, not a seed script standing in for it.
+// Cross-app e2e: the persistent EMS account uploads a real patient
+// (through the EMS app's own UI, live-tracking enabled, GPS mocked via
+// Playwright's geolocation override — see runPatrolTest's webGeolocation
+// param) and the persistent physician account then signs in and confirms
+// that exact patient shows up with a live map centered on the mocked
+// coordinates. Unlike run-admin/physician/ems-patrol-test.mjs (each
+// scoped to one app verifying its own UI against Firebase Admin SDK-
+// seeded state), this one verifies the real cross-app path: EMS's upload
+// is genuinely what makes the patient visible to physician, not a seed
+// script standing in for it.
+//
+// Both accounts are the same persistent ones run-physician-patrol-test.mjs/
+// run-ems-patrol-test.mjs's own web legs use (see those files' header
+// comments for why persistent, and how the TOTP secrets are supplied) —
+// never created or torn down here. Only the hospital + patient are fresh
+// every run, same as before. This script only ever runs on Chrome, never
+// Android (physician's own Android leg uses patient_flow_test.dart
+// instead, and EMS's onboarding equivalent is a genuinely different
+// scenario — see ci.yml), so there's no cross-job concurrency concern
+// overwriting the physician account's workLocation here the way there
+// would be if this ran on Android too (see run-physician-patrol-test.mjs's
+// own header comment for the fuller reasoning on that risk).
 //
 // Patrol can't drive two apps in one process (each `patrol test` is a
 // separate compiled Flutter binary/process) — this runs two *sequential*
@@ -22,7 +35,9 @@
 // Usage: node scripts/run-patient-flow-e2e.mjs
 // Requires: flutter + patrol_cli on PATH (or edit FLUTTER_BIN/PATROL_BIN in
 // scripts/lib/run-patrol.mjs to match your machine), a cached `firebase
-// login` CLI session (or GOOGLE_APPLICATION_CREDENTIALS set, e.g. in CI).
+// login` CLI session (or GOOGLE_APPLICATION_CREDENTIALS set, e.g. in CI),
+// and E2E_EMS_PASSWORD/E2E_EMS_TOTP_SECRET/E2E_PHYSICIAN_PASSWORD/
+// E2E_PHYSICIAN_TOTP_SECRET in the environment (repo secrets in CI).
 
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
@@ -37,6 +52,13 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const EMS_APP_DIR = path.join(REPO_ROOT, 'flutter', 'apps', 'ems');
 const PHYSICIAN_APP_DIR = path.join(REPO_ROOT, 'flutter', 'apps', 'physician');
 
+const EMS_EMAIL = 'persistent-ems@amdash-e2e.test';
+const PHYSICIAN_EMAIL = 'persistent-physician@amdash-e2e.test';
+const EMS_PASSWORD = process.env.E2E_EMS_PASSWORD;
+const EMS_TOTP_SECRET = process.env.E2E_EMS_TOTP_SECRET;
+const PHYSICIAN_PASSWORD = process.env.E2E_PHYSICIAN_PASSWORD;
+const PHYSICIAN_TOTP_SECRET = process.env.E2E_PHYSICIAN_TOTP_SECRET;
+
 const RUN_ID = Date.now();
 const HOSPITAL_NAME = `Patrol Flow Test Hospital ${RUN_ID}`;
 const PATIENT_NAME = `Patrol Flow Test Patient ${RUN_ID}`;
@@ -50,6 +72,32 @@ const PATIENT_NAME = `Patrol Flow Test Patient ${RUN_ID}`;
 const GPS_LATITUDE = 43.6629;
 const GPS_LONGITUDE = -79.3957;
 
+// Seeds a fresh hospital, and re-points the persistent physician account's
+// workLocation to it directly (rather than driving the /work-location
+// screen in the test itself, the way patient_flow_test.dart does — this
+// test is about the EMS-to-physician handoff, not work-location setup,
+// which is already covered elsewhere). Has to match HOSPITAL_NAME exactly:
+// PatientList's destination filter defaults to the physician's own
+// workLocation, and a patient whose destination doesn't match it is
+// filtered out of the default view entirely (a real one found live during
+// manual testing, not a hypothetical). Safe to overwrite here — see this
+// file's own header comment for why nothing else concurrently depends on
+// this account's workLocation while this runs.
+//
+// etaAlertThresholdsMinutes pre-seeded the same way, rather than driven
+// through Settings' own checkbox + Enable button in the test itself —
+// Enable needs a real FCM permission + token round trip, which Patrol's
+// bundled Playwright Chromium cannot complete for real (confirmed:
+// Chrome's own "AbortError: Registration failed - permission denied" on
+// service-worker registration, consistent with a known Playwright/
+// Chromium limitation around push registration — see
+// incoming_patient_test.dart's own comment for the full story). What this
+// test verifies instead is the *read* half — that this real, pre-seeded
+// Firestore value correctly reaches and checks the right box — via a
+// genuine cross-process round trip; the write half (Enable persisting a
+// fresh selection) has full widget-test coverage instead
+// (user_settings_screen_test.dart), with PatientAlertService mocked out so
+// it doesn't depend on real browser push-registration support at all.
 async function seed(db) {
   const organizationId = await findOrganizationId(db, 'test-org');
 
@@ -61,62 +109,13 @@ async function seed(db) {
     organizationId,
   });
 
-  const emsEmail = `smoke-ems-flow-${RUN_ID}@amdash-e2e.test`;
-  const emsPassword = 'SmokeTest123';
-  const emsUser = await getAuth().createUser({ email: emsEmail, password: emsPassword, emailVerified: true });
-  await db
-    .doc(`users/${emsUser.uid}`)
-    .set({ email: emsEmail, role: ['ems'], organizationId, firstName: 'Smoke', lastName: 'Ems' }, { merge: true });
-
-  const physicianEmail = `smoke-physician-flow-${RUN_ID}@amdash-e2e.test`;
-  const physicianPassword = 'SmokeTest123';
-  const physicianUser = await getAuth().createUser({
-    email: physicianEmail,
-    password: physicianPassword,
-    emailVerified: true,
-  });
-  // workLocation set directly here, rather than driven through the
-  // /work-location screen in the test itself (see patient_flow_test.dart
-  // for that flow) — this test is about the EMS-to-physician handoff, not
-  // work-location setup, which is already covered elsewhere. Has to match
-  // HOSPITAL_NAME exactly: PatientList's destination filter defaults to
-  // the physician's own workLocation, and a patient whose destination
-  // doesn't match it is filtered out of the default view entirely (a real
-  // one found live during this session's own manual testing, not a
-  // hypothetical).
-  //
-  // etaAlertThresholdsMinutes pre-seeded the same way, rather than driven
-  // through Settings' own checkbox + Enable button in the test itself —
-  // Enable needs a real FCM permission + token round trip, which Patrol's
-  // bundled Playwright Chromium cannot complete for real (confirmed:
-  // Chrome's own "AbortError: Registration failed - permission denied" on
-  // service-worker registration, consistent with a known Playwright/
-  // Chromium limitation around push registration — see
-  // incoming_patient_test.dart's own comment for the full story). What
-  // this test verifies instead is the *read* half — that this real,
-  // pre-seeded Firestore value correctly reaches and checks the right box
-  // — via a genuine cross-process round trip; the write half (Enable
-  // persisting a fresh selection) has full widget-test coverage instead
-  // (user_settings_screen_test.dart), with PatientAlertService mocked out
-  // so it doesn't depend on real browser push-registration support at all.
+  const physicianUser = await getAuth().getUserByEmail(PHYSICIAN_EMAIL);
   await db.doc(`users/${physicianUser.uid}`).set(
-    {
-      email: physicianEmail,
-      role: ['physician'],
-      organizationId,
-      firstName: 'Smoke',
-      lastName: 'Physician',
-      workLocation: HOSPITAL_NAME,
-      etaAlertThresholdsMinutes: [30],
-    },
+    { workLocation: HOSPITAL_NAME, etaAlertThresholdsMinutes: [30] },
     { merge: true },
   );
 
-  return {
-    hospitalId: hospitalRef.id,
-    ems: { email: emsEmail, password: emsPassword, uid: emsUser.uid },
-    physician: { email: physicianEmail, password: physicianPassword, uid: physicianUser.uid },
-  };
+  return { hospitalId: hospitalRef.id };
 }
 
 // Verifies the real backend detection pipeline — functions/src/ems.ts's
@@ -158,57 +157,22 @@ async function verifyEtaAlertThreshold(db) {
   );
 }
 
-async function cleanup(db, auth, seeded) {
-  // Specific-reference deletes first, unconditional regardless of age —
-  // this run's own account/hospital/patient just finished being used, so
-  // there's never a reason to wait on them (unlike the broad sweep below,
-  // scoped to catching debris from OTHER, possibly-still-running jobs).
-  // Missing until this fix: cleanup() used to rely *entirely* on the
-  // broad sweep below to find its own patient (no seed script writes it
-  // directly — it's created through the EMS app's own UI, so there was
-  // never an id to delete by), which meant adding the age guard to that
-  // sweep broke this specific run's own timely cleanup — confirmed for
-  // real: two "Patrol Flow Test Patient" leftovers with the same edited
-  // heart rate collided in a very next run's own "found 2 widgets"
-  // failure. `destination` is known up front (HOSPITAL_NAME) and unique
-  // to this run by construction, so an *exact* match (not the broad
-  // sweep's prefix range) finds it precisely, without needing to guess
-  // at its Firestore doc id.
+async function cleanup(db, seeded) {
+  // No account cleanup any more — both accounts are persistent, never
+  // created or deleted per run (see this file's own header comment).
   if (seeded) {
-    await auth.deleteUser(seeded.ems.uid).catch(() => {});
-    await db.doc(`users/${seeded.ems.uid}`).delete().catch(() => {});
-    await auth.deleteUser(seeded.physician.uid).catch(() => {});
-    await db.doc(`users/${seeded.physician.uid}`).delete().catch(() => {});
     await db.doc(`hospitals/${seeded.hospitalId}`).delete().catch(() => {});
     const ownPatientSnap = await db.collection('patients').where('destination', '==', HOSPITAL_NAME).get();
     for (const doc of ownPatientSnap.docs) await db.recursiveDelete(doc.ref);
   }
 
   // Age-guarded (isOldEnoughToSweep) — a broad sweep with no age check can
-  // delete a concurrently-running sibling run's still-in-use account/
-  // hospital/patient (e.g. two overlapping pushes both triggering this
-  // same script) — see that function's own comment for the real GHA
-  // failure this was confirmed against. This run's own state is already
-  // gone via the specific deletes above; this is purely a safety net for
-  // orphaned debris from other, past runs.
-  let deletedUsers = 0;
-  let pageToken;
-  do {
-    const page = await auth.listUsers(1000, pageToken);
-    for (const user of page.users) {
-      if (
-        user.email &&
-        (user.email.startsWith('smoke-ems-flow-') || user.email.startsWith('smoke-physician-flow-')) &&
-        isOldEnoughToSweep(user.email)
-      ) {
-        await auth.deleteUser(user.uid);
-        await db.doc(`users/${user.uid}`).delete().catch(() => {});
-        deletedUsers++;
-      }
-    }
-    pageToken = page.pageToken;
-  } while (pageToken);
-
+  // delete a concurrently-running sibling run's still-in-use hospital/
+  // patient (e.g. two overlapping pushes both triggering this same
+  // script) — see that function's own comment for the real GHA failure
+  // this was confirmed against. This run's own state is already gone via
+  // the specific deletes above; this is purely a safety net for orphaned
+  // debris from other, past runs.
   const hospSnap = await db
     .collection('hospitals')
     .where('name', '>=', 'Patrol Flow Test Hospital')
@@ -248,30 +212,32 @@ async function cleanup(db, auth, seeded) {
     }
   }
 
-  console.log(
-    `Cleanup: removed ${deletedUsers} throwaway user(s), ${deletedHospitals} leftover hospital(s), ` +
-      `${deletedPatients} leftover patient(s).`,
+  console.log(`Cleanup: removed ${deletedHospitals} leftover hospital(s), ${deletedPatients} leftover patient(s).`);
+}
+
+if (!EMS_PASSWORD || !EMS_TOTP_SECRET || !PHYSICIAN_PASSWORD || !PHYSICIAN_TOTP_SECRET) {
+  console.error(
+    'E2E_EMS_PASSWORD, E2E_EMS_TOTP_SECRET, E2E_PHYSICIAN_PASSWORD, and E2E_PHYSICIAN_TOTP_SECRET must all be set in the environment.',
   );
+  process.exit(1);
 }
 
 const credentialPath = initFirebaseAdmin('patientflow');
 const db = getFirestore();
-const auth = getAuth();
 
 let seeded;
 let exitCode = 1;
 try {
   seeded = await seed(db);
-  console.log('Created throwaway ems account:', seeded.ems.email);
-  console.log('Created throwaway physician account:', seeded.physician.email);
-  console.log('Seeded hospital:', HOSPITAL_NAME);
+  console.log('Seeded hospital:', HOSPITAL_NAME, '— re-pointed persistent physician account\'s workLocation to it.');
 
   const emsExitCode = await runPatrolTest({
     appDir: EMS_APP_DIR,
     target: 'patrol_test/patient_upload_flow_test.dart',
     dartDefines: {
-      SMOKE_EMAIL: seeded.ems.email,
-      SMOKE_PASSWORD: seeded.ems.password,
+      SMOKE_EMAIL: EMS_EMAIL,
+      SMOKE_PASSWORD: EMS_PASSWORD,
+      SMOKE_TOTP_SECRET: EMS_TOTP_SECRET,
       SMOKE_HOSPITAL: HOSPITAL_NAME,
       SMOKE_PATIENT_NAME: PATIENT_NAME,
     },
@@ -287,8 +253,9 @@ try {
       appDir: PHYSICIAN_APP_DIR,
       target: 'patrol_test/incoming_patient_test.dart',
       dartDefines: {
-        SMOKE_EMAIL: seeded.physician.email,
-        SMOKE_PASSWORD: seeded.physician.password,
+        SMOKE_EMAIL: PHYSICIAN_EMAIL,
+        SMOKE_PASSWORD: PHYSICIAN_PASSWORD,
+        SMOKE_TOTP_SECRET: PHYSICIAN_TOTP_SECRET,
         SMOKE_PATIENT_NAME: PATIENT_NAME,
         SMOKE_LATITUDE: String(GPS_LATITUDE),
         SMOKE_LONGITUDE: String(GPS_LONGITUDE),
@@ -307,7 +274,7 @@ try {
     }
   }
 } finally {
-  await cleanup(db, auth, seeded);
+  await cleanup(db, seeded);
   if (credentialPath) fs.unlinkSync(credentialPath);
 }
 

@@ -1,55 +1,79 @@
 #!/usr/bin/env node
 // Self-contained runner for the EMS app's Patrol e2e test — same pattern
-// as run-admin-patrol-test.mjs. Simpler than physician's runner: the test
-// itself creates, edits, and deletes its own throwaway patient entirely
-// through the app's UI (see patrol_test/ems_test.dart), so
-// this script only needs to create/delete the throwaway EMS account. On the
-// self-contained (non --seed-only/--teardown) path, it also verifies the
-// resulting patient.* audit-log entries directly via the Admin SDK — see
-// verifyPatientAuditEntries's own comment. Wired into .github/workflows/
-// ci.yml's e2e job — not a local-only dev tool.
+// as run-admin-patrol-test.mjs, except this one signs into a *persistent*
+// account rather than a fresh throwaway one. patrol_test/ems_test.dart
+// itself creates, edits, and deletes its own throwaway patient through
+// the app's UI, and (web only) also drives a wrong-app rejection using
+// the sibling persistent physician account — see that file's own header
+// comment for the full shape and why nothing here ever needs a sign-out.
 //
-// Written in Node/JS rather than Dart for the same reason as
-// run-admin-patrol-test.mjs: needs the Firebase *Admin* SDK to seed/tear
-// down real Auth + Firestore state around the Dart-side Patrol test, and
-// scripts/ already has that set up.
+// Why persistent, not a fresh account every run (like every other script
+// in this family): merging the wrong-app-rejection scenario into this
+// same session — the point of this change — needs the CRUD account to
+// already be MFA-enrolled *before* this run starts, since nothing in a
+// single continuous session can both enroll fresh and also resolve a
+// prior scenario's own account-switch cleanly (see ems_test.dart's own
+// header comment). A fresh account is never pre-enrolled, so it can't
+// work here. persistent-ems@amdash-e2e.test was created once (Admin SDK)
+// and MFA-enrolled once, by hand, driving the real enrollment UI locally
+// (no server-side shortcut exists for TOTP — see amdash_patrol_helpers'
+// completeMfaEnrollment) — its TOTP secret is stored as the
+// E2E_EMS_TOTP_SECRET repo secret, read here and passed through to
+// signInWithTotp, which computes a fresh valid code on every sign-in the
+// same way a real authenticator app would. Never torn down between runs;
+// see cleanup()'s own comment for what teardown actually still does here.
+//
+// Shared by both platforms this file's own scenario runs on: the default
+// (no-flag) mode below drives Chrome directly (web e2e); --seed-only
+// writes this same persistent account's credentials (not a freshly
+// created one) to --account-json for the Android e2e job's own
+// `patrol build android` step to pick up — see ci.yml's flutter-android-
+// e2e job. Both platforms sign into the exact same account now, which is
+// what lets ems_test.dart's own signInWithTotp call be unconditional
+// rather than needing yet another platform branch.
 //
 // Usage:
 //   node scripts/run-ems-patrol-test.mjs
-//     Default: seed, run `patrol test`, teardown, all in one process — used
-//     by web-e2e (Chrome). PATROL_DEVICE=android|ios overrides the default
-//     'chrome' device — 'android'/'ios' get resolved to the actual connected
-//     emulator/simulator device id at run time (see
-//     scripts/lib/run-patrol.mjs's resolveDeviceId).
+//     Default: run `patrol test` against Chrome, verify the resulting
+//     audit-log entries, sweep any orphaned patient debris. Used by web-e2e.
 //   node scripts/run-ems-patrol-test.mjs --seed-only [--account-json=<path>]
-//     Seeds only, writes the seeded account to --account-json (default: an
-//     os.tmpdir() path) and exits 0 without running patrol or tearing down.
-//     Used ahead of `patrol build` in the Firebase Test Lab
-//     (android-e2e/ios-e2e) workflows, where the app is built once with
-//     these values baked in as --dart-define flags rather than run locally
-//     via `patrol test`.
+//     Ensures org-level flags (fhirExportEnabled/auditLoggingEnabled) are
+//     set, writes the persistent account's credentials to --account-json,
+//     and exits 0 — no `patrol test` run, no account creation (there's
+//     nothing left to create). Used ahead of `patrol build` in the
+//     Firebase Test Lab (flutter-android-e2e) workflow.
 //   node scripts/run-ems-patrol-test.mjs --teardown [--account-json=<path>]
-//     Reads --account-json, tears the seeded state down, deletes the file,
-//     and exits. Used after the `gcloud firebase test ... run` step in the
-//     Test Lab workflows — a separate step from seeding, so it must be
-//     invoked independently rather than via the try/finally below.
+//     Sweeps any orphaned patient debris left under this account — no
+//     account deletion (persistent, never torn down). Used after the
+//     `gcloud firebase test ... run` step in the Test Lab workflow.
 // Requires: flutter + patrol_cli on PATH (or edit scripts/lib/run-patrol.mjs
 // to match your machine), a cached `firebase login` CLI session (or
-// GOOGLE_APPLICATION_CREDENTIALS set, e.g. in CI).
+// GOOGLE_APPLICATION_CREDENTIALS set, e.g. in CI), and E2E_EMS_PASSWORD/
+// E2E_EMS_TOTP_SECRET in the environment (repo secrets in CI).
 
 import { getAuth } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
+import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findOrganizationId, initFirebaseAdmin, isOldEnoughToSweep } from './lib/firebase-admin-cli.mjs';
+import { findOrganizationId, initFirebaseAdmin } from './lib/firebase-admin-cli.mjs';
 import { runPatrolTest } from './lib/run-patrol.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
 const EMS_APP_DIR = path.join(REPO_ROOT, 'flutter', 'apps', 'ems');
 const DEFAULT_ACCOUNT_JSON_PATH = path.join(os.tmpdir(), 'amdash-ems-smoke-account.json');
+
+// See this file's own header comment for why these are fixed/persistent
+// rather than generated per run.
+const EMS_EMAIL = 'persistent-ems@amdash-e2e.test';
+// The *other* persistent account — used only for the wrong-app-rejection
+// phase inside ems_test.dart (a physician-role account attempting EMS
+// sign-in), never signed into for real here.
+const WRONG_APP_EMAIL = 'persistent-physician@amdash-e2e.test';
+const EMS_PASSWORD = process.env.E2E_EMS_PASSWORD;
+const EMS_TOTP_SECRET = process.env.E2E_EMS_TOTP_SECRET;
 
 function parseArgs(argv) {
   const seedOnly = argv.includes('--seed-only');
@@ -60,224 +84,192 @@ function parseArgs(argv) {
   return { seedOnly, teardown, accountJsonPath };
 }
 
-async function createSmokeEmsAccount(db) {
+// FHIR export is opt-in per org — ems_test.dart's own flow exercises the
+// export-on-complete-transport prompt, so make sure it's reachable
+// regardless of whatever this shared fixture's last state was. Safe to
+// set unconditionally: it only ever adds a new opt-in prompt, never
+// changes any other existing behavior this or any other test relies on.
+// auditLoggingEnabled likewise — verifyPatientAuditEntries below needs
+// the patient.* actions this test triggers to actually get logged
+// (logAudit silently skips GATED_ACTIONS when an org has explicitly
+// turned this off — see audit.ts), regardless of whatever some other
+// concurrently-running or earlier test last left this shared org's
+// toggle set to.
+async function ensureOrgFlags(db) {
   const organizationId = await findOrganizationId(db, 'test-org');
-  // FHIR export is opt-in per org — ems_test.dart's own flow exercises the
-  // export-on-complete-transport prompt, so make sure it's reachable
-  // regardless of whatever this shared fixture's last state was. Safe to
-  // set unconditionally: it only ever adds a new opt-in prompt, never
-  // changes any other existing behavior this or any other test relies on.
-  // auditLoggingEnabled likewise — verifyPatientAuditEntries below needs
-  // the patient.* actions this test triggers to actually get logged
-  // (logAudit silently skips GATED_ACTIONS when an org has explicitly
-  // turned this off — see audit.ts), regardless of whatever some other
-  // concurrently-running or earlier test last left this shared org's
-  // toggle set to.
-  await db.doc(`organizations/${organizationId}`).set({ fhirExportEnabled: true, auditLoggingEnabled: true }, { merge: true });
-  const email = `smoke-ems-${Date.now()}@amdash-e2e.test`;
-  const password = 'SmokeTest123';
-  // emailVerified: true — required for mandatory MFA's /mfa-setup screen to
-  // skip straight to TOTP enrollment (see run-admin-patrol-test.mjs's fuller
-  // comment on this same line).
-  const user = await getAuth().createUser({ email, password, emailVerified: true });
-  await db.doc(`users/${user.uid}`).set(
-    { email, role: ['ems'], organizationId, firstName: 'Smoke', lastName: 'Ems' },
-    { merge: true },
-  );
-  return { email, password, uid: user.uid };
+  await db
+    .doc(`organizations/${organizationId}`)
+    .set({ fhirExportEnabled: true, auditLoggingEnabled: true }, { merge: true });
 }
 
 // Confirms ems_test.dart's own UI-level flow (add/edit/delete a patient,
 // then complete transport + export a FHIR record) actually produced the
 // audit-log entries SECURITY.md's coverage table expects for each of these
-// five patient.* actions — previously listed there as "🔜 planned": the
-// actions themselves already fired on every green run, nothing had ever
-// checked the resulting audit rows actually existed.
+// five patient.* actions.
 //
-// Keyed on actorUid (this run's own freshly-created smoke account), not
-// target/details — the two patients this test creates never surface their
-// Firestore-generated ids back to this script, but actorUid is unique to
-// this run regardless (a fresh account every time), so it's an
-// unambiguous, race-safe match even with sibling e2e jobs writing to this
-// same shared test-org concurrently (see firebase-admin-cli.mjs's own
-// comment on that risk).
+// Scoped to `since` (a timestamp captured right before this run's own
+// `patrol test` started) — not just "any entry ever for this actorUid",
+// which is all the pre-persistent-account version of this check needed,
+// back when actorUid was a fresh uid every run. Now that the account is
+// persistent, an unscoped check would trivially pass forever after the
+// very first successful run, regardless of whether *this* run's own
+// actions actually got logged — it would only ever prove the account had
+// done this at some point in its history. Needs a composite index
+// (auditLog: actorUid + action + timestamp) — see firestore.indexes.json.
 //
 // patient.decrypt isn't checked here — it only fires for a genuinely
 // CMEK-encrypted field (see amdash_core's patient_decryption_service.dart's
 // _needsDecrypt), which no current e2e flow, including this one, ever
 // triggers (test-org isn't CMEK-opted-in). That's a separate, larger
 // follow-up — a dedicated CMEK e2e flow — not an oversight here.
-async function verifyPatientAuditEntries(db, actorUid) {
+//
+// Known residual gap: actorUid is shared with flutter-android-e2e's own
+// run of this same file (both sign into the one persistent EMS account —
+// see this file's own header comment for why that's safe here, unlike
+// physician's equivalent), and that job runs concurrently with this one,
+// not sequentially. If both happen to be mid-flight at once, an entry
+// this check matches could technically be the *other* job's own action
+// rather than this run's, which would mask a genuine regression in
+// exactly one of them for the same action type at the same time — a
+// narrow, compound failure mode (needs real overlap *and* a real bug in
+// only one leg), not fixed here. Disambiguating fully would mean matching
+// on the specific patient id too, which would need threading
+// debugLastUploadedPatientId through for both of this test's own patients,
+// not just the FHIR-export one it already captures — a real improvement,
+// just not done in this pass.
+async function verifyPatientAuditEntries(db, actorUid, since) {
   const actions = ['patient.create', 'patient.update', 'patient.delete', 'patient.complete', 'patient.fhirExport'];
   for (const action of actions) {
-    const snap = await db.collection('auditLog').where('actorUid', '==', actorUid).where('action', '==', action).limit(1).get();
+    const snap = await db
+      .collection('auditLog')
+      .where('actorUid', '==', actorUid)
+      .where('action', '==', action)
+      .where('timestamp', '>', since)
+      .limit(1)
+      .get();
     if (snap.empty) {
-      throw new Error(`No ${action} audit-log entry found for this run's EMS account (${actorUid}).`);
+      throw new Error(
+        `No ${action} audit-log entry found for this run's EMS account (${actorUid}) since ${since.toDate().toISOString()}.`,
+      );
     }
   }
   console.log(`✅ Confirmed audit-log entries for: ${actions.join(', ')}.`);
 }
 
-async function cleanup(db, auth, smokeAccountUids) {
-  const ownUids = new Set(Array.isArray(smokeAccountUids) ? smokeAccountUids : [smokeAccountUids]);
-  for (const uid of ownUids) {
-    await auth.deleteUser(uid).catch(() => {});
-    await db.doc(`users/${uid}`).delete().catch(() => {});
-  }
+// Backstop for a patient left behind by a genuinely crashed run (process
+// killed outright, not just an assertion failure — ems_test.dart's own
+// try/finally blocks already handle the normal failure case). The old
+// version of this swept by "owner account no longer exists", which can
+// never fire now that the owning account (persistent-ems) is never
+// deleted — age-guarded directly off the patient document's own
+// `submittedAt` server timestamp instead. Not a name-prefix match: `name`
+// is encrypted client-side by the real upload flow this test's patients
+// go through (see patient_upload_service.dart/encryptPatientFields), so a
+// plaintext query against it can never match — confirmed for real in an
+// earlier version of this sweep, which relied on exactly that and quietly
+// matched nothing for months.
+const ORPHAN_SWEEP_AGE_MS = 20 * 60 * 1000; // 20 minutes — see isOldEnoughToSweep's own reasoning.
 
-  // Broad prefix sweep, not just this run's own account(s) — an
-  // interrupted run (killed process, a Test Lab run that crashed between
-  // --seed-only and --teardown) otherwise orphans its account forever,
-  // since no *future* run would ever know to clean up an account it
-  // didn't create itself. Confirmed for real this session: accounts from
-  // days earlier still sitting in Firebase Auth, because this only ever
-  // deleted the one uid passed in. Same pattern admin's cleanup() already
-  // uses, and the same reasoning the patient sweep below already applied
-  // to patients specifically. Age-guarded (isOldEnoughToSweep) on top of
-  // that — a broad sweep with no age check can delete a
-  // concurrently-running sibling job's still-in-use account (confirmed
-  // for real: see that function's own comment).
-  let deletedUsers = 0;
-  let pageToken;
-  do {
-    const page = await auth.listUsers(1000, pageToken);
-    for (const user of page.users) {
-      if (user.email?.startsWith('smoke-ems-') && !ownUids.has(user.uid) && isOldEnoughToSweep(user.email)) {
-        await auth.deleteUser(user.uid).catch(() => {});
-        await db.doc(`users/${user.uid}`).delete().catch(() => {});
-        deletedUsers++;
-      }
-    }
-    pageToken = page.pageToken;
-  } while (pageToken);
-
-  // Belt-and-suspenders: the test deletes its own patient as its last
-  // step, but if it failed partway through (after create, before delete),
-  // sweep for anything left behind so it doesn't linger in test-org.
-  //
-  // A name/destination-based query (what an earlier version of this
-  // function used) is a dead end: `name` is encrypted client-side by the
-  // real upload flow this test's patient goes through (see
-  // patient_upload_service.dart/encryptPatientFields), so a plaintext
-  // range query against it can never match, and this test's patient sets
-  // no `destination` either — confirmed for real, several genuinely
-  // leftover "Patrol EMS Test Patient..." documents accumulated in
-  // test-org from failed runs while that query reported 0 every time.
-  //
-  // `createdBy` is the reliable signal instead: every patient write stamps
-  // it with the creating user's uid (patient_upload_service.dart's own
-  // doc comment), in plaintext, unconditionally. A patient whose
-  // `createdBy` uid no longer resolves to a real Auth user can only be one
-  // this script's own account-sweep already deleted above — a genuine
-  // person's account is never deleted out from under their own patients
-  // in normal use, so "owner doesn't exist" is an unambiguous signal this
-  // is orphaned test debris, not a guess. Also safe against sibling jobs:
-  // a concurrently-running job's account still exists until *that* job's
-  // own cleanup deletes it, so this can never catch a patient still
-  // legitimately in use elsewhere — no separate age guard needed the way
-  // the prefix-based account sweep above requires one.
-  const organizationId = await findOrganizationId(db, 'test-org');
-  const testOrgPatientsSnap = await db.collection('patients').where('organizationId', '==', organizationId).get();
-  const ownerUids = [...new Set(testOrgPatientsSnap.docs.map((doc) => doc.data().createdBy).filter(Boolean))];
-  const existingUids = new Set();
-  for (let i = 0; i < ownerUids.length; i += 100) {
-    const batch = ownerUids.slice(i, i + 100).map((uid) => ({ uid }));
-    const { users } = await auth.getUsers(batch);
-    for (const user of users) existingUids.add(user.uid);
+async function sweepOrphanedPatients(db, emsUid) {
+  const cutoff = Timestamp.fromMillis(Date.now() - ORPHAN_SWEEP_AGE_MS);
+  const snap = await db
+    .collection('patients')
+    .where('createdBy', '==', emsUid)
+    .where('submittedAt', '<', cutoff)
+    .get();
+  let deleted = 0;
+  for (const doc of snap.docs) {
+    await db.recursiveDelete(doc.ref);
+    deleted++;
   }
-  let deletedPatients = 0;
-  for (const doc of testOrgPatientsSnap.docs) {
-    const owner = doc.data().createdBy;
-    if (owner && !existingUids.has(owner)) {
-      await doc.ref.delete();
-      deletedPatients++;
-    }
-  }
-
-  console.log(
-    `Cleanup: removed ${ownUids.size} throwaway EMS account(s), ${deletedUsers} other leftover EMS account(s), ` +
-      `${deletedPatients} leftover patient(s) with a deleted owner.`,
-  );
+  console.log(`Cleanup: removed ${deleted} orphaned patient(s) older than ${ORPHAN_SWEEP_AGE_MS / 60000} minutes.`);
 }
 
 const { seedOnly, teardown, accountJsonPath } = parseArgs(process.argv.slice(2));
 
+// Teardown only ever sweeps by uid (looked up fresh below) — it never
+// needs the password/secret, so it's the one mode that can run without
+// them set. --seed-only and the default (web) mode both write/use the
+// real password+secret, so they still fail fast here rather than writing
+// a JSON file with undefined fields, or an empty dart-define, that would
+// only surface as a confusing failure several steps later.
+if (!teardown && (!EMS_PASSWORD || !EMS_TOTP_SECRET)) {
+  console.error('E2E_EMS_PASSWORD and E2E_EMS_TOTP_SECRET must both be set in the environment.');
+  process.exit(1);
+}
+
 const credentialPath = initFirebaseAdmin('emspatrol');
 const db = getFirestore();
 const auth = getAuth();
+const emsUid = (await auth.getUserByEmail(EMS_EMAIL)).uid;
 
 if (teardown) {
-  const account = JSON.parse(fs.readFileSync(accountJsonPath, 'utf8'));
-  await cleanup(db, auth, account.uid);
-  fs.unlinkSync(accountJsonPath);
+  await sweepOrphanedPatients(db, emsUid);
+  if (fs.existsSync(accountJsonPath)) fs.unlinkSync(accountJsonPath);
   if (credentialPath) fs.unlinkSync(credentialPath);
   console.log('Teardown complete.');
   process.exit(0);
 }
 
-let account;
+if (seedOnly) {
+  await ensureOrgFlags(db);
+  fs.writeFileSync(
+    accountJsonPath,
+    JSON.stringify({ email: EMS_EMAIL, password: EMS_PASSWORD, totpSecret: EMS_TOTP_SECRET, uid: emsUid }),
+  );
+  console.log('Wrote persistent EMS account to', accountJsonPath);
+  if (credentialPath) fs.unlinkSync(credentialPath);
+  process.exit(0);
+}
+
 let exitCode = 1;
 try {
-  account = await createSmokeEmsAccount(db);
-  console.log('Created throwaway EMS account:', account.email);
+  await ensureOrgFlags(db);
+  // Captured right before the real test run starts — verifyPatientAuditEntries
+  // below only accepts entries stamped after this, so a stale entry from
+  // some earlier run of this same persistent account can never
+  // false-positive this check.
+  const since = Timestamp.now();
 
-  if (seedOnly) {
-    fs.writeFileSync(accountJsonPath, JSON.stringify(account));
-    console.log('Wrote seeded account to', accountJsonPath);
-    exitCode = 0;
-  } else {
-    // Both of ems_test.dart's own phases (add/edit/delete a patient, then
-    // complete transport + export FHIR) run in this one `patrol test`
-    // process, inside one `patrolTest` block, sharing this one account and
-    // its one MFA enrollment — see that file's own header comment for why
-    // (used to be two separate patrol test files/processes/accounts
-    // specifically to route around a cross-process MFA limitation; one
-    // continuous patrolTest block never hits that limitation in the first
-    // place, since nothing ever reloads mid-test to lose the session).
-    exitCode = await runPatrolTest({
-      appDir: EMS_APP_DIR,
-      device: process.env.PATROL_DEVICE || 'chrome',
-      // ems_test.dart never grants geolocation (it deliberately leaves
-      // live tracking off in both phases) — but
-      // LocationTrackingSection.initState() still calls
-      // Geolocator.getCurrentPosition() unconditionally on every mount of
-      // the upload/edit form regardless. With no permission decision at
-      // all, the browser leaves the request in "prompt" limbo
-      // indefinitely (no UI to click through in headless CI), so it only
-      // ever resolves via that call's own internal 12s Dart-side timeout
-      // — a real race window against Patrol's own 10s hit-test timeout,
-      // confirmed via a real GHA "Found 0 widgets with type TextField"
-      // right around that ~12s mark. Explicitly denying (empty
-      // permissions array, not omitted) makes the browser reject the
-      // request immediately instead, removing the race entirely.
-      webPermissions: [],
-      target: 'patrol_test/ems_test.dart',
-      dartDefines: { SMOKE_EMAIL: account.email, SMOKE_PASSWORD: account.password },
-    });
+  exitCode = await runPatrolTest({
+    appDir: EMS_APP_DIR,
+    device: process.env.PATROL_DEVICE || 'chrome',
+    // ems_test.dart never grants geolocation (it deliberately leaves live
+    // tracking off) — but LocationTrackingSection.initState() still calls
+    // Geolocator.getCurrentPosition() unconditionally on every mount of
+    // the upload/edit form regardless. With no permission decision at
+    // all, the browser leaves the request in "prompt" limbo indefinitely
+    // (no UI to click through in headless CI), so it only ever resolves
+    // via that call's own internal 12s Dart-side timeout — a real race
+    // window against Patrol's own 10s hit-test timeout, confirmed via a
+    // real GHA "Found 0 widgets with type TextField" right around that
+    // ~12s mark. Explicitly denying (empty permissions array, not
+    // omitted) makes the browser reject the request immediately instead,
+    // removing the race entirely.
+    webPermissions: [],
+    target: 'patrol_test/ems_test.dart',
+    dartDefines: {
+      SMOKE_EMAIL: EMS_EMAIL,
+      SMOKE_PASSWORD: EMS_PASSWORD,
+      SMOKE_TOTP_SECRET: EMS_TOTP_SECRET,
+      WRONG_APP_EMAIL: WRONG_APP_EMAIL,
+    },
+  });
 
-    if (exitCode === 0) {
-      try {
-        await verifyPatientAuditEntries(db, account.uid);
-      } catch (error) {
-        console.error(error.message);
-        exitCode = 1;
-      }
-    } else {
-      console.log('\n❌ Patrol test failed — skipping the audit-entry checks (nothing meaningful to verify).');
+  if (exitCode === 0) {
+    try {
+      await verifyPatientAuditEntries(db, emsUid, since);
+    } catch (error) {
+      console.error(error.message);
+      exitCode = 1;
     }
+  } else {
+    console.log('\n❌ Patrol test failed — skipping the audit-entry checks (nothing meaningful to verify).');
   }
 } finally {
-  // --seed-only intentionally skips cleanup — teardown happens in a later,
-  // separately-invoked `--teardown` run (see the Test Lab workflows), after
-  // `patrol build` + `gcloud firebase test ... run` have both used this
-  // seeded state.
-  if (!seedOnly && account) await cleanup(db, auth, account.uid);
+  await sweepOrphanedPatients(db, emsUid);
   if (credentialPath) fs.unlinkSync(credentialPath);
 }
 
-if (seedOnly) {
-  console.log(exitCode === 0 ? '\n✅ Seed complete.' : '\n❌ Seed failed.');
-} else {
-  console.log(exitCode === 0 ? '\n✅ Patrol test passed.' : '\n❌ Patrol test failed.');
-}
+console.log(exitCode === 0 ? '\n✅ Patrol test passed.' : '\n❌ Patrol test failed.');
 process.exit(exitCode);

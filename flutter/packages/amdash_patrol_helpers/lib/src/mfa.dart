@@ -4,6 +4,7 @@ import 'package:otp/otp.dart';
 import 'package:patrol/patrol.dart';
 
 import 'interaction_helpers.dart';
+import 'session.dart';
 
 /// Every account across this app family requires TOTP MFA (each app's own
 /// route guard checks it right after auth) — a freshly created throwaway
@@ -39,6 +40,50 @@ Future<void> completeMfaEnrollment(PatrolIntegrationTester $) async {
   await pumpUntil(
     $,
     () => find.byKey(const Key('mfa_secret_key')).evaluate().isEmpty,
+    maxIterations: 30,
+  );
+}
+
+/// Signs in via [signIn], then resolves the real second-factor challenge
+/// an *already-enrolled* account hits on every sign-in — a genuinely
+/// different screen from [completeMfaEnrollment]'s one-time setup screen.
+/// `LoginScreen` (amdash_core) catches `FirebaseAuthMultiFactorException`
+/// mid-`_submitSignIn` for exactly this case and shows a bare "Enter the
+/// 6-digit code" step, no secret displayed (there's nothing to read off
+/// screen post-enrollment — Firebase never shows a TOTP secret again once
+/// enrolled), so [secret] has to be supplied by the caller: captured once,
+/// by hand, during that account's own one-time enrollment (see
+/// [completeMfaEnrollment]), then stored wherever that account's other
+/// credentials live (a repo secret for a shared/persistent test account,
+/// same as its password).
+///
+/// For a throwaway, never-before-signed-in account, use
+/// [completeMfaEnrollment] instead (after a plain [signIn]) — this is for
+/// an account that has already completed that step on some earlier run
+/// and stays enrolled from then on.
+Future<void> signInWithTotp(
+  PatrolIntegrationTester $,
+  String email,
+  String password,
+  String secret,
+) async {
+  await signIn($, email, password);
+  await pumpUntil(
+    $,
+    () => find.text('Enter the 6-digit code from your authenticator app').evaluate().isNotEmpty,
+    maxIterations: 40,
+  );
+  final code = OTP.generateTOTPCodeString(
+    secret,
+    DateTime.now().millisecondsSinceEpoch,
+    algorithm: Algorithm.SHA1,
+    isGoogle: true,
+  );
+  await enterTextAt($, 0, code);
+  await tapText($, 'Verify');
+  await pumpUntil(
+    $,
+    () => find.text('Enter the 6-digit code from your authenticator app').evaluate().isEmpty,
     maxIterations: 30,
   );
 }

@@ -335,9 +335,20 @@ jobs:
     # default to C/POSIX rather than a real locale. Setting a real one
     # job-wide fixes it; the runner has en_US.UTF-8 pre-generated already,
     # just not active.
+    #
+    # E2E_*_PASSWORD/E2E_*_TOTP_SECRET — the two persistent e2e accounts'
+    # credentials (see run-physician-patrol-test.mjs/run-ems-patrol-
+    # test.mjs's own header comments). Job-wide rather than scoped to just
+    # the steps that need them: several scenario steps below need some
+    # subset of the four, and GitHub Actions env is only settable per-job
+    # or per-step, not shared across an arbitrary subset of steps.
     env:
       LANG: en_US.UTF-8
       LC_ALL: en_US.UTF-8
+      E2E_PHYSICIAN_PASSWORD: ${{ secrets.E2E_PHYSICIAN_PASSWORD }}
+      E2E_PHYSICIAN_TOTP_SECRET: ${{ secrets.E2E_PHYSICIAN_TOTP_SECRET }}
+      E2E_EMS_PASSWORD: ${{ secrets.E2E_EMS_PASSWORD }}
+      E2E_EMS_TOTP_SECRET: ${{ secrets.E2E_EMS_TOTP_SECRET }}
     steps:
       - uses: actions/checkout@v7
 
@@ -407,10 +418,14 @@ jobs:
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}' > "$RUNNER_TEMP/firebase-service-account.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
 
-      # Each scenario below creates its own throwaway Firebase account (+
-      # hospital/patient as needed), drives `patrol test` against a real
-      # Chrome instance, and tears its own state back down — see each
-      # script's own header comment for why it's scoped the way it is.
+      # Each scenario below drives `patrol test` against a real Chrome
+      # instance — see each script's own header comment for why it's
+      # scoped the way it is. Admin's two scenarios and physician-
+      # onboarding each still create + tear down their own throwaway
+      # Firebase account; physician/ems/patient-flow instead sign into the
+      # two persistent e2e accounts (see run-physician-patrol-test.mjs/
+      # run-ems-patrol-test.mjs's own header comments for why), seeding +
+      # tearing down only fresh hospital/patient data around them.
       - name: Run admin Patrol e2e
         id: run_admin
         if: ${{ !cancelled() }}
@@ -487,15 +502,16 @@ jobs:
 
       # Unlike the four plain per-app scenarios above (each app's own UI
       # against Admin SDK-seeded state), this drives the real cross-app
-      # path: an EMS account uploads a live-tracked patient through the
-      # EMS app's own UI (GPS mocked via Playwright's geolocation
-      # override, since a headless CI browser has no real GPS), then a
-      # physician account signs in and confirms that exact patient — not
-      # a seeded stand-in — shows up with a live map centered on the
-      # mocked coordinates. Patrol can't drive two apps in one process, so
-      # this is two sequential `patrol test` runs coordinated by shared,
-      # deterministic naming rather than any live signal between them —
-      # see run-patient-flow-e2e.mjs's own header comment.
+      # path: the persistent EMS account uploads a live-tracked patient
+      # through the EMS app's own UI (GPS mocked via Playwright's
+      # geolocation override, since a headless CI browser has no real
+      # GPS), then the persistent physician account signs in and confirms
+      # that exact patient — not a seeded stand-in — shows up with a live
+      # map centered on the mocked coordinates. Patrol can't drive two
+      # apps in one process, so this is two sequential `patrol test` runs
+      # coordinated by shared, deterministic naming rather than any live
+      # signal between them — see run-patient-flow-e2e.mjs's own header
+      # comment.
       - name: Run cross-app patient flow e2e (EMS upload -> physician view)
         id: run_patient_flow
         if: ${{ !cancelled() }}
@@ -513,18 +529,16 @@ jobs:
             flutter/apps/ems/playwright-report
           retention-days: 7
 
-      # Same two-sequential-Patrol-runs shape as the patient flow scenario,
-      # for the other real cross-app path: an admin account creates a new
-      # physician user through the admin app's own UI (no password, no
-      # work location — nothing pre-seeded), and that exact account then
-      # completes its own real first-ever sign-in through the physician
-      # app's own UI — plus a third leg covering the matching failure
-      # state (an ems-role account rejected at the physician app). See
-      # run-physician-onboarding-e2e.mjs's own header comment.
-      # run-ems-onboarding-e2e.mjs's identical EMS-side onboarding flow
-      # runs in the flutter-android-e2e job instead — EMS crews use the
-      # native app, not the web build, so that leg needs a real Android
-      # device.
+      # The other real cross-app path: an admin-created physician account
+      # (seeded directly, no password yet — mirroring what a real
+      # createUser call would produce) completes its own real first-ever
+      # sign-in through the physician app's own UI. A fresh, throwaway
+      # account by necessity — first-login can't be re-tested against an
+      # already-enrolled account. See run-physician-onboarding-e2e.mjs's
+      # own header comment. run-ems-onboarding-e2e.mjs's identical EMS-side
+      # onboarding flow runs in the flutter-android-e2e job instead — EMS
+      # crews use the native app, not the web build, so that leg needs a
+      # real Android device.
       - name: Run cross-app physician onboarding e2e (admin creates user -> physician first sign-in)
         id: run_physician_onboarding
         if: ${{ !cancelled() }}
@@ -542,49 +556,16 @@ jobs:
             flutter/apps/ems/playwright-report
           retention-days: 7
 
-      # EMS's own wrong-app rejection leg — nothing about this scenario is
-      # Android-specific, unlike the real onboarding leg, which stays on
-      # Test Lab (see run-ems-app-redirect-e2e.mjs's own header comment).
-      - name: Run ems app-redirect e2e (admin creates physician-role user -> EMS rejects at email)
-        id: run_ems_app_redirect
-        if: ${{ !cancelled() }}
-        run: node run-ems-app-redirect-e2e.mjs
-        working-directory: scripts
-
-      - name: Upload Patrol reports (ems app redirect)
-        if: ${{ !cancelled() && steps.run_ems_app_redirect.outcome == 'failure' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: patrol-reports-ems-app-redirect
-          path: |
-            flutter/apps/admin/playwright-report
-            flutter/apps/physician/playwright-report
-            flutter/apps/ems/playwright-report
-          retention-days: 7
-
-      # Physician's own wrong-app rejection leg — split out of
-      # run-physician-onboarding-e2e.mjs (see run-physician-app-redirect-
-      # e2e.mjs's own header comment for why: a real attempt at merging it
-      # into the same script/patrolTest block as the real onboarding leg
-      # hit a hard wall — AuthService.signOut()'s deliberate page reload
-      # on web kills a still-running Patrol test, and no scenario ordering
-      # avoids needing that sign-out somewhere in the middle).
-      - name: Run physician app-redirect e2e (admin creates ems-role user -> physician rejects at email)
-        id: run_physician_app_redirect
-        if: ${{ !cancelled() }}
-        run: node run-physician-app-redirect-e2e.mjs
-        working-directory: scripts
-
-      - name: Upload Patrol reports (physician app redirect)
-        if: ${{ !cancelled() && steps.run_physician_app_redirect.outcome == 'failure' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: patrol-reports-physician-app-redirect
-          path: |
-            flutter/apps/admin/playwright-report
-            flutter/apps/physician/playwright-report
-            flutter/apps/ems/playwright-report
-          retention-days: 7
+      # EMS's and physician's own wrong-app rejection legs used to be two
+      # more scenarios here, each its own script/account (run-ems-app-
+      # redirect-e2e.mjs / run-physician-app-redirect-e2e.mjs). Folded
+      # directly into ems_test.dart/patient_flow_test.dart instead, as a
+      # phase 0 ahead of each file's own real sign-in — see those files'
+      # own header comments for the full reasoning (the persistent-account
+      # model this job's scenarios now use makes that merge possible: the
+      # rejection phase runs before the real account ever signs in, using
+      # the *other* persistent account's email, so there's no account
+      # switch — and thus no sign-out — needed within the session).
 
   # Only runs on master — see flutter-web-e2e's identical note on real
   # Firebase/Test Lab resource usage. Mirrors codemagic.yaml's own
@@ -662,7 +643,20 @@ jobs:
       # straight to $RUNNER_TEMP — every step below runs in this same job
       # on this same runner, so nothing needs to leave the filesystem to
       # reach them.
+      #
+      # physician's own --seed-only still creates a fresh throwaway
+      # account here (no E2E_PHYSICIAN_* secrets needed) — deliberately
+      # NOT the persistent one flutter-web-e2e's own physician scenario
+      # uses, since this job runs concurrently with that one and sharing
+      # an account would race over profile.workLocation (see
+      # run-physician-patrol-test.mjs's own header comment). ems's
+      # --seed-only *does* use the persistent account (safe here — see
+      # run-ems-patrol-test.mjs's own header comment for why EMS has no
+      # equivalent shared-state race), so it needs its own secrets below.
       - name: Seed physician + ems smoke accounts
+        env:
+          E2E_EMS_PASSWORD: ${{ secrets.E2E_EMS_PASSWORD }}
+          E2E_EMS_TOTP_SECRET: ${{ secrets.E2E_EMS_TOTP_SECRET }}
         run: |
           node run-physician-patrol-test.mjs --seed-only --account-json="$RUNNER_TEMP/physician-account.json"
           node run-ems-patrol-test.mjs --seed-only --account-json="$RUNNER_TEMP/ems-account.json"
@@ -736,6 +730,13 @@ jobs:
           set -o pipefail
           ACCOUNT="$RUNNER_TEMP/physician-account.json"
           cd flutter/apps/physician
+          # This account is the fresh throwaway one (never the persistent
+          # e2e account flutter-web-e2e's own physician scenario uses —
+          # see run-physician-patrol-test.mjs's own header comment for
+          # why), so patient_flow_test.dart signs in via the plain
+          # signIn + completeMfaEnrollment path, not signInWithTotp — no
+          # SMOKE_TOTP_SECRET/WRONG_APP_EMAIL needed here; that file only
+          # reads either on its kIsWeb branch.
           patrol build android --target patrol_test/patient_flow_test.dart \
             --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
             --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")" \
@@ -810,9 +811,17 @@ jobs:
           set -o pipefail
           ACCOUNT="$RUNNER_TEMP/ems-account.json"
           cd flutter/apps/ems
+          # SMOKE_TOTP_SECRET — this account is the persistent one (see
+          # run-ems-patrol-test.mjs's own header comment), always already
+          # MFA-enrolled, so ems_test.dart's sign-in always resolves the
+          # real second-factor challenge (signInWithTotp) rather than
+          # first-time enrollment. No WRONG_APP_EMAIL here — this file's
+          # own wrong-app-rejection phase is web-only (kIsWeb-gated), so
+          # Android's build never reads it.
           patrol build android --target patrol_test/ems_test.dart \
             --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
             --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")" \
+            --dart-define SMOKE_TOTP_SECRET="$(jq -r .totpSecret "$ACCOUNT")" \
             --dart-define FIREBASE_APPCHECK_DEBUG_TOKEN="${{ secrets.FIREBASE_APPCHECK_DEBUG_TOKEN }}"
           # --grant-permissions=none (gcloud *beta* only — the stable
           # `gcloud firebase test android run` has no equivalent flag at

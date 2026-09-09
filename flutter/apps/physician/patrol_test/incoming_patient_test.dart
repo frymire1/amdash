@@ -1,8 +1,9 @@
 // Cross-app verification (see scripts/run-patient-flow-e2e.mjs, which
 // orchestrates this alongside ems's patient_upload_flow_test.dart, run
-// first): signs in as a physician whose workLocation is pre-seeded to
-// match the hospital ems's test just uploaded a patient for, and confirms
-// that real patient — not one seeded directly via the Admin SDK, like
+// first): signs in as the persistent physician account (workLocation
+// re-pointed by the orchestrator, right before this runs, to match the
+// hospital ems's test just uploaded a patient for), and confirms that
+// real patient — not one seeded directly via the Admin SDK, like
 // patient_flow_test.dart uses — actually shows up with a live map
 // centered on the exact (mocked) GPS coordinates ems's test used, and
 // that vitals reflect ems's own later edit (also real, done through the
@@ -11,9 +12,19 @@
 // update on one app are genuinely what physician sees, not two tests
 // independently exercising their own UI against synthetic state.
 //
-// tapFinder/pumpUntil/completeMfaEnrollment come from
-// amdash_patrol_helpers, shared across every app's patrol_test/ suite —
-// see that package for the full rationale/history behind each one.
+// Web only (never runs on Android — see run-patient-flow-e2e.mjs's own
+// header comment), so unlike patient_flow_test.dart this doesn't need a
+// kIsWeb branch: always the persistent account, always signInWithTotp.
+// Safe to overwrite that account's workLocation here even though
+// patient_flow_test.dart's own scenario also touches it — both only ever
+// run as sequential steps within the same flutter-web-e2e job now, never
+// concurrently with each other or with Android (which uses its own,
+// separate throwaway physician account — see run-physician-patrol-
+// test.mjs's own header comment for why).
+//
+// tapFinder/pumpUntil/signInWithTotp come from amdash_patrol_helpers,
+// shared across every app's patrol_test/ suite — see that package for the
+// full rationale/history behind each one.
 import 'package:amdash_core/amdash_core.dart';
 import 'package:amdash_patrol_helpers/amdash_patrol_helpers.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -33,6 +44,7 @@ void main() {
     ($) async {
       const email = String.fromEnvironment('SMOKE_EMAIL');
       const password = String.fromEnvironment('SMOKE_PASSWORD');
+      const totpSecret = String.fromEnvironment('SMOKE_TOTP_SECRET');
       const patientName = String.fromEnvironment('SMOKE_PATIENT_NAME');
       // There's no double.fromEnvironment (only int/bool/String) — read as
       // a string const-define and parse at runtime instead.
@@ -45,6 +57,11 @@ void main() {
         password,
         isNotEmpty,
         reason: 'pass --dart-define=SMOKE_PASSWORD=...',
+      );
+      expect(
+        totpSecret,
+        isNotEmpty,
+        reason: 'pass --dart-define=SMOKE_TOTP_SECRET=...',
       );
       expect(
         patientName,
@@ -79,16 +96,10 @@ void main() {
       await $.pumpWidgetAndSettle(const ProviderScope(child: PhysicianApp()));
 
       // Sign in. No work-location step here — this account's workLocation
-      // is pre-seeded by the orchestrator to match the hospital ems's test
-      // uploaded for, unlike patient_flow_test.dart which drives that
-      // screen itself.
-      await $(TextField).at(0).enterText(email);
-      await tapText($, 'Continue');
-      await pumpUntil($, () => find.text('Sign In').evaluate().isNotEmpty);
-      await $(TextField).at(0).enterText(password);
-      await tapText($, 'Sign In');
-
-      await completeMfaEnrollment($);
+      // is re-pointed by the orchestrator (right before this runs) to
+      // match the hospital ems's test uploaded for, unlike
+      // patient_flow_test.dart which drives that screen itself.
+      await signInWithTotp($, email, password, totpSecret);
 
       await pumpUntil(
         $,
