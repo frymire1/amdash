@@ -197,41 +197,50 @@ void main() {
         maxIterations: 100,
       );
 
-      // Explicitly select this run's own hospital in PatientList's own
-      // destination filter, rather than relying on its *default* selection
-      // (which comes from profile.workLocation — see patient_list.dart).
-      // That default is exactly right for a throwaway, single-use account,
-      // but this one is the shared persistent physician account (see this
-      // file's own header comment) — and now that Android's own
-      // flutter-android-e2e job signs into a genuinely *different*,
-      // throwaway account instead of this one (see run-physician-patrol-
-      // test.mjs's own header comment for why the two platforms diverge
-      // here specifically), there's no cross-job workLocation race left to
-      // worry about even without this — but web itself still has no
+      // Web only: explicitly select this run's own hospital in
+      // PatientList's own destination filter, rather than relying on its
+      // *default* selection (which comes from profile.workLocation — see
+      // patient_list.dart). That default is exactly right for a
+      // throwaway, single-use account (Android's own leg — see this
+      // file's own sign-in comment for why it keeps a fresh one), but web
+      // signs into the shared persistent physician account, which has no
       // guarantee this exact hospital was the *last* one written to
-      // workLocation by some earlier run of this same script, since nothing
-      // resets it between runs. Driving the real Filter UI instead makes
-      // this assertion depend only on what this run itself just selected,
-      // not on whatever workLocation happened to already be.
-      await tapFinder($, find.byTooltip('Filter'));
-      await pumpUntil(
-        $,
-        () => find.byType(DropdownButtonFormField<String>).evaluate().isNotEmpty,
-        maxIterations: 20,
-      );
-      await tapFinder($, find.byType(DropdownButtonFormField<String>));
-      await pumpUntil(
-        $,
-        () => find.text(hospitalName).evaluate().length > 1,
-        maxIterations: 20,
-      );
-      // Same lazy-finder-race reasoning as the hospital-autocomplete tap
-      // above — no `await` between computing the index and tapping it.
-      final destinationMatches = find.text(hospitalName);
-      await $.tester.tap(
-        destinationMatches.at(destinationMatches.evaluate().length - 1),
-      );
-      await $.pump(const Duration(milliseconds: 400));
+      // workLocation by some earlier run of this same script, since
+      // nothing resets it between runs. Driving the real Filter UI
+      // instead makes this assertion depend only on what this run itself
+      // just selected, not on whatever workLocation happened to already
+      // be.
+      //
+      // Confirmed for real why this can't *also* run on Android
+      // unconditionally: the dropdown this opens overflowed by 23px on
+      // Test Lab's own MediumPhone device width (a real RenderFlex
+      // overflow at that screen size, in patient_list.dart's own
+      // DropdownButtonFormField — not present on web's wider default
+      // viewport), crashing the whole test. Android's own throwaway
+      // account never needs this in the first place (its workLocation is
+      // always freshly set, this same run, by the picker step above), so
+      // gating it here costs nothing real.
+      if (kIsWeb) {
+        await tapFinder($, find.byTooltip('Filter'));
+        await pumpUntil(
+          $,
+          () => find.byType(DropdownButtonFormField<String>).evaluate().isNotEmpty,
+          maxIterations: 20,
+        );
+        await tapFinder($, find.byType(DropdownButtonFormField<String>));
+        await pumpUntil(
+          $,
+          () => find.text(hospitalName).evaluate().length > 1,
+          maxIterations: 20,
+        );
+        // Same lazy-finder-race reasoning as the hospital-autocomplete tap
+        // above — no `await` between computing the index and tapping it.
+        final destinationMatches = find.text(hospitalName);
+        await $.tester.tap(
+          destinationMatches.at(destinationMatches.evaluate().length - 1),
+        );
+        await $.pump(const Duration(milliseconds: 400));
+      }
 
       // The seeded patient should appear in the list.
       await pumpUntil(

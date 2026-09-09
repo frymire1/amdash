@@ -108,6 +108,14 @@
       ]
     },
     {
+      "collectionGroup": "patients",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "createdBy", "order": "ASCENDING" },
+        { "fieldPath": "submittedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "location",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
