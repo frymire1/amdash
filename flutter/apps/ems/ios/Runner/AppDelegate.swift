@@ -33,12 +33,21 @@ import UIKit
     // (rather than a real Flutter plugin) since this app is the only
     // caller — same technique GeneratedPluginRegistrant's own generated
     // plugins use to reach the engine's binary messenger.
-    let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "AmDashLocationAlwaysUpgrade")
+    guard let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "AmDashLocationAlwaysUpgrade") else {
+      // No real failure mode found for this in practice — registrar(forPlugin:)
+      // only returns nil once the engine has already been destroyed, which
+      // can't be true here (this callback IS the engine's own init hook).
+      // Guarded anyway rather than force-unwrapped: skipping the channel
+      // setup just means the in-app "Background Access Limited" banner
+      // (see evaluateHealth/openBackgroundLocationSettings) is the only
+      // path to "Always" for this launch, not a crash.
+      return
+    }
     let channel = FlutterMethodChannel(
       name: "com.amdash.ems/location_always_upgrade",
       binaryMessenger: registrar.messenger()
     )
-    channel.setMethodCallHandler { [weak self] call, result in
+    channel.setMethodCallHandler { [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
       guard call.method == "requestAlwaysUpgrade" else {
         result(FlutterMethodNotImplemented)
         return
