@@ -24,6 +24,14 @@ function loginUrlForRole(role: AssignableRole): string {
     : 'https://physician-web-577422583971.northamerica-northeast2.run.app';
 }
 
+// TODO: replace with the real distribution link once one exists (neither
+// app is published to the App Store/Play Store yet — the only current
+// distribution path is Firebase App Distribution, invite-only and not yet
+// wired to auto-add a new EMS user as a tester, so this placeholder is
+// deliberately not a real Firebase App Distribution link either; swap it
+// for whatever the actual link ends up being, store listing or otherwise).
+const EMS_APP_DOWNLOAD_URL = 'https://TODO-add-ems-app-download-link';
+
 // Email clients can't load local/repo files, so the logo has to be a
 // publicly reachable URL — reusing the mark already deployed as the
 // marketing site's apple-touch-icon.png (the same finalized Arctic Cyan
@@ -80,12 +88,30 @@ function ctaButton(url: string, label: string): string {
   `;
 }
 
-function welcomeEmailHtml({ email, firstName, loginUrl }: { email: string; firstName: string; loginUrl: string }): string {
+function welcomeEmailHtml({
+  email,
+  firstName,
+  loginUrl,
+  role,
+}: {
+  email: string;
+  firstName: string;
+  loginUrl: string;
+  role: AssignableRole;
+}): string {
   return emailShell(`
     <p style="margin:0 0 16px;">Hi ${firstName},</p>
     <p style="margin:0 0 24px;">An administrator has created an AmDash account for you at <strong>${email}</strong>.</p>
     ${ctaButton(loginUrl, 'Sign in to get started')}
     <p style="margin:24px 0 0;font-size:13px;color:#5E7A7D;">Since this is your first time signing in, you'll be asked to set a password after entering your email.</p>
+    ${
+      role === 'ems'
+        ? `
+      <p style="margin:24px 0 16px;">EMS crews use the AmDash mobile app for live location sharing during transport.</p>
+      ${ctaButton(EMS_APP_DOWNLOAD_URL, 'Download the AmDash app')}
+    `
+        : ''
+    }
   `);
 }
 
@@ -133,7 +159,7 @@ export async function sendWelcomeEmail({
       from: FROM_ADDRESS,
       to: email,
       subject: 'Your AmDash account is ready',
-      html: welcomeEmailHtml({ email, firstName, loginUrl }),
+      html: welcomeEmailHtml({ email, firstName, loginUrl, role }),
     });
     if (error) {
       logger.error('Failed to send welcome email', { email, error });

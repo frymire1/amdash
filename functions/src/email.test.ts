@@ -61,6 +61,20 @@ describe('sendWelcomeEmail', () => {
     );
   });
 
+  it('includes a download-the-app link for an EMS account', async () => {
+    await sendWelcomeEmail({ email: 'a@example.com', firstName: 'Jordan', role: 'ems' });
+    expect((mockSend.mock.calls[0][0].html as string)).toContain('Download the AmDash app');
+  });
+
+  it('omits the download-the-app link for physician/nurse accounts — that link is EMS-only', async () => {
+    await sendWelcomeEmail({ email: 'a@example.com', firstName: 'Jordan', role: 'physician' });
+    expect((mockSend.mock.calls[0][0].html as string)).not.toContain('Download the AmDash app');
+
+    mockSend.mockClear();
+    await sendWelcomeEmail({ email: 'a@example.com', firstName: 'Jordan', role: 'nurse' });
+    expect((mockSend.mock.calls[0][0].html as string)).not.toContain('Download the AmDash app');
+  });
+
   it('is best-effort: logs and does not throw when Resend reports an API-level error', async () => {
     mockSend.mockResolvedValue({ error: { message: 'domain not verified' } });
 
