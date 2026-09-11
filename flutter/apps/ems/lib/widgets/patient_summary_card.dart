@@ -200,7 +200,16 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
         label: 'No GPS Signal',
         pulsing: false,
       ),
+      EmsTrackingHealth.backgroundAccessLimited => const StatusPill(
+        kind: StatusPillKind.warning,
+        label: 'Background Access Limited',
+        pulsing: false,
+      ),
     };
+  }
+
+  Future<void> _openBackgroundLocationSettings() async {
+    await ref.read(emsTrackingProvider.notifier).openBackgroundLocationSettings();
   }
 
   @override
@@ -304,6 +313,25 @@ class _PatientSummaryCardState extends ConsumerState<PatientSummaryCard> {
               ),
             ),
           ),
+          // Its own button, outside the InkWell above, same reasoning as
+          // Edit/Complete/Delete below: living inside that InkWell's tap
+          // area would make this button's own tap ambiguous with the
+          // card's navigate-to-viewer tap.
+          if (health == EmsTrackingHealth.backgroundAccessLimited)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      "Location may pause once the app is backgrounded. Grant 'Allow all the time' for "
+                      'reliable tracking during transport.',
+                    ),
+                  ),
+                  TextButton(onPressed: _openBackgroundLocationSettings, child: const Text('Open Settings')),
+                ],
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             child: Wrap(

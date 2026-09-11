@@ -5,6 +5,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:ems/services/ems_tracking_service.dart';
 import 'package:ems/services/ems_tracking_task_handler.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task_platform_interface.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -46,6 +47,12 @@ Position _position({double latitude = 45.4, double longitude = -75.7}) {
 }
 
 void main() {
+  // Needed for the iosLocationAlwaysUpgradeChannel tests below —
+  // MethodChannel.invokeMethod and TestDefaultBinaryMessengerBinding.instance
+  // both require a live binding, which plain `test()` (unlike `testWidgets()`)
+  // doesn't initialize on its own.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   setUpAll(() {
     registerFallbackValue(const LocationSettings());
     registerFallbackValue(<String, Object?>{});
@@ -186,6 +193,28 @@ void main() {
       });
     }
 
+    test('Android whileInUse -> backgroundAccessLimited, even with a fresh fix', () async {
+      when(
+        () => geolocator.getCurrentPosition(locationSettings: any(named: 'locationSettings')),
+      ).thenAnswer((_) async => _position());
+      when(() => geolocator.isLocationServiceEnabled()).thenAnswer((_) async => true);
+      when(() => geolocator.checkPermission()).thenAnswer((_) async => LocationPermission.always);
+      stubForegroundServiceLifecycle();
+      stubNotificationPermission(NotificationPermission.granted);
+
+      final container = containerFor();
+      final controller = container.read(emsTrackingProvider.notifier);
+      await controller.startTracking('patient-1');
+
+      // Granted at start (so startTracking succeeds), downgraded to
+      // whileInUse afterward — e.g. the user later revoked "Allow all the
+      // time" from system Settings while the app kept running.
+      when(() => geolocator.checkPermission()).thenAnswer((_) async => LocationPermission.whileInUse);
+      // startTracking's own confirming publish already recorded a fresh
+      // fix — proves this takes priority over "online" regardless.
+      expect(await controller.evaluateHealth(), EmsTrackingHealth.backgroundAccessLimited);
+    });
+
     test('a fresh fix -> online; no fix yet (or long stale) -> noSignal', () async {
       when(
         () => geolocator.getCurrentPosition(locationSettings: any(named: 'locationSettings')),
@@ -274,25 +303,103 @@ void main() {
       verifyNever(() => foregroundTask.requestNotificationPermission());
     });
 
-    test('iOS: escalates a whileInUse grant toward always, and skips the notification-permission check', () async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-      when(
-        () => geolocator.checkPermission(),
-      ).thenAnswer((_) async => LocationPermission.whileInUse);
-      when(() => geolocator.requestPermission()).thenAnswer((_) async => LocationPermission.always);
-      when(
-        () => geolocator.getCurrentPosition(locationSettings: any(named: 'locationSettings')),
-      ).thenAnswer((_) async => _position());
-      when(
-        () => geolocator.getPositionStream(locationSettings: any(named: 'locationSettings')),
-      ).thenAnswer((_) => const Stream.empty());
+    // Deliberately does NOT stub/verify geolocator.requestPermission() for
+    // the whileInUse -> always escalation — see _ensurePermissions' own
+    // comment on why that call is a confirmed no-op for this specific
+    // case (geolocator_apple 2.3.14 never reaches CoreLocation once
+    // authorizationStatus is already determined). These exercise the real
+    // replacement instead: iosLocationAlwaysUpgradeChannel.
+    group('iOS: whileInUse -> always escalation via iosLocationAlwaysUpgradeChannel', () {
+      setUp(() => debugDefaultTargetPlatformOverride = TargetPlatform.iOS);
+
+      tearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+          iosLocationAlwaysUpgradeChannel,
+          null,
+        );
+      });
+
+      test('invokes the native channel once, and skips the notification-permission check', () async {
+        when(() => geolocator.checkPermission()).thenAnswer((_) async => LocationPermission.whileInUse);
+        when(
+          () => geolocator.getCurrentPosition(locationSettings: any(named: 'locationSettings')),
+        ).thenAnswer((_) async => _position());
+        when(
+          () => geolocator.getPositionStream(locationSettings: any(named: 'locationSettings')),
+        ).thenAnswer((_) => const Stream.empty());
+
+        var channelCalls = 0;
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+          iosLocationAlwaysUpgradeChannel,
+          (call) async {
+            channelCalls++;
+            expect(call.method, 'requestAlwaysUpgrade');
+            return 4; // arbitrary CLAuthorizationStatus rawValue — unused by the caller.
+          },
+        );
+
+        final container = containerFor();
+        final controller = container.read(emsTrackingProvider.notifier);
+        await controller.startTracking('patient-1');
+
+        expect(channelCalls, 1);
+        verifyNever(() => foregroundTask.checkNotificationPermission());
+      });
+
+      test(
+        'a PlatformException from the native handler (e.g. IN_PROGRESS) is swallowed, not left unhandled',
+        () async {
+          when(() => geolocator.checkPermission()).thenAnswer((_) async => LocationPermission.whileInUse);
+          when(
+            () => geolocator.getCurrentPosition(locationSettings: any(named: 'locationSettings')),
+          ).thenAnswer((_) async => _position());
+          when(
+            () => geolocator.getPositionStream(locationSettings: any(named: 'locationSettings')),
+          ).thenAnswer((_) => const Stream.empty());
+
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+            iosLocationAlwaysUpgradeChannel,
+            (call) async => throw PlatformException(code: 'IN_PROGRESS'),
+          );
+
+          final container = containerFor();
+          final controller = container.read(emsTrackingProvider.notifier);
+
+          // Reaching here without rethrowing is the assertion — startTracking
+          // still succeeds despite the channel call failing.
+          await controller.startTracking('patient-1');
+          expect(controller.isTracking('patient-1'), true);
+        },
+      );
+
+      test('a MissingPluginException (no native handler registered yet) is swallowed too', () async {
+        when(() => geolocator.checkPermission()).thenAnswer((_) async => LocationPermission.whileInUse);
+        when(
+          () => geolocator.getCurrentPosition(locationSettings: any(named: 'locationSettings')),
+        ).thenAnswer((_) async => _position());
+        when(
+          () => geolocator.getPositionStream(locationSettings: any(named: 'locationSettings')),
+        ).thenAnswer((_) => const Stream.empty());
+        // No mock handler set at all — invokeMethod throws MissingPluginException by default.
+
+        final container = containerFor();
+        final controller = container.read(emsTrackingProvider.notifier);
+
+        await controller.startTracking('patient-1');
+        expect(controller.isTracking('patient-1'), true);
+      });
+    });
+  });
+
+  group('openBackgroundLocationSettings', () {
+    test('delegates straight to Geolocator.openAppSettings', () async {
+      when(() => geolocator.openAppSettings()).thenAnswer((_) async => true);
 
       final container = containerFor();
       final controller = container.read(emsTrackingProvider.notifier);
-      await controller.startTracking('patient-1');
 
-      verify(() => geolocator.requestPermission()).called(1);
-      verifyNever(() => foregroundTask.checkNotificationPermission());
+      expect(await controller.openBackgroundLocationSettings(), true);
+      verify(() => geolocator.openAppSettings()).called(1);
     });
   });
 

@@ -3,6 +3,8 @@ import UIKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+  private let locationAlwaysUpgradeHandler = LocationAlwaysUpgradeHandler()
+
   // No override of application(_:didFinishLaunchingWithOptions:) needed —
   // there used to be one here that manually set
   // UNUserNotificationCenter.current().delegate = self, on the assumption
@@ -24,5 +26,24 @@ import UIKit
   // _getTokenWaitingForApns).
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+
+    // See LocationAlwaysUpgradeHandler's own doc comment: works around a
+    // confirmed geolocator_apple limitation by talking to CoreLocation
+    // directly instead. A plain method channel off a throwaway plugin key
+    // (rather than a real Flutter plugin) since this app is the only
+    // caller — same technique GeneratedPluginRegistrant's own generated
+    // plugins use to reach the engine's binary messenger.
+    let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "AmDashLocationAlwaysUpgrade")
+    let channel = FlutterMethodChannel(
+      name: "com.amdash.ems/location_always_upgrade",
+      binaryMessenger: registrar.messenger()
+    )
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard call.method == "requestAlwaysUpgrade" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      self?.locationAlwaysUpgradeHandler.requestUpgrade(result: result)
+    }
   }
 }

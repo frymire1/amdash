@@ -17,12 +17,19 @@ import '../support/pump_app.dart';
 class _FakeEmsTrackingController extends EmsTrackingController {
   _FakeEmsTrackingController(this._initial);
   final Set<String> _initial;
+  int openBackgroundLocationSettingsCalls = 0;
 
   @override
   Set<String> build() => _initial;
 
   @override
   Future<void> stopTracking(String patientId) async {}
+
+  @override
+  Future<bool> openBackgroundLocationSettings() async {
+    openBackgroundLocationSettingsCalls++;
+    return true;
+  }
 }
 
 class _MockPatientUploadService extends Mock implements PatientUploadService {}
@@ -55,17 +62,18 @@ void main() {
     when(() => functions.httpsCallable('exportPatientFhirBundle')).thenReturn(exportCallable);
   });
 
-  Future<void> pumpCard(
+  Future<_FakeEmsTrackingController> pumpCard(
     WidgetTester tester, {
     Set<String> trackedIds = const {},
     EmsTrackingHealth health = EmsTrackingHealth.online,
     Organization? organization,
-  }) {
-    return pumpApp(
+  }) async {
+    final trackingController = _FakeEmsTrackingController(trackedIds);
+    await pumpApp(
       tester,
       const SizedBox(),
       overrides: [
-        emsTrackingProvider.overrideWith(() => _FakeEmsTrackingController(trackedIds)),
+        emsTrackingProvider.overrideWith(() => trackingController),
         emsTrackingHealthProvider.overrideWith((ref) => Stream.value(health)),
         ownOrganizationProvider.overrideWith((ref) => Stream.value(organization)),
         patientUploadServiceProvider.overrideWithValue(uploadService),
@@ -78,6 +86,7 @@ void main() {
       },
       initialLocation: '/card',
     );
+    return trackingController;
   }
 
   group('tracking pill', () {
@@ -116,6 +125,38 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('NO GPS SIGNAL'), findsOneWidget);
+    });
+
+    testWidgets('tracking + Android whileInUse only: shows the background-access banner and pill', (tester) async {
+      await pumpCard(tester, trackedIds: const {'patient-1'}, health: EmsTrackingHealth.backgroundAccessLimited);
+      await tester.pumpAndSettle();
+
+      expect(find.text('BACKGROUND ACCESS LIMITED'), findsOneWidget);
+      expect(find.text('Open Settings'), findsOneWidget);
+    });
+
+    testWidgets("tapping Open Settings on the background-access banner opens the app's location settings", (
+      tester,
+    ) async {
+      final controller = await pumpCard(
+        tester,
+        trackedIds: const {'patient-1'},
+        health: EmsTrackingHealth.backgroundAccessLimited,
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Open Settings'));
+      await tester.pumpAndSettle();
+
+      expect(controller.openBackgroundLocationSettingsCalls, 1);
+    });
+
+    testWidgets('a healthy tracking state shows no background-access banner', (tester) async {
+      await pumpCard(tester, trackedIds: const {'patient-1'}, health: EmsTrackingHealth.online);
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Open Settings'), findsNothing);
     });
   });
 
