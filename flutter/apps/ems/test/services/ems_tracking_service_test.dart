@@ -389,6 +389,82 @@ void main() {
         expect(controller.isTracking('patient-1'), true);
       });
     });
+
+    // requestIOSAlwaysUpgradeIfNeeded is public specifically so
+    // LocationTrackingSection can trigger it as soon as the upload form
+    // resolves its own "When In Use" prompt, rather than only later at
+    // Submit — see location_tracking_section_test.dart for that call
+    // site's own coverage. These exercise the shared method directly.
+    group('requestIOSAlwaysUpgradeIfNeeded', () {
+      tearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+          iosLocationAlwaysUpgradeChannel,
+          null,
+        );
+      });
+
+      test('at most one real attempt per controller lifetime, even across repeated calls', () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        var channelCalls = 0;
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+          iosLocationAlwaysUpgradeChannel,
+          (call) async {
+            channelCalls++;
+            return 4;
+          },
+        );
+
+        final container = containerFor();
+        final controller = container.read(emsTrackingProvider.notifier);
+
+        // Mirrors the real sequence this exists for: the upload form's own
+        // 15s poll calling this repeatedly while permission stays
+        // whileInUse (the user hasn't answered the native alert yet, or
+        // already answered "Keep Only While Using" once this session).
+        await controller.requestIOSAlwaysUpgradeIfNeeded(LocationPermission.whileInUse);
+        await controller.requestIOSAlwaysUpgradeIfNeeded(LocationPermission.whileInUse);
+        await controller.requestIOSAlwaysUpgradeIfNeeded(LocationPermission.whileInUse);
+
+        expect(channelCalls, 1);
+      });
+
+      test('no-op on Android — never touches the channel', () async {
+        var channelCalls = 0;
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+          iosLocationAlwaysUpgradeChannel,
+          (call) async {
+            channelCalls++;
+            return 4;
+          },
+        );
+
+        final container = containerFor();
+        final controller = container.read(emsTrackingProvider.notifier);
+        await controller.requestIOSAlwaysUpgradeIfNeeded(LocationPermission.whileInUse);
+
+        expect(channelCalls, 0);
+      });
+
+      for (final permission in [LocationPermission.denied, LocationPermission.deniedForever, LocationPermission.always]) {
+        test('no-op on iOS when permission is $permission (not whileInUse)', () async {
+          debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+          var channelCalls = 0;
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+            iosLocationAlwaysUpgradeChannel,
+            (call) async {
+              channelCalls++;
+              return 4;
+            },
+          );
+
+          final container = containerFor();
+          final controller = container.read(emsTrackingProvider.notifier);
+          await controller.requestIOSAlwaysUpgradeIfNeeded(permission);
+
+          expect(channelCalls, 0);
+        });
+      }
+    });
   });
 
   group('openBackgroundLocationSettings', () {

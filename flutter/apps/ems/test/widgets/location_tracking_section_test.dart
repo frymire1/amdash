@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:ems/services/ems_tracking_service.dart';
 import 'package:ems/widgets/location_tracking_section.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
@@ -59,6 +60,11 @@ void main() {
 
   tearDown(() {
     GeolocatorPlatform.instance = realGeolocator;
+    debugDefaultTargetPlatformOverride = null;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+      iosLocationAlwaysUpgradeChannel,
+      null,
+    );
   });
 
   Future<void> pumpSection(
@@ -87,6 +93,49 @@ void main() {
     verify(() => geolocator.requestPermission()).called(1);
     expect(find.text('Tracking Active'), findsOneWidget);
   });
+
+  testWidgets(
+    'iOS: a fresh whileInUse grant triggers the Always-upgrade channel immediately, not just at Submit',
+    (tester) async {
+      // See ems_tracking_service.dart's requestIOSAlwaysUpgradeIfNeeded and
+      // this call site's own comment: the point of calling it from here is
+      // showing both native dialogs back-to-back while the form is still
+      // open, rather than only later via _ensurePermissions at Submit.
+      //
+      // Reset explicitly at the end of THIS test body below, not via
+      // tearDown()/addTearDown() — for a testWidgets test, flutter_test's
+      // own debugAssertAllFoundationVarsUnset check runs synchronously
+      // inside the test body's own binding.runTest call, before either
+      // teardown mechanism's callback queue is flushed, so both throw
+      // "value of a foundation debug variable was changed by the test" on
+      // this exact test regardless (confirmed for real — the only other
+      // debugDefaultTargetPlatformOverride usages in this repo are all
+      // plain test(), which never goes through that binding check at all).
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      when(() => geolocator.checkPermission()).thenAnswer((_) async => LocationPermission.denied);
+      when(() => geolocator.requestPermission()).thenAnswer((_) async => LocationPermission.whileInUse);
+      when(
+        () => geolocator.getCurrentPosition(locationSettings: any(named: 'locationSettings')),
+      ).thenAnswer((_) async => _position());
+
+      var channelCalls = 0;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        iosLocationAlwaysUpgradeChannel,
+        (call) async {
+          channelCalls++;
+          return 4; // arbitrary CLAuthorizationStatus rawValue — unused by the caller.
+        },
+      );
+
+      await pumpSection(tester);
+      await tester.pumpAndSettle();
+
+      expect(channelCalls, 1);
+      // See this test's own opening comment on why this can't be left to
+      // tearDown()/addTearDown() — must happen before this function returns.
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
 
   testWidgets('a successful fetch shows Tracking Active and reports lat/lng via onChanged', (tester) async {
     when(() => geolocator.checkPermission()).thenAnswer((_) async => LocationPermission.always);

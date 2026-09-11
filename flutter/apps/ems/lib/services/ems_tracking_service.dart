@@ -408,25 +408,56 @@ class EmsTrackingController extends Notifier<Set<String>> {
     //   own docs say the OS silently ignores. See evaluateHealth's
     //   backgroundAccessLimited case and openBackgroundLocationSettings
     //   for how this is instead surfaced and fixed via Settings there.
-    if (_isIOS && permission == LocationPermission.whileInUse) {
-      try {
-        await iosLocationAlwaysUpgradeChannel.invokeMethod<int>('requestAlwaysUpgrade');
-      } on PlatformException {
-        // Best-effort — a failure here just leaves the app at whileInUse,
-        // which evaluateHealth's backgroundAccessLimited case and the
-        // Settings fallback (openBackgroundLocationSettings) already
-        // cover regardless.
-      } on MissingPluginException {
-        // No native handler registered — e.g. this build predates
-        // AppDelegate.swift's channel setup. Same fallback as above.
-      }
-    }
+    await requestIOSAlwaysUpgradeIfNeeded(permission);
 
     if (kIsWeb || _isIOS) return;
 
     final notificationPermission = await FlutterForegroundTask.checkNotificationPermission();
     if (notificationPermission != NotificationPermission.granted) {
       await FlutterForegroundTask.requestNotificationPermission();
+    }
+  }
+
+  // Set the instant this method is ATTEMPTED (not just on success) — see
+  // this method's own doc comment on why more than one attempt per app
+  // launch would be pointless, not just wasteful.
+  bool _iosAlwaysUpgradeAttempted = false;
+
+  /// Triggers CoreLocation's "Change to Always Allow" upgrade alert as
+  /// soon as a "While Using" grant is detected — public (unlike the rest
+  /// of this permission machinery) so [LocationTrackingSection] can call
+  /// it too, right when the upload form first resolves its own "When In
+  /// Use" prompt, rather than only here at submit time via
+  /// [_ensurePermissions]/[startTracking]. Confirmed via a physician's own
+  /// on-device testing that leaving this to fire only at submit worked,
+  /// but surprised them with a second native dialog after they'd already
+  /// tapped Submit — showing both back-to-back while the form is still
+  /// open is a smoother sequence, and Apple's own guidance is to ask for
+  /// the escalation close to when the user first engages the feature that
+  /// needs it, not to delay it further.
+  ///
+  /// At most one real attempt per app launch (this controller's own
+  /// lifetime, not per screen mount): iOS won't show this alert again
+  /// once the user has answered it once this install regardless (same
+  /// "answered once, stays answered" rule as every other iOS permission),
+  /// so retrying on every 15s poll tick or every screen mount would just
+  /// be repeated no-op native calls once past the first. Whichever call
+  /// site reaches whileInUse first "wins" the one attempt — harmless
+  /// either way since both ultimately call the same channel.
+  Future<void> requestIOSAlwaysUpgradeIfNeeded(LocationPermission permission) async {
+    if (!_isIOS || permission != LocationPermission.whileInUse || _iosAlwaysUpgradeAttempted) return;
+    _iosAlwaysUpgradeAttempted = true;
+
+    try {
+      await iosLocationAlwaysUpgradeChannel.invokeMethod<int>('requestAlwaysUpgrade');
+    } on PlatformException {
+      // Best-effort — a failure here just leaves the app at whileInUse,
+      // which evaluateHealth's backgroundAccessLimited case and the
+      // Settings fallback (openBackgroundLocationSettings) already cover
+      // regardless.
+    } on MissingPluginException {
+      // No native handler registered — e.g. this build predates
+      // AppDelegate.swift's channel setup. Same fallback as above.
     }
   }
 

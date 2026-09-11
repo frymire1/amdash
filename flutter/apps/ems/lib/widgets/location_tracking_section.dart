@@ -136,6 +136,17 @@ class _LocationTrackingSectionState extends ConsumerState<LocationTrackingSectio
         permission = await Geolocator.requestPermission();
       }
 
+      // Right after this screen's own "When In Use" prompt resolves, not
+      // only later at Submit (ems_tracking_service.dart's
+      // _ensurePermissions calls this too, as a fallback) — see that
+      // method's own doc comment: showing both native dialogs back-to-back
+      // while the form is still open reads as one sequence, rather than
+      // surprising the user with a second permission popup after they've
+      // already tapped Submit. A no-op past the very first call this app
+      // launch (see requestIOSAlwaysUpgradeIfNeeded's own guard), so this
+      // running again on every 15s poll tick is harmless.
+      await ref.read(emsTrackingProvider.notifier).requestIOSAlwaysUpgradeIfNeeded(permission);
+
       // Deliberately NOT passing `timeLimit` here: geolocator_web 4.1.4 has
       // a confirmed bug (html_geolocation_manager.dart) where it computes
       // the browser's timeout via `timeout?.inMicroseconds` but treats the
