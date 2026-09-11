@@ -23,7 +23,12 @@ Future<void> main() async {
   // the current registration flow), and the two aren't interchangeable —
   // ReCaptchaV3Provider expects a classic v3 site key and won't validate
   // against an Enterprise key ID.
-  await FirebaseAppCheck.instance.activate(providerWeb: ReCaptchaEnterpriseProvider(_appCheckRecaptchaSiteKey));
+  // null (not an empty-string provider) when no key was passed at build
+  // time — see ems/lib/main.dart's identical guard for why an empty-key
+  // provider is a real crash, not a no-op.
+  await FirebaseAppCheck.instance.activate(
+    providerWeb: _appCheckRecaptchaSiteKey.isEmpty ? null : ReCaptchaEnterpriseProvider(_appCheckRecaptchaSiteKey),
+  );
 
   runApp(const ProviderScope(child: AdminApp()));
 }

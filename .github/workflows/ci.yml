@@ -992,8 +992,19 @@ jobs:
         run: |
           set -e
           cd flutter
+          # APP_CHECK_RECAPTCHA_SITE_KEY: see deploy-web-cloud-run.yml's
+          # identical build step for the full rationale (not a secret,
+          # registered against these same real Cloud Run hostnames).
+          # Missing here was a real bug, not just a monitor-mode no-op as
+          # each app's main.dart comment assumed: ReCaptchaEnterpriseProvider
+          # activated with an empty site key doesn't silently skip
+          # attaching a token — it throws "Missing required parameters:
+          # sitekey" from the underlying recaptcha JS the first time the
+          # app actually needs a token (confirmed for real via a manual
+          # onboarding test against this exact amdash-dev deployment).
           for app in physician ems; do
-            (cd "apps/$app" && flutter build web --release)
+            (cd "apps/$app" && flutter build web --release \
+              --dart-define=APP_CHECK_RECAPTCHA_SITE_KEY=6Ld6eaItAAAAAMigfWyO0OQ6x0ycufLolu5kcPgn)
           done
 
       # Same WIF pattern flutter-android-e2e uses above (same pool,

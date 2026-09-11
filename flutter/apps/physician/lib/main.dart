@@ -29,7 +29,10 @@ Future<void> main() async {
         ? AppleDebugProvider(debugToken: _appCheckDebugToken.isEmpty ? null : _appCheckDebugToken)
         : const AppleAppAttestWithDeviceCheckFallbackProvider(),
     // Enterprise, not classic v3 — see admin/lib/main.dart's identical note.
-    providerWeb: ReCaptchaEnterpriseProvider(_appCheckRecaptchaSiteKey),
+    // null (not an empty-string provider) when no key was passed at build
+    // time — see ems/lib/main.dart's identical guard for why an empty-key
+    // provider is a real crash, not a no-op.
+    providerWeb: _appCheckRecaptchaSiteKey.isEmpty ? null : ReCaptchaEnterpriseProvider(_appCheckRecaptchaSiteKey),
   );
 
   // iOS/macOS default to *not* displaying a push at all while the app is

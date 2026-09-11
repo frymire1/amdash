@@ -18,9 +18,7 @@ import 'web/service_worker_registration.dart';
 const _appCheckDebugToken = String.fromEnvironment('FIREBASE_APPCHECK_DEBUG_TOKEN');
 
 // Public by design (reCAPTCHA site keys are meant to be embedded in client
-// code) — registered per-app in the Firebase Console's App Check tab. Empty
-// default just means the web build's App Check activation is a no-op until
-// that registration happens; nothing else here depends on it.
+// code) — registered per-app in the Firebase Console's App Check tab.
 const _appCheckRecaptchaSiteKey = String.fromEnvironment('APP_CHECK_RECAPTCHA_SITE_KEY');
 
 Future<void> main() async {
@@ -38,7 +36,17 @@ Future<void> main() async {
         ? AppleDebugProvider(debugToken: _appCheckDebugToken.isEmpty ? null : _appCheckDebugToken)
         : const AppleAppAttestWithDeviceCheckFallbackProvider(),
     // Enterprise, not classic v3 — see admin/lib/main.dart's identical note.
-    providerWeb: ReCaptchaEnterpriseProvider(_appCheckRecaptchaSiteKey),
+    // null (not an empty-string provider) when no key was passed at build
+    // time (e.g. a local `flutter run -d chrome`, or a web build that
+    // forgot the --dart-define — a real, confirmed bug once, on the
+    // amdash-dev deployment ci.yml's flutter-web-deploy job builds): a
+    // ReCaptchaEnterpriseProvider actually activated with an empty site key
+    // is NOT a harmless no-op the way this comment used to assume — it
+    // throws "Missing required parameters: sitekey" from the underlying
+    // recaptcha JS the moment the app first actually needs a token. null
+    // genuinely skips web activation instead, matching that original intent
+    // for real.
+    providerWeb: _appCheckRecaptchaSiteKey.isEmpty ? null : ReCaptchaEnterpriseProvider(_appCheckRecaptchaSiteKey),
   );
 
   // iOS/macOS default to *not* displaying a push at all while the app is
