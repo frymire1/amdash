@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -113,6 +115,19 @@ class _TotpEnrollmentFormState extends ConsumerState<TotpEnrollmentForm> {
           .confirmEnrollment(secret, code)
           .timeout(const Duration(seconds: 15));
       ref.invalidate(mfaEnrolledFactorsProvider);
+      // Fire-and-forget — see AuthService.notifyMfaEnrolled's own doc
+      // comment on why this is best-effort and never awaited into a path
+      // that could delay onEnrolled() over a slow/failed email send.
+      // catchError, not just unawaited(): unawaited() only suppresses the
+      // unawaited_futures lint, it doesn't actually catch a rejection —
+      // confirmed for real via a test that a rejected Future here reached
+      // flutter_test's zone as an unhandled exception without this.
+      // AuthService.notifyMfaEnrolled() already swallows its own errors
+      // internally, so this is belt-and-suspenders in practice, not
+      // covering a real gap in its current implementation — but the
+      // widget shouldn't rely on that implementation detail to make its
+      // own "fire-and-forget" claim true.
+      unawaited(ref.read(authServiceProvider).notifyMfaEnrolled().catchError((_) {}));
       if (mounted) widget.onEnrolled();
     } on MfaRequiresRecentLoginException {
       if (mounted) setState(() => _confirming = false);

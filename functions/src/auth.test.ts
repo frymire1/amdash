@@ -14,6 +14,7 @@ const {
   mockCollection,
   mockSendPasswordResetEmail,
   mockSendVerificationEmail,
+  mockSendMfaEnrolledEmail,
   mockEnforceRateLimit,
 } = vi.hoisted(() => ({
   mockInitializeApp: vi.fn(),
@@ -26,6 +27,7 @@ const {
   mockCollection: vi.fn(() => ({ doc: mockDoc })),
   mockSendPasswordResetEmail: vi.fn(),
   mockSendVerificationEmail: vi.fn(),
+  mockSendMfaEnrolledEmail: vi.fn(),
   // rate-limit.ts has its own dedicated test file covering its internals
   // (window math, transaction semantics, key hashing) — mocked away here,
   // same as email.ts below, so these tests stay focused on auth.ts's own
@@ -51,6 +53,7 @@ vi.mock('./email', () => ({
   RESEND_API_KEY: 'fake-secret-param',
   sendPasswordResetEmail: mockSendPasswordResetEmail,
   sendVerificationEmail: mockSendVerificationEmail,
+  sendMfaEnrolledEmail: mockSendMfaEnrolledEmail,
 }));
 
 vi.mock('./rate-limit', () => ({ enforceRateLimit: mockEnforceRateLimit }));
@@ -59,6 +62,7 @@ import {
   checkAccountStatus,
   findUserByEmail,
   getCallerProfile,
+  notifyMfaEnrolled,
   requestEmailVerification,
   requestPasswordReset,
   setInitialPassword,
@@ -388,5 +392,20 @@ describe('requestEmailVerification', () => {
 
   it('throws unauthenticated when there is no signed-in caller', async () => {
     await expect(requestEmailVerification.run(fakeCallableRequest({}))).rejects.toThrow('You must be signed in.');
+  });
+});
+
+describe('notifyMfaEnrolled', () => {
+  it('requires auth and sends the branded MFA-enrolled confirmation', async () => {
+    mockGet.mockResolvedValue({ data: () => ({ email: 'a@example.com', firstName: 'Jordan' }) });
+
+    const result = await notifyMfaEnrolled.run(fakeCallableRequest({}, 'uid-1'));
+
+    expect(mockSendMfaEnrolledEmail).toHaveBeenCalledWith({ email: 'a@example.com', firstName: 'Jordan' });
+    expect(result).toEqual({ email: 'a@example.com' });
+  });
+
+  it('throws unauthenticated when there is no signed-in caller', async () => {
+    await expect(notifyMfaEnrolled.run(fakeCallableRequest({}))).rejects.toThrow('You must be signed in.');
   });
 });

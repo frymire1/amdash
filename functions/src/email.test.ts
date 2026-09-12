@@ -22,7 +22,7 @@ vi.mock('firebase-functions/params', () => ({
   defineSecret: () => ({ value: () => 'fake-resend-api-key' }),
 }));
 
-import { sendPasswordResetEmail, sendVerificationEmail, sendWelcomeEmail } from './email';
+import { sendMfaEnrolledEmail, sendPasswordResetEmail, sendVerificationEmail, sendWelcomeEmail } from './email';
 
 describe('sendWelcomeEmail', () => {
   beforeEach(() => {
@@ -87,6 +87,45 @@ describe('sendWelcomeEmail', () => {
 
     await expect(sendWelcomeEmail({ email: 'a@example.com', firstName: 'J', role: 'ems' })).resolves.toBeUndefined();
     expect(mockLoggerError).toHaveBeenCalledWith('Failed to send welcome email', expect.any(Object));
+  });
+});
+
+describe('sendMfaEnrolledEmail', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockSend.mockResolvedValue({ error: null });
+  });
+
+  it('sends the branded confirmation to the right recipient/subject', async () => {
+    await sendMfaEnrolledEmail({ email: 'user@example.com', firstName: 'Jordan' });
+
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: 'AmDash <noreply@amdashtracking.com>',
+        to: 'user@example.com',
+        subject: 'Two-factor authentication enabled on your AmDash account',
+      }),
+    );
+    expect((mockSend.mock.calls[0][0].html as string)).toContain('Jordan');
+  });
+
+  it('acknowledges the separate email Identity Platform also sends, so it does not read as an error', async () => {
+    await sendMfaEnrolledEmail({ email: 'user@example.com', firstName: 'Jordan' });
+    expect((mockSend.mock.calls[0][0].html as string)).toContain('second, plainer email');
+  });
+
+  it('is best-effort, like sendWelcomeEmail: logs and does not throw when Resend reports an API-level error', async () => {
+    mockSend.mockResolvedValue({ error: { message: 'domain not verified' } });
+
+    await expect(sendMfaEnrolledEmail({ email: 'a@example.com', firstName: 'J' })).resolves.toBeUndefined();
+    expect(mockLoggerError).toHaveBeenCalledWith('Failed to send MFA-enrolled email', expect.any(Object));
+  });
+
+  it('is best-effort: logs and does not throw when the Resend call itself throws', async () => {
+    mockSend.mockRejectedValue(new Error('network error'));
+
+    await expect(sendMfaEnrolledEmail({ email: 'a@example.com', firstName: 'J' })).resolves.toBeUndefined();
+    expect(mockLoggerError).toHaveBeenCalledWith('Failed to send MFA-enrolled email', expect.any(Object));
   });
 });
 

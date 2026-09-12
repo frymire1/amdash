@@ -117,6 +117,24 @@ class AuthService {
     await callable.call<Map<Object?, Object?>>(<String, Object?>{});
   }
 
+  // Called by TotpEnrollmentForm right after confirmEnrollment() succeeds
+  // (both first-time setup and self-service re-enroll), to send a branded
+  // confirmation via the notifyMfaEnrolled callable — see
+  // functions/src/email.ts's sendMfaEnrolledEmail for why this
+  // supplements, rather than replaces, Identity Platform's own automatic
+  // notification for the same event. Best-effort by design, unlike
+  // sendEmailVerification/resetPassword above: MFA enrollment has already
+  // succeeded by the time this runs, so a failed notification shouldn't
+  // disrupt that or the enrollment UI flow that follows it.
+  Future<void> notifyMfaEnrolled() async {
+    try {
+      final callable = _functions.httpsCallable('notifyMfaEnrolled');
+      await callable.call<Map<Object?, Object?>>(<String, Object?>{});
+    } catch (_) {
+      // Best-effort — see this method's own doc comment.
+    }
+  }
+
   /// For an admin-created account that has no password yet: sets its first
   /// password via the `setInitialPassword` callable (refuses if the
   /// account already has a password credential — see

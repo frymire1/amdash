@@ -31,6 +31,11 @@ void main() {
     user = _MockUser();
     when(() => user.email).thenReturn('jordan@example.com');
     when(() => authService.currentUser).thenReturn(user);
+    // See totp_enrollment_form_test.dart's identical stub — TotpEnrollmentForm
+    // (rendered once email is verified) fires this unawaited right after a
+    // successful confirmEnrollment(), and mocktail throws synchronously on
+    // an unstubbed call.
+    when(() => authService.notifyMfaEnrolled()).thenAnswer((_) async {});
   });
 
   Future<void> pumpScreen(WidgetTester tester) {

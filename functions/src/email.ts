@@ -132,6 +132,15 @@ function verifyEmailHtml({ firstName, verifyUrl }: { firstName: string; verifyUr
   `);
 }
 
+function mfaEnrolledEmailHtml({ firstName }: { firstName: string }): string {
+  return emailShell(`
+    <p style="margin:0 0 16px;">Hi ${firstName},</p>
+    <p style="margin:0 0 16px;">Two-factor authentication has been set up on your AmDash account. From now on, you'll need a code from your authenticator app each time you sign in.</p>
+    <p style="margin:0 0 24px;font-size:13px;color:#5E7A7D;">You may also get a second, plainer email directly from our authentication provider confirming the same change — that's expected, not an error, and it includes its own link to reverse the change if this wasn't you.</p>
+    <p style="margin:24px 0 0;font-size:13px;color:#5E7A7D;">If you didn't make this change, contact your administrator right away.</p>
+  `);
+}
+
 // Called after createUser's Firestore write already succeeded — the
 // account exists and is usable (via "Forgot password?") regardless of
 // whether this email actually sends, so a Resend hiccup here is caught
@@ -192,6 +201,47 @@ export async function sendPasswordResetEmail({
   if (error) {
     logger.error('Failed to send password reset email', { email, error });
     throw new Error('Failed to send the password reset email.');
+  }
+}
+
+// Best-effort, like sendWelcomeEmail (not sendPasswordResetEmail/
+// sendVerificationEmail below) — by the time totp_enrollment_form.dart
+// calls the notifyMfaEnrolled callable that sends this, the actual TOTP
+// enrollment has already succeeded, so a failed send here shouldn't
+// disrupt that or the UI flow that follows it.
+//
+// This supplements, not replaces, Identity Platform's own automatic
+// MFA-enrollment notification ("Your account in <project-id> has been
+// updated with TOTP for 2 step verification") — that one is sent directly
+// by Google's backend the instant a factor is enrolled, entirely outside
+// this Resend pipeline, and unlike password reset/email verification
+// there's no Admin SDK generateXLink-style hook to intercept it (it's a
+// pure side effect of the enroll() call, not a link-based flow).
+// Confirmed for real (against this exact project, via the Identity
+// Toolkit Admin API) that it can't be suppressed OR rebranded today:
+// PATCHing notification.sendEmail.revertSecondFactorAdditionTemplate's
+// subject/body always 400s with EMAIL_TEMPLATE_UPDATE_NOT_ALLOWED, even
+// with every documented placeholder (including %SECOND_FACTOR%) present —
+// most likely gated on dnsInfo.customDomainState being verified (still
+// NOT_STARTED for amdashtracking.com as of this writing), which is
+// intentionally on hold pending legal review of the privacy policy/ToS.
+// Revisit suppressing/rebranding Google's own email once that domain work
+// happens — see mfaEnrolledEmailHtml's own line acknowledging the second
+// email in the meantime.
+export async function sendMfaEnrolledEmail({ email, firstName }: { email: string; firstName: string }): Promise<void> {
+  const resend = new Resend(RESEND_API_KEY.value());
+  try {
+    const { error } = await resend.emails.send({
+      from: FROM_ADDRESS,
+      to: email,
+      subject: 'Two-factor authentication enabled on your AmDash account',
+      html: mfaEnrolledEmailHtml({ firstName }),
+    });
+    if (error) {
+      logger.error('Failed to send MFA-enrolled email', { email, error });
+    }
+  } catch (error) {
+    logger.error('Failed to send MFA-enrolled email', { email, error });
   }
 }
 

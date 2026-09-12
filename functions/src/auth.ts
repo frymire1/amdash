@@ -6,7 +6,7 @@ import { UserRole } from './classes/user-role';
 import { CallerProfile } from './classes/caller-profile';
 import { CheckAccountStatusRequest } from './classes/check-account-status-request';
 import { SetInitialPasswordRequest } from './classes/set-initial-password-request';
-import { RESEND_API_KEY, sendPasswordResetEmail, sendVerificationEmail } from './email';
+import { RESEND_API_KEY, sendMfaEnrolledEmail, sendPasswordResetEmail, sendVerificationEmail } from './email';
 import { enforceRateLimit } from './rate-limit';
 import type { CallableRequest } from 'firebase-functions/v2/https';
 
@@ -234,6 +234,20 @@ export const requestEmailVerification = onCall({ region: REGION, secrets: [RESEN
   const firstName = await firstNameFor(profile.uid);
   const verifyUrl = await getAuth().generateEmailVerificationLink(profile.email);
   await sendVerificationEmail({ email: profile.email, firstName, verifyUrl });
+
+  return { email: profile.email };
+});
+
+// Requires auth, same pattern as requestEmailVerification above —
+// totp_enrollment_form.dart calls this right after confirmEnrollment()
+// succeeds (both first-time setup and self-service re-enroll), to send a
+// branded confirmation via sendMfaEnrolledEmail — see that function's own
+// comment for why this supplements, rather than replaces, Identity
+// Platform's own automatic notification for the same event.
+export const notifyMfaEnrolled = onCall({ region: REGION, secrets: [RESEND_API_KEY] }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+  const firstName = await firstNameFor(profile.uid);
+  await sendMfaEnrolledEmail({ email: profile.email, firstName });
 
   return { email: profile.email };
 });

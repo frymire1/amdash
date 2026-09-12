@@ -132,6 +132,26 @@ void main() {
     });
   });
 
+  group('notifyMfaEnrolled', () {
+    test('calls the notifyMfaEnrolled callable with no arguments', () async {
+      final result = _MockHttpsCallableResult<Map<Object?, Object?>>();
+      when(() => result.data).thenReturn(<Object?, Object?>{});
+      when(() => callable.call<Map<Object?, Object?>>(any())).thenAnswer((_) async => result);
+
+      await service().notifyMfaEnrolled();
+
+      verify(() => functions.httpsCallable('notifyMfaEnrolled')).called(1);
+      verify(() => callable.call<Map<Object?, Object?>>(<String, Object?>{})).called(1);
+    });
+
+    test('is best-effort: swallows a failure rather than throwing', () async {
+      when(() => callable.call<Map<Object?, Object?>>(any())).thenThrow(Exception('network error'));
+
+      // Reaching here without throwing is the assertion.
+      await service().notifyMfaEnrolled();
+    });
+  });
+
   group('claimPasswordlessAccount', () {
     test('calls setInitialPassword then signs in with the new password', () async {
       final result = _MockHttpsCallableResult<Map<Object?, Object?>>();

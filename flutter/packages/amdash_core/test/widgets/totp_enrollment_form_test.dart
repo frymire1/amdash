@@ -31,6 +31,14 @@ void main() {
     user = _MockUser();
     when(() => user.email).thenReturn('jordan@example.com');
     when(() => authService.currentUser).thenReturn(user);
+    // Default stub so every test past the confirm step doesn't need its
+    // own — _confirm() fires this unawaited right after a successful
+    // confirmEnrollment(), and mocktail throws synchronously on an
+    // unstubbed call, which _confirm()'s own try/catch would otherwise
+    // wrongly treat as "that code didn't work". Individual tests below
+    // override this where the notification's own behavior is what's
+    // being tested.
+    when(() => authService.notifyMfaEnrolled()).thenAnswer((_) async {});
   });
 
   Future<void> pumpForm(WidgetTester tester, {VoidCallback? onEnrolled}) {
@@ -196,6 +204,51 @@ void main() {
       verify(() => mfaService.confirmEnrollment(any(), '123456')).called(1);
       expect(enrolled, true);
     });
+
+    testWidgets('confirming successfully also notifies via AuthService.notifyMfaEnrolled', (tester) async {
+      when(() => mfaService.confirmEnrollment(any(), any())).thenAnswer((_) async {});
+
+      await pumpForm(tester);
+      await tester.pump();
+      await tester.pump();
+
+      await tester.enterText(find.byType(TextField), '123456');
+      await tester.tap(find.text('Confirm'));
+      await tester.pump();
+      await tester.pump();
+
+      verify(() => authService.notifyMfaEnrolled()).called(1);
+    });
+
+    testWidgets(
+      'notifyMfaEnrolled failing does not block onEnrolled — best-effort, fire-and-forget',
+      (tester) async {
+        when(() => mfaService.confirmEnrollment(any(), any())).thenAnswer((_) async {});
+        // thenAnswer(async => throw ...), not thenThrow — the real
+        // AuthService.notifyMfaEnrolled() is itself `async` (and swallows
+        // its own errors besides), so it can only ever fail via a
+        // *rejected Future*, never a synchronous throw at the call site.
+        // A bare thenThrow would make the mock throw synchronously right
+        // where _confirm() calls unawaited(...notifyMfaEnrolled()) —
+        // before unawaited() ever receives a Future to swallow — which
+        // would incorrectly land in _confirm()'s own catch block instead
+        // of exercising unawaited()'s real job (silently dropping a later
+        // rejection, not a call that never returned a Future at all).
+        when(() => authService.notifyMfaEnrolled()).thenAnswer((_) async => throw Exception('network error'));
+        var enrolled = false;
+
+        await pumpForm(tester, onEnrolled: () => enrolled = true);
+        await tester.pump();
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), '123456');
+        await tester.tap(find.text('Confirm'));
+        await tester.pump();
+        await tester.pump();
+
+        expect(enrolled, true);
+      },
+    );
 
     testWidgets('submitting the code field via the keyboard (onSubmitted) also confirms', (tester) async {
       when(() => mfaService.confirmEnrollment(any(), any())).thenAnswer((_) async {});

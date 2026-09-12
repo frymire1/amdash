@@ -35,6 +35,10 @@ void main() {
     // Every test's own body overrides mfaEnrolledFactorsProvider (it's
     // what selects which of the card's two top-line messages shows), so
     // this is just a safe default for tests that don't care about it.
+    // See totp_enrollment_form_test.dart's identical stub — TotpEnrollmentForm
+    // fires this unawaited right after a successful confirmEnrollment(),
+    // and mocktail throws synchronously on an unstubbed call.
+    when(() => authService.notifyMfaEnrolled()).thenAnswer((_) async {});
   });
 
   Future<void> pumpCard(WidgetTester tester, {required List<MultiFactorInfo> factors}) {
