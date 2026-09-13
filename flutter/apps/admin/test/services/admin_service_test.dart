@@ -11,6 +11,18 @@ class _MockHttpsCallable extends Mock implements HttpsCallable {}
 
 class _MockHttpsCallableResult<T> extends Mock implements HttpsCallableResult<T> {}
 
+// FirebaseFunctionsException's real constructor is @protected (only
+// callable from within its own package) and `code` is a plain inherited
+// field from FirebaseException, not a mockable virtual member mocktail's
+// when() can intercept cleanly — see amdash_core's login_screen_test.dart
+// identical fake for the same workaround.
+class _FakeFirebaseFunctionsException extends Fake implements FirebaseFunctionsException {
+  _FakeFirebaseFunctionsException(this.code);
+
+  @override
+  final String code;
+}
+
 void main() {
   setUpAll(() {
     registerFallbackValue(<String, Object?>{});
@@ -115,6 +127,61 @@ void main() {
       final callable = stub('deleteUser', const <String, Object?>{});
       await service.deleteUser('u1');
       verify(() => callable.call<Map<Object?, Object?>>({'uid': 'u1'})).called(1);
+    });
+
+    test('deleteUser retries once on a cold-start "internal" failure, and succeeds', () async {
+      final callable = _MockHttpsCallable();
+      when(() => functions.httpsCallable('deleteUser')).thenReturn(callable);
+      var calls = 0;
+      when(() => callable.call<Map<Object?, Object?>>(any())).thenAnswer((_) async {
+        calls++;
+        if (calls == 1) throw _FakeFirebaseFunctionsException('internal');
+        return _MockHttpsCallableResult<Map<Object?, Object?>>();
+      });
+
+      await service.deleteUser('u1');
+
+      expect(calls, 2);
+    });
+
+    test('deleteUser treats a not-found on the retry as success — the first attempt already worked', () async {
+      final callable = _MockHttpsCallable();
+      when(() => functions.httpsCallable('deleteUser')).thenReturn(callable);
+      var calls = 0;
+      when(() => callable.call<Map<Object?, Object?>>(any())).thenAnswer((_) async {
+        calls++;
+        throw _FakeFirebaseFunctionsException(calls == 1 ? 'internal' : 'not-found');
+      });
+
+      // Reaching here without throwing is the assertion.
+      await service.deleteUser('u1');
+      expect(calls, 2);
+    });
+
+    test('deleteUser does not retry a genuine error code (e.g. permission-denied)', () async {
+      final callable = _MockHttpsCallable();
+      when(() => functions.httpsCallable('deleteUser')).thenReturn(callable);
+      var calls = 0;
+      when(() => callable.call<Map<Object?, Object?>>(any())).thenAnswer((_) async {
+        calls++;
+        throw _FakeFirebaseFunctionsException('permission-denied');
+      });
+
+      await expectLater(service.deleteUser('u1'), throwsA(isA<FirebaseFunctionsException>()));
+      expect(calls, 1);
+    });
+
+    test('deleteUser rethrows if the retry hits a real, different failure', () async {
+      final callable = _MockHttpsCallable();
+      when(() => functions.httpsCallable('deleteUser')).thenReturn(callable);
+      var calls = 0;
+      when(() => callable.call<Map<Object?, Object?>>(any())).thenAnswer((_) async {
+        calls++;
+        throw _FakeFirebaseFunctionsException(calls == 1 ? 'internal' : 'internal');
+      });
+
+      await expectLater(service.deleteUser('u1'), throwsA(isA<FirebaseFunctionsException>()));
+      expect(calls, 2);
     });
 
     test('setUserDisabled sends uid + disabled', () async {

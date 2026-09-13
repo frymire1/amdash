@@ -494,6 +494,31 @@ describe('deleteUser', () => {
     expect(result).toEqual({ uid: 'target-uid' });
   });
 
+  it('is idempotent: a retry that hits an already-deleted Auth account still completes cleanly', async () => {
+    // Simulates the real scenario this exists for: the FIRST call's Auth
+    // deletion actually went through, but its response never made it back
+    // (a dropped connection, not a real failure) — a client-side retry
+    // then re-runs this whole function against a target whose Firestore
+    // doc still exists (that half never got a chance to run) but whose
+    // Auth account is already gone.
+    mockUserGet.mockResolvedValue({ exists: true, data: () => ({ organizationId: 'org-1', role: ['ems'], email: 'a@example.com' }) });
+    mockDeleteAuthUser.mockRejectedValue(Object.assign(new Error('no user record'), { code: 'auth/user-not-found' }));
+
+    const result = await deleteUser.run(fakeCallableRequest({ uid: 'target-uid' }, 'uid-1'));
+
+    expect(mockUserDelete).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'user.delete' }));
+    expect(result).toEqual({ uid: 'target-uid' });
+  });
+
+  it('a real Auth deletion failure (not "already gone") still throws, not swallowed by the idempotency guard', async () => {
+    mockUserGet.mockResolvedValue({ exists: true, data: () => ({ organizationId: 'org-1', role: ['ems'], email: 'a@example.com' }) });
+    mockDeleteAuthUser.mockRejectedValue(Object.assign(new Error('internal'), { code: 'auth/internal-error' }));
+
+    await expect(deleteUser.run(fakeCallableRequest({ uid: 'target-uid' }, 'uid-1'))).rejects.toThrow('internal');
+    expect(mockUserDelete).not.toHaveBeenCalled();
+  });
+
   it('treats a target doc that exists but has no data() as an empty object rather than crashing on it', async () => {
     // organizationId ends up undefined either way, so this still fails —
     // but via the ordinary "different organization" check

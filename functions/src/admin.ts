@@ -287,7 +287,22 @@ export const deleteUser = onCall<DeleteUserRequest>({ region: REGION }, async (r
 
   await assertNotLastAdmin(profile.organizationId as string, uid, 'delete');
 
-  await getAuth().deleteUser(uid);
+  // Idempotent on purpose, not just best-effort: a client-side retry after
+  // a dropped connection (Cloud Functions v2's own cold starts can trip a
+  // well-documented load-balancer/keep-alive race — see
+  // AdminService.deleteUser's own comment, flutter/apps/admin) has to be
+  // safe to repeat even when the FIRST attempt's Auth deletion actually
+  // went through before the connection died. Without this catch, that
+  // retry would throw auth/user-not-found here instead of completing
+  // cleanly — the one gap that would have made "just retry" a real hack
+  // instead of a legitimate fix.
+  try {
+    await getAuth().deleteUser(uid);
+  } catch (error) {
+    if ((error as { code?: string }).code !== 'auth/user-not-found') throw error;
+  }
+  // Firestore's own delete() is already a no-op on a missing doc — nothing
+  // extra needed here for the same retry to stay safe.
   await targetDocRef.delete();
 
   await logAudit({

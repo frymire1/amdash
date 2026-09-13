@@ -62,8 +62,45 @@ class AdminService {
     return ManagedUser.fromJson(result.data);
   }
 
-  Future<void> deleteUser(String uid) {
-    return _functions.httpsCallable('deleteUser').call<Map<Object?, Object?>>({'uid': uid});
+  // Cloud Functions v2 (Cloud Run under the hood) can drop the very first
+  // request after scaling up from zero — confirmed for real via a genuine
+  // admin-app failure (browser console: net::ERR_CONNECTION_CLOSED; Cloud
+  // Run's own logs showing a fresh instance starting right beforehand)
+  // that reached the Flutter SDK as
+  // FirebaseFunctionsException(code: 'internal'). This isn't really a
+  // cold-start-speed problem — Google's own load-balancer troubleshooting
+  // docs describe the actual mechanism directly: "the backend closes the
+  // idle connection, but the load balancer does not know and sends a
+  // request on the dead connection" — a keep-alive race that can happen
+  // any time a backend instance is being created or torn down, on any
+  // load-balanced HTTP service, not something specific to this function or
+  // even to Google Cloud. It's why browsers themselves silently retry GET
+  // requests that fail this way; a POST isn't auto-retried by the browser
+  // since it isn't inherently safe to repeat — but this one now genuinely
+  // is: functions/src/admin.ts's deleteUser was made idempotent
+  // specifically so this retry is a real fix, not a mask over a bug. Two
+  // cases after a dropped connection:
+  //  - The original request never actually reached the function: the
+  //    retry runs deleteUser fresh and succeeds normally.
+  //  - The original request DID complete server-side and only the
+  //    response was lost in transit: the retry either completes cleanly
+  //    (deleteUser now tolerates re-deleting an already-gone Auth account)
+  //    or hits "not-found" — proof the first attempt already worked, not
+  //    a real failure, so that specific outcome is treated as success too
+  //    rather than surfacing a confusing "user no longer exists" error
+  //    right after the admin asked to delete them.
+  Future<void> deleteUser(String uid) async {
+    final callable = _functions.httpsCallable('deleteUser');
+    try {
+      await callable.call<Map<Object?, Object?>>({'uid': uid});
+    } on FirebaseFunctionsException catch (error) {
+      if (error.code != 'internal') rethrow;
+      try {
+        await callable.call<Map<Object?, Object?>>({'uid': uid});
+      } on FirebaseFunctionsException catch (retryError) {
+        if (retryError.code != 'not-found') rethrow;
+      }
+    }
   }
 
   Future<void> setUserDisabled({required String uid, required bool disabled}) {
