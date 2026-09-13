@@ -611,6 +611,17 @@ export const deleteHospital = onCall<DeleteHospitalRequest>({ region: REGION }, 
 
   const hospitalRef = getFirestore().collection('hospitals').doc(hospitalId);
   const hospitalDoc = await hospitalRef.get();
+  // Real pre-existing gap, found while auditing which admin.ts callables
+  // are safe for AdminService to retry after a dropped connection (see
+  // deleteUser's own comment): without this explicit check, a retry
+  // against an already-deleted hospital fell through to requireSameOrg
+  // with organizationId undefined, throwing a misleading
+  // "That hospital belongs to a different organization" instead of a
+  // clean, recognizable not-found — exactly the same gap deleteUser had
+  // before this session's own fix for it.
+  if (!hospitalDoc.exists) {
+    throw new HttpsError('not-found', 'That hospital no longer exists.');
+  }
   const hospitalData = hospitalDoc.data() ?? {};
   requireSameOrg(profile, hospitalData['organizationId'], 'That hospital belongs to a different organization.');
 

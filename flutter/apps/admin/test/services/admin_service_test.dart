@@ -55,6 +55,50 @@ void main() {
     return callable;
   }
 
+  // Exercises _callWithColdStartRetry's behavior for a given callable name
+  // — shared by every "confirmed safe to retry" test below instead of each
+  // repeating the same mock/call/verify block. The first call throws a
+  // cold-start-shaped 'internal' failure; the second (the retry) succeeds
+  // with `data`. Asserting exactly 2 calls is the real assertion — that
+  // one retry actually happened, not zero and not more than one.
+  Future<void> expectRetriesOnceOnInternal(
+    String calleeName,
+    Future<void> Function() invoke, {
+    Map<Object?, Object?> data = const <String, Object?>{},
+  }) async {
+    final callable = _MockHttpsCallable();
+    when(() => functions.httpsCallable(calleeName)).thenReturn(callable);
+    final result = _MockHttpsCallableResult<Map<Object?, Object?>>();
+    when(() => result.data).thenReturn(data);
+    var calls = 0;
+    when(() => callable.call<Map<Object?, Object?>>(any())).thenAnswer((_) async {
+      calls++;
+      if (calls == 1) throw _FakeFirebaseFunctionsException('internal');
+      return result;
+    });
+
+    await invoke();
+
+    expect(calls, 2);
+  }
+
+  // Same shape, for a callable this app deliberately does NOT retry
+  // (createUser/createHospital/createOrganization — see
+  // AdminService's own doc comment on why). Asserts the failure surfaces
+  // immediately after exactly one call, not silently retried.
+  Future<void> expectDoesNotRetry(String calleeName, Future<void> Function() invoke) async {
+    final callable = _MockHttpsCallable();
+    when(() => functions.httpsCallable(calleeName)).thenReturn(callable);
+    var calls = 0;
+    when(() => callable.call<Map<Object?, Object?>>(any())).thenAnswer((_) async {
+      calls++;
+      throw _FakeFirebaseFunctionsException('internal');
+    });
+
+    await expectLater(invoke(), throwsA(isA<FirebaseFunctionsException>()));
+    expect(calls, 1);
+  }
+
   setUp(() {
     functions = _MockFirebaseFunctions();
     service = AdminService(functions);
@@ -81,6 +125,13 @@ void main() {
         }),
       ).called(1);
     });
+
+    test('is not retried on a cold-start "internal" failure — mints a new Auth uid every call', () async {
+      await expectDoesNotRetry(
+        'createUser',
+        () => service.createUser(email: 'a@b.com', firstName: 'Jordan', lastName: 'Smith', role: UserRole.physician),
+      );
+    });
   });
 
   group('setUserRole / removeUserRole', () {
@@ -90,10 +141,24 @@ void main() {
       verify(() => callable.call<Map<Object?, Object?>>({'email': 'a@b.com', 'role': 'nurse'})).called(1);
     });
 
+    test('setUserRole retries once on a cold-start "internal" failure — arrayUnion is a no-op if reapplied', () async {
+      await expectRetriesOnceOnInternal(
+        'setUserRole',
+        () => service.setUserRole(email: 'a@b.com', role: UserRole.nurse),
+      );
+    });
+
     test('removeUserRole sends email + the role\'s wire value', () async {
       final callable = stub('removeUserRole', const <String, Object?>{});
       await service.removeUserRole(email: 'a@b.com', role: UserRole.ems);
       verify(() => callable.call<Map<Object?, Object?>>({'email': 'a@b.com', 'role': 'ems'})).called(1);
+    });
+
+    test('removeUserRole retries once on a cold-start "internal" failure', () async {
+      await expectRetriesOnceOnInternal(
+        'removeUserRole',
+        () => service.removeUserRole(email: 'a@b.com', role: UserRole.ems),
+      );
     });
   });
 
@@ -119,6 +184,14 @@ void main() {
       verify(
         () => callable.call<Map<Object?, Object?>>({'uid': 'u1', 'firstName': 'Jordan', 'lastName': 'Smith'}),
       ).called(1);
+    });
+
+    test('retries once on a cold-start "internal" failure — setting the same fields twice is a no-op', () async {
+      await expectRetriesOnceOnInternal(
+        'updateUser',
+        () => service.updateUser(uid: 'u1'),
+        data: {'uid': 'u1'},
+      );
     });
   });
 
@@ -190,16 +263,31 @@ void main() {
       verify(() => callable.call<Map<Object?, Object?>>({'uid': 'u1', 'disabled': true})).called(1);
     });
 
+    test('setUserDisabled retries once on a cold-start "internal" failure', () async {
+      await expectRetriesOnceOnInternal(
+        'setUserDisabled',
+        () => service.setUserDisabled(uid: 'u1', disabled: true),
+      );
+    });
+
     test('resendInvite sends uid', () async {
       final callable = stub('resendInvite', const <String, Object?>{});
       await service.resendInvite('u1');
       verify(() => callable.call<Map<Object?, Object?>>({'uid': 'u1'})).called(1);
     });
 
+    test('resendInvite retries once on a cold-start "internal" failure', () async {
+      await expectRetriesOnceOnInternal('resendInvite', () => service.resendInvite('u1'));
+    });
+
     test('resetUserMfa sends uid', () async {
       final callable = stub('resetUserMfa', const <String, Object?>{});
       await service.resetUserMfa('u1');
       verify(() => callable.call<Map<Object?, Object?>>({'uid': 'u1'})).called(1);
+    });
+
+    test('resetUserMfa retries once on a cold-start "internal" failure', () async {
+      await expectRetriesOnceOnInternal('resetUserMfa', () => service.resetUserMfa('u1'));
     });
   });
 
@@ -223,6 +311,14 @@ void main() {
       final callable = stub('listAuditLog', {'entries': <Object?>[], 'hasMore': false});
       await service.listAuditLog(beforeTimestampMs: 1700000000000);
       verify(() => callable.call<Map<Object?, Object?>>({'beforeTimestampMs': 1700000000000})).called(1);
+    });
+
+    test('retries once on a cold-start "internal" failure — a pure read', () async {
+      await expectRetriesOnceOnInternal(
+        'listAuditLog',
+        () => service.listAuditLog(),
+        data: {'entries': <Object?>[], 'hasMore': false},
+      );
     });
   });
 
@@ -249,6 +345,23 @@ void main() {
 
       final users = await service.listUsersWithRoles();
       expect(users, hasLength(1));
+    });
+
+    test('retries once on a cold-start "internal" failure — a pure read', () async {
+      final callable = _MockHttpsCallable();
+      when(() => functions.httpsCallable('listUsersWithRoles')).thenReturn(callable);
+      final result = _MockHttpsCallableResult<List<Object?>>();
+      when(() => result.data).thenReturn(<Object?>[]);
+      var calls = 0;
+      when(() => callable.call<List<Object?>>()).thenAnswer((_) async {
+        calls++;
+        if (calls == 1) throw _FakeFirebaseFunctionsException('internal');
+        return result;
+      });
+
+      await service.listUsersWithRoles();
+
+      expect(calls, 2);
     });
   });
 
@@ -283,6 +396,13 @@ void main() {
       expect(hospital.longitude, 0);
     });
 
+    test('createHospital is not retried on a cold-start "internal" failure — .add() mints a new doc ID every call', () async {
+      await expectDoesNotRetry(
+        'createHospital',
+        () => service.createHospital(name: 'General', address: '123 Main St'),
+      );
+    });
+
     test('updateHospital omits null optional fields and always reports an empty organizationId '
         '(not returned by the callable)', () async {
       final callable = stub('updateHospital', {'id': 'h1', 'name': 'Renamed'});
@@ -303,10 +423,36 @@ void main() {
       ).called(1);
     });
 
+    test('updateHospital retries once on a cold-start "internal" failure', () async {
+      await expectRetriesOnceOnInternal(
+        'updateHospital',
+        () => service.updateHospital(hospitalId: 'h1', name: 'Renamed'),
+        data: {'id': 'h1', 'name': 'Renamed'},
+      );
+    });
+
     test('deleteHospital sends hospitalId', () async {
       final callable = stub('deleteHospital', const <String, Object?>{});
       await service.deleteHospital('h1');
       verify(() => callable.call<Map<Object?, Object?>>({'hospitalId': 'h1'})).called(1);
+    });
+
+    test('deleteHospital retries once on a cold-start "internal" failure, and succeeds', () async {
+      await expectRetriesOnceOnInternal('deleteHospital', () => service.deleteHospital('h1'));
+    });
+
+    test('deleteHospital treats a not-found on the retry as success — the first attempt already worked', () async {
+      final callable = _MockHttpsCallable();
+      when(() => functions.httpsCallable('deleteHospital')).thenReturn(callable);
+      var calls = 0;
+      when(() => callable.call<Map<Object?, Object?>>(any())).thenAnswer((_) async {
+        calls++;
+        throw _FakeFirebaseFunctionsException(calls == 1 ? 'internal' : 'not-found');
+      });
+
+      // Reaching here without throwing is the assertion.
+      await service.deleteHospital('h1');
+      expect(calls, 2);
     });
   });
 
@@ -332,6 +478,19 @@ void main() {
         }),
       ).called(1);
     });
+
+    test('is not retried on a cold-start "internal" failure — chains a new Auth account + org doc every call', () async {
+      await expectDoesNotRetry(
+        'createOrganization',
+        () => service.createOrganization(
+          organizationName: 'Acme EMS',
+          adminEmail: 'admin@acme.com',
+          adminFirstName: 'Jordan',
+          adminLastName: 'Smith',
+          country: 'CA',
+        ),
+      );
+    });
   });
 
   group('organization settings toggles', () {
@@ -341,10 +500,18 @@ void main() {
       verify(() => callable.call<Map<Object?, Object?>>({'retainAllData': true})).called(1);
     });
 
+    test('setOrganizationRetention retries once on a cold-start "internal" failure', () async {
+      await expectRetriesOnceOnInternal('setOrganizationRetention', () => service.setOrganizationRetention(true));
+    });
+
     test('setOrganizationCountry sends country', () async {
       final callable = stub('setOrganizationCountry', const <String, Object?>{});
       await service.setOrganizationCountry('CA');
       verify(() => callable.call<Map<Object?, Object?>>({'country': 'CA'})).called(1);
+    });
+
+    test('setOrganizationCountry retries once on a cold-start "internal" failure', () async {
+      await expectRetriesOnceOnInternal('setOrganizationCountry', () => service.setOrganizationCountry('CA'));
     });
 
     test('setOrganizationCmekPreference sends cmekRequested', () async {
@@ -353,16 +520,38 @@ void main() {
       verify(() => callable.call<Map<Object?, Object?>>({'cmekRequested': true})).called(1);
     });
 
+    test('setOrganizationCmekPreference retries once on a cold-start "internal" failure — reuses the existing key',
+        () async {
+      await expectRetriesOnceOnInternal(
+        'setOrganizationCmekPreference',
+        () => service.setOrganizationCmekPreference(true),
+      );
+    });
+
     test('setOrganizationAuditLogging sends auditLoggingEnabled', () async {
       final callable = stub('setOrganizationAuditLogging', const <String, Object?>{});
       await service.setOrganizationAuditLogging(false);
       verify(() => callable.call<Map<Object?, Object?>>({'auditLoggingEnabled': false})).called(1);
     });
 
+    test('setOrganizationAuditLogging retries once on a cold-start "internal" failure', () async {
+      await expectRetriesOnceOnInternal(
+        'setOrganizationAuditLogging',
+        () => service.setOrganizationAuditLogging(false),
+      );
+    });
+
     test('setOrganizationFhirExportEnabled sends fhirExportEnabled', () async {
       final callable = stub('setOrganizationFhirExportEnabled', const <String, Object?>{});
       await service.setOrganizationFhirExportEnabled(true);
       verify(() => callable.call<Map<Object?, Object?>>({'fhirExportEnabled': true})).called(1);
+    });
+
+    test('setOrganizationFhirExportEnabled retries once on a cold-start "internal" failure', () async {
+      await expectRetriesOnceOnInternal(
+        'setOrganizationFhirExportEnabled',
+        () => service.setOrganizationFhirExportEnabled(true),
+      );
     });
   });
 

@@ -812,9 +812,17 @@ describe('deleteHospital', () => {
     );
   });
 
+  it('throws not-found when the target no longer exists', async () => {
+    mockGetCallerProfile.mockResolvedValue(ADMIN_PROFILE);
+    mockHospitalGet.mockResolvedValue({ exists: false });
+    await expect(deleteHospital.run(fakeCallableRequest({ hospitalId: 'hosp-1' }, 'uid-1'))).rejects.toThrow(
+      'That hospital no longer exists.',
+    );
+  });
+
   it('throws permission-denied for a hospital in a different organization', async () => {
     mockGetCallerProfile.mockResolvedValue(ADMIN_PROFILE);
-    mockHospitalGet.mockResolvedValue({ data: () => ({ organizationId: 'org-2' }) });
+    mockHospitalGet.mockResolvedValue({ exists: true, data: () => ({ organizationId: 'org-2' }) });
     await expect(deleteHospital.run(fakeCallableRequest({ hospitalId: 'hosp-1' }, 'uid-1'))).rejects.toThrow(
       'That hospital belongs to a different organization.',
     );
@@ -822,7 +830,7 @@ describe('deleteHospital', () => {
 
   it('deletes and logs audit for a same-org hospital', async () => {
     mockGetCallerProfile.mockResolvedValue(ADMIN_PROFILE);
-    mockHospitalGet.mockResolvedValue({ data: () => ({ organizationId: 'org-1', name: 'General' }) });
+    mockHospitalGet.mockResolvedValue({ exists: true, data: () => ({ organizationId: 'org-1', name: 'General' }) });
     const result = await deleteHospital.run(fakeCallableRequest({ hospitalId: 'hosp-1' }, 'uid-1'));
     expect(mockHospitalDelete).toHaveBeenCalledTimes(1);
     expect(result).toEqual({ hospitalId: 'hosp-1' });
@@ -830,7 +838,7 @@ describe('deleteHospital', () => {
 
   it('treats a hospital doc with no data() as an empty object rather than crashing on it', async () => {
     mockGetCallerProfile.mockResolvedValue(ADMIN_PROFILE);
-    mockHospitalGet.mockResolvedValue({ data: () => undefined });
+    mockHospitalGet.mockResolvedValue({ exists: true, data: () => undefined });
     await expect(deleteHospital.run(fakeCallableRequest({ hospitalId: 'hosp-1' }, 'uid-1'))).rejects.toThrow(
       'That hospital belongs to a different organization.',
     );
