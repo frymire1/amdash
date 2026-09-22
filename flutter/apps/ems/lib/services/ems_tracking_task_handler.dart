@@ -22,10 +22,11 @@ const emsFixReportSignal = 'ems-fix';
 /// handler in the dedicated background isolate the foreground service
 /// keeps alive. Never called directly by a test — it's the real isolate
 /// entry point, only ever invoked by the OS/plugin at real runtime (same
-/// exclusion category TESTING.md already gives main.dart), and calling it
-/// would construct `EmsTrackingTaskHandler()` with no args, which throws
-/// `[core/no-app]` the same way DirectionsService's/this class's own `??`
-/// fallback does (see EmsTrackingTaskHandler's own comment).
+/// exclusion category TESTING.md already gives main.dart): constructing
+/// `EmsTrackingTaskHandler()` itself no longer throws (see its own
+/// constructor comment on why that used to happen for real, not just in
+/// tests), but `FlutterForegroundTask.setTaskHandler(...)` still needs a
+/// real plugin/isolate context a plain VM test doesn't have.
 // coverage:ignore-start
 @pragma('vm:entry-point')
 void emsTrackingTaskCallback() {
@@ -55,22 +56,40 @@ class EmsTrackingTaskHandler extends TaskHandler {
   // line either method reaches would throw in a plain VM test (no
   // platform channel for Firebase.initializeApp to complete against),
   // making almost this entire class untestable over one bootstrap call.
-  // The `functions` param's own `??` fallback is never exercised by a
-  // test for the identical reason DirectionsService's twin fallback
-  // isn't (see that file's own comment) — confirmed merely constructing
-  // FirebaseFunctions.instanceFor(...) throws [core/no-app] without a
-  // real Firebase.initializeApp() having run.
+  //
+  // [functions] is deliberately NOT resolved to its real
+  // FirebaseFunctions.instanceFor(...) fallback here in the constructor
+  // — confirmed for real via a genuine Firebase Test Lab failure (not
+  // just a test-only concern): this constructor's own initializer list
+  // runs synchronously the instant the plugin calls
+  // `FlutterForegroundTask.setTaskHandler(EmsTrackingTaskHandler())` in
+  // emsTrackingTaskCallback, which is BEFORE onStart — and thus
+  // _ensureFirebase's real Firebase.initializeApp call — ever runs in
+  // this isolate. Eagerly constructing FirebaseFunctions.instanceFor(...)
+  // right here crashed every real invocation with
+  // "[core/no-app] No Firebase App '[DEFAULT]' has been created" — this
+  // isolate has no Firebase app yet at construction time, only once
+  // onStart/_ensureFirebase has actually run. Resolved lazily instead via
+  // [_functionsInstance], the first time _publishAllTracked actually
+  // needs it — by then _ensureFirebase has already completed. The `??`
+  // fallback itself is still never exercised by a test, same reasoning
+  // as DirectionsService's twin fallback (see that file's own comment) —
+  // every test here supplies [functions] directly.
   EmsTrackingTaskHandler({FirebaseFunctions? functions, @visibleForTesting bool firebaseReady = false})
-    : _functions = functions ?? FirebaseFunctions.instanceFor(region: functionsRegion), // coverage:ignore-line
+    : _functionsOverride = functions,
       // Not `this._firebaseReady` — an initializing formal takes the
       // field's own (private) name, which a test in a different library
       // could never pass by name at all.
       // ignore: prefer_initializing_formals
       _firebaseReady = firebaseReady;
 
-  final FirebaseFunctions _functions;
+  final FirebaseFunctions? _functionsOverride;
+  FirebaseFunctions? _functions;
   final Set<String> _trackedPatientIds = {};
   bool _firebaseReady;
+
+  FirebaseFunctions get _functionsInstance =>
+      _functions ??= _functionsOverride ?? FirebaseFunctions.instanceFor(region: functionsRegion); // coverage:ignore-line
 
   // Firebase.initializeApp is genuine isolate-bootstrap glue — same
   // category TESTING.md already excludes main.dart's own call for
@@ -125,7 +144,7 @@ class EmsTrackingTaskHandler extends TaskHandler {
 
     for (final patientId in _trackedPatientIds.toList()) {
       try {
-        await _functions.httpsCallable('publishEmsLocation').call<Object?>({
+        await _functionsInstance.httpsCallable('publishEmsLocation').call<Object?>({
           'patientId': patientId,
           'latitude': position.latitude,
           'longitude': position.longitude,
