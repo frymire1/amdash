@@ -56,7 +56,17 @@ import 'interaction_helpers.dart';
 /// only returns via the idle path below (nothing left to handle for two
 /// consecutive iterations), never by running out of clock while still
 /// actively finding something to dismiss every pass.
-Future<void> settleLocationPrompts(PatrolIntegrationTester $) async {
+///
+/// [grantLocation] flips the native dialog's own outcome from
+/// [MobileAutomator.denyPermission] to
+/// [MobileAutomator.grantPermissionWhenInUse] — every other check in this
+/// function (the Play Services "Location Accuracy" nudge, the in-app
+/// "Location permission is off" AlertDialog fallback) is unchanged and
+/// still runs regardless, since granting can still leave the app at a
+/// state that shows either of those (e.g. a slow first fix). Defaults to
+/// `false` so every existing caller keeps today's deny-everywhere
+/// behavior unchanged.
+Future<void> settleLocationPrompts(PatrolIntegrationTester $, {bool grantLocation = false}) async {
   final ceiling = DateTime.now().add(const Duration(seconds: 45));
   final grace = DateTime.now().add(const Duration(seconds: 8));
   var everHandledSomething = false;
@@ -68,7 +78,11 @@ Future<void> settleLocationPrompts(PatrolIntegrationTester $) async {
       if (await $.platform.mobile.isPermissionDialogVisible(timeout: const Duration(milliseconds: 500))) {
         handledSomething = true;
         try {
-          await $.platform.mobile.denyPermission();
+          if (grantLocation) {
+            await $.platform.mobile.grantPermissionWhenInUse();
+          } else {
+            await $.platform.mobile.denyPermission();
+          }
         } catch (_) {
           // Best-effort — see this function's own doc comment.
         }

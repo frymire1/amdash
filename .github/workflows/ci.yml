@@ -878,6 +878,81 @@ jobs:
             echo
           done
 
+      # Proves live GPS tracking survives backgrounding for real — the
+      # scenario this file's own bug fix (requestAndroidBackgroundUpgradeIfNeeded,
+      # debugLastFixAtMs in ems_tracking_service.dart) exists for. See
+      # background_gps_tracking_test.dart's own header comment for the full
+      # rationale, including why this is its own scenario rather than a
+      # phase folded into the ems one above.
+      #
+      # Deliberately no --grant-permissions=none here, unlike every other
+      # Android scenario in this job — this is the one scenario that
+      # actually needs real location permission granted, via Patrol's own
+      # native automation (settleLocationPrompts($, grantLocation: true)),
+      # rather than sidestepping the dependency.
+      #
+      # Explicit --timeout: this scenario's own ~40s deliberate backgrounded
+      # wait, on top of sign-in/MFA/form interaction/native-dialog handling
+      # (each of which this job's other scenarios' own comments already
+      # document as sometimes taking several real seconds on a loaded Test
+      # Lab device) makes this the longest-running scenario in this file by
+      # a real margin — an explicit, generous budget beats finding out the
+      # tool's own default wasn't enough via a false-failure.
+      #
+      # Reuses the same persistent EMS account/credentials the ems scenario
+      # above already seeded (ACCOUNT="$RUNNER_TEMP/ems-account.json") —
+      # this step runs after that scenario has fully finished (sequential
+      # steps in one job), never concurrently with it, so there's no
+      # shared-state race to worry about (see run-ems-patrol-test.mjs's own
+      # header comment on why this account has no such race in the first
+      # place).
+      - name: Build + run background GPS tracking Test Lab suite (Android)
+        id: run_background_gps_tracking
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          ACCOUNT="$RUNNER_TEMP/ems-account.json"
+          cd flutter/apps/ems
+          patrol build android --target patrol_test/background_gps_tracking_test.dart \
+            --dart-define SMOKE_EMAIL="$(jq -r .email "$ACCOUNT")" \
+            --dart-define SMOKE_PASSWORD="$(jq -r .password "$ACCOUNT")" \
+            --dart-define SMOKE_TOTP_SECRET="$(jq -r .totpSecret "$ACCOUNT")" \
+            --dart-define FIREBASE_APPCHECK_DEBUG_TOKEN="${{ secrets.FIREBASE_APPCHECK_DEBUG_TOKEN }}"
+          gcloud firebase test android run \
+            --type instrumentation \
+            --app build/app/outputs/apk/debug/app-debug.apk \
+            --test build/app/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            --device model=MediumPhone.arm,version=35,locale=en,orientation=portrait \
+            --timeout 10m \
+            --results-bucket=gs://amdash-dev-test-lab-results \
+            2>&1 | tee /tmp/background-gps-tracking-testlab.log
+
+      # Permanent diagnostic — see the physician scenario's identical step
+      # above, same rationale.
+      - name: Dump background GPS tracking Test Lab raw results
+        if: always()
+        run: |
+          BUCKET_PATH=$(grep -oE 'storage/browser/[^]]+' /tmp/background-gps-tracking-testlab.log | head -1 | sed 's#storage/browser/##')
+          if [ -z "$BUCKET_PATH" ]; then
+            echo "Could not find a GCS bucket path in the run's output."
+            exit 0
+          fi
+          echo "=== gs://$BUCKET_PATH (recursive listing) ==="
+          gcloud storage ls -r "gs://$BUCKET_PATH" || true
+          echo "=== catting anything text-like found above ==="
+          for f in $(gcloud storage ls -r "gs://$BUCKET_PATH" 2>/dev/null | grep -E '\.(txt|xml|log)$|logcat$|instrumentation\.results$'); do
+            echo "--- $f ---"
+            if [[ "$f" == *logcat ]]; then
+              echo "-- flutter-tagged lines --"
+              gcloud storage cat "$f" 2>&1 | grep -iE ' flutter *: ' | head -c 20000
+              echo "-- first 20000 bytes, unfiltered --"
+              gcloud storage cat "$f" 2>&1 | head -c 20000
+            else
+              gcloud storage cat "$f" 2>&1 | head -c 20000
+            fi
+            echo
+          done
+
       # The real onboarding leg — the seed step above already seeded the
       # new EMS account directly via the Admin SDK (see
       # run-ems-onboarding-e2e.mjs's own header comment); this is that
