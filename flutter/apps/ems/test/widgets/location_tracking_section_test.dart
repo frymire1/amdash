@@ -4,6 +4,8 @@ import 'package:ems/services/ems_tracking_service.dart';
 import 'package:ems/widgets/location_tracking_section.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geolocator_platform_interface/geolocator_platform_interface.dart';
@@ -16,6 +18,13 @@ import '../support/pump_app.dart';
 // that swapping GeolocatorPlatform.instance intercepts the plugin's static
 // calls in a plain `flutter test` run.
 class _MockGeolocatorPlatform extends Mock with MockPlatformInterfaceMixin implements GeolocatorPlatform {}
+
+// Only needed for the Android background-upgrade test below — every other
+// test in this file stays on the default (Android) test platform without
+// ever reaching requestAndroidBackgroundUpgradeIfNeeded's battery-
+// optimization branch, since none of them resolve permission to
+// whileInUse (see that test's own comment).
+class _MockForegroundTaskPlatform extends Mock with MockPlatformInterfaceMixin implements FlutterForegroundTaskPlatform {}
 
 // A minimal fake for emsTrackingProvider — LocationTrackingSection only
 // ever reads .isTracking(patientId) off it (a plain state.contains check),
@@ -51,15 +60,27 @@ void main() {
 
   late _MockGeolocatorPlatform geolocator;
   late GeolocatorPlatform realGeolocator;
+  late _MockForegroundTaskPlatform foregroundTask;
+  late FlutterForegroundTaskPlatform realForegroundTask;
 
   setUp(() {
     geolocator = _MockGeolocatorPlatform();
     realGeolocator = GeolocatorPlatform.instance;
     GeolocatorPlatform.instance = geolocator;
+
+    // See ems_tracking_service_test.dart's identical setUp for why
+    // resetStatic()/skipServiceResponseCheck are needed alongside the
+    // platform swap itself.
+    foregroundTask = _MockForegroundTaskPlatform();
+    realForegroundTask = FlutterForegroundTaskPlatform.instance;
+    FlutterForegroundTaskPlatform.instance = foregroundTask;
+    FlutterForegroundTask.resetStatic();
+    FlutterForegroundTask.skipServiceResponseCheck = true;
   });
 
   tearDown(() {
     GeolocatorPlatform.instance = realGeolocator;
+    FlutterForegroundTaskPlatform.instance = realForegroundTask;
     debugDefaultTargetPlatformOverride = null;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
       iosLocationAlwaysUpgradeChannel,
@@ -134,6 +155,33 @@ void main() {
       // See this test's own opening comment on why this can't be left to
       // tearDown()/addTearDown() — must happen before this function returns.
       debugDefaultTargetPlatformOverride = null;
+    },
+  );
+
+  testWidgets(
+    'Android: a fresh whileInUse grant also triggers the background-access + battery-optimization escalation',
+    (tester) async {
+      // Unlike the iOS test above, this stays on the default (Android)
+      // test platform — no override needed. See ems_tracking_service.dart's
+      // requestAndroidBackgroundUpgradeIfNeeded for why a second
+      // Geolocator.requestPermission() call (not a separate native
+      // channel, unlike iOS) is the correct escalation here.
+      when(() => geolocator.checkPermission()).thenAnswer((_) async => LocationPermission.denied);
+      when(() => geolocator.requestPermission()).thenAnswer((_) async => LocationPermission.whileInUse);
+      when(
+        () => geolocator.getCurrentPosition(locationSettings: any(named: 'locationSettings')),
+      ).thenAnswer((_) async => _position());
+      when(() => foregroundTask.isIgnoringBatteryOptimizations).thenAnswer((_) async => false);
+      when(() => foregroundTask.requestIgnoreBatteryOptimization()).thenAnswer((_) async => true);
+
+      await pumpSection(tester);
+      await tester.pumpAndSettle();
+
+      // Once from this section's own denied -> requestPermission() call,
+      // once more from requestAndroidBackgroundUpgradeIfNeeded's own
+      // escalation attempt.
+      verify(() => geolocator.requestPermission()).called(2);
+      verify(() => foregroundTask.requestIgnoreBatteryOptimization()).called(1);
     },
   );
 

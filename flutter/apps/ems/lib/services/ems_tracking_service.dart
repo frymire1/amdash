@@ -91,6 +91,19 @@ class EmsTrackingController extends Notifier<Set<String>> {
   // _ensureIOSPositionStream for why this exists.
   int? _lastIOSPublishMs;
 
+  // Diagnostic only — lets an e2e test prove a fix genuinely arrived
+  // during a specific window (e.g. while the app was backgrounded) by
+  // comparing this before/after, rather than trusting the health chip:
+  // evaluateHealth's backgroundAccessLimited case deliberately takes
+  // priority over freshness once permission is whileInUse (see its own
+  // doc comment), so the chip alone can't distinguish "fixes kept
+  // flowing" from "fixes stopped" on exactly the Android 11+ devices this
+  // is most useful for proving. static, not instance — mirrors
+  // patient_upload_service.dart's own debugLastUploadedPatientId,
+  // readable directly by a test without fishing a live controller
+  // instance out of the widget tree mid-background/foreground.
+  static int? debugLastFixAtMs;
+
   @override
   Set<String> build() {
     _functions = ref.watch(firebaseFunctionsProvider);
@@ -117,9 +130,14 @@ class EmsTrackingController extends Notifier<Set<String>> {
 
   bool get _isIOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
+  bool get _isAndroid => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
   bool isTracking(String patientId) => state.contains(patientId);
 
-  void _recordFix() => _lastFixMs = DateTime.now().millisecondsSinceEpoch;
+  void _recordFix() {
+    _lastFixMs = DateTime.now().millisecondsSinceEpoch;
+    debugLastFixAtMs = _lastFixMs;
+  }
 
   // A device actively transmitting a patient's live GPS fix is not idle by
   // any reasonable definition — registers this with amdash_core's
@@ -375,40 +393,18 @@ class EmsTrackingController extends Notifier<Set<String>> {
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
     }
-    // "Always" (not just "when in use") is what CoreLocation requires to
-    // keep delivering the stream in the background — see this class's own
-    // header comment.
-    //
-    // Deliberately does NOT call Geolocator.requestPermission() again for
-    // this, on either platform — confirmed for real (a physician's own
-    // repeated on-device iOS testing never showed the upgrade alert, not
-    // even once) that it can't work:
-    //
-    // - iOS: geolocator_apple 2.3.14's native PermissionHandler.m
-    //   immediately echoes back CLLocationManager.authorizationStatus
-    //   without ever calling requestAlwaysAuthorization() whenever that
-    //   status is already determined — which it always is by the time
-    //   this method reaches this branch (permission == whileInUse is
-    //   itself a determined status). So this call could never have
-    //   triggered CoreLocation's "Change to Always Allow" alert, no
-    //   matter how many times it ran — also reported upstream as
-    //   Baseflow/flutter-geolocator#1223 and #889. Goes straight to
-    //   CoreLocation instead, via iosLocationAlwaysUpgradeChannel (see its
-    //   own doc comment) — a small native handler
-    //   (ios/Runner/LocationAlwaysUpgradeHandler.swift) that isn't
-    //   blocked by geolocator_apple's guard.
-    // - Android: re-requesting wouldn't reliably get "Always" either —
-    //   on API 30+, the runtime dialog stops offering an "Allow all the
-    //   time" option at all once foreground access is already granted
-    //   (developer.android.com/.../permissions/background), and
-    //   geolocator_android 5.0.3's own PermissionManager.java bundles
-    //   ACCESS_FINE_LOCATION/ACCESS_COARSE_LOCATION into the SAME request
-    //   array as ACCESS_BACKGROUND_LOCATION, which is exactly the
-    //   "foreground and background requested together" pattern Android's
-    //   own docs say the OS silently ignores. See evaluateHealth's
-    //   backgroundAccessLimited case and openBackgroundLocationSettings
-    //   for how this is instead surfaced and fixed via Settings there.
+    // "Always"/background access (not just "when in use") is what keeps
+    // fixes flowing once the app is backgrounded — see this class's own
+    // header comment. Each platform needs its own escalation path once
+    // "when in use" is granted, since a plain second call to
+    // Geolocator.requestPermission() behaves completely differently on
+    // each — see requestIOSAlwaysUpgradeIfNeeded's and
+    // requestAndroidBackgroundUpgradeIfNeeded's own doc comments for why
+    // each is shaped the way it is (iOS needs to route around a
+    // geolocator_apple bug via a native handler; Android's own plugin
+    // already supports the second-call pattern directly).
     await requestIOSAlwaysUpgradeIfNeeded(permission);
+    await requestAndroidBackgroundUpgradeIfNeeded(permission);
 
     if (kIsWeb || _isIOS) return;
 
@@ -458,6 +454,69 @@ class EmsTrackingController extends Notifier<Set<String>> {
     } on MissingPluginException {
       // No native handler registered — e.g. this build predates
       // AppDelegate.swift's channel setup. Same fallback as above.
+    }
+  }
+
+  // Same "attempted, not just succeeded" reasoning as _iosAlwaysUpgradeAttempted.
+  bool _androidBackgroundUpgradeAttempted = false;
+
+  /// Android's counterpart to [requestIOSAlwaysUpgradeIfNeeded] — same
+  /// trigger points (called from both here and [LocationTrackingSection]
+  /// as soon as the form's own first prompt resolves to whileInUse), same
+  /// "public, at most one real attempt per controller lifetime" shape.
+  ///
+  /// Unlike iOS, this needs no native MethodChannel handler: geolocator_android
+  /// 5.0.3's PermissionManager.java (checked against its actual installed
+  /// source, not just its docs) only adds ACCESS_BACKGROUND_LOCATION to
+  /// its native request when the CURRENT status is already whileInUse —
+  /// i.e. a second plain `Geolocator.requestPermission()` call, made only
+  /// once status has already reached whileInUse, IS the correct
+  /// escalation here too. (A previous version of this comment claimed the
+  /// plugin bundles FINE/COARSE and BACKGROUND into one request
+  /// regardless, which isn't what the installed source does — that
+  /// mistaken premise is why this call was missing entirely before, and
+  /// why only one native dialog ever appeared no matter how location
+  /// access was granted.)
+  ///
+  /// Still not full parity with iOS's two dialogs on every device: Android
+  /// 11+ (API 30+) drops "Allow all the time" from any in-app runtime
+  /// dialog once foreground access is already granted
+  /// (developer.android.com/training/location/permissions#request-background-location)
+  /// — Settings is the OS-mandated path for that tier on those versions
+  /// regardless of how this is called. So this call gets a genuine second
+  /// native dialog (with "Allow all the time" offered) on Android 10 (API
+  /// 29) and below, and is a harmless no-op on Android 11+, where
+  /// evaluateHealth's backgroundAccessLimited case and
+  /// openBackgroundLocationSettings remain the real path forward.
+  ///
+  /// Also requests the battery-optimization exemption here
+  /// (REQUEST_IGNORE_BATTERY_OPTIMIZATIONS is already declared in
+  /// AndroidManifest.xml but was never actually requested anywhere before
+  /// this) — independent of the location-permission tier, but the same
+  /// timing. This is likely the more load-bearing half of this method in
+  /// practice: OEM battery managers (Samsung/Xiaomi especially) killing
+  /// the foreground service despite a live whileInUse grant — not the
+  /// permission tier alone — is what actually drops GPS fixes partway
+  /// through a real backgrounded transport, since the foreground-service
+  /// exemption this class's header comment describes only holds for as
+  /// long as the service itself survives.
+  Future<void> requestAndroidBackgroundUpgradeIfNeeded(LocationPermission permission) async {
+    if (!_isAndroid || permission != LocationPermission.whileInUse || _androidBackgroundUpgradeAttempted) return;
+    _androidBackgroundUpgradeAttempted = true;
+
+    try {
+      await Geolocator.requestPermission();
+    } catch (_) {
+      // Best-effort — evaluateHealth's backgroundAccessLimited case and
+      // openBackgroundLocationSettings already cover this regardless.
+    }
+
+    try {
+      if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+        await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+      }
+    } catch (_) {
+      // Best-effort, same reasoning.
     }
   }
 

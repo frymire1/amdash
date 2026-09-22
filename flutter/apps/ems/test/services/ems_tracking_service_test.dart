@@ -465,6 +465,93 @@ void main() {
         });
       }
     });
+
+    // requestAndroidBackgroundUpgradeIfNeeded is public for the same
+    // reason requestIOSAlwaysUpgradeIfNeeded is — see
+    // location_tracking_section_test.dart for that call site's own
+    // coverage. These exercise the shared method directly.
+    group('requestAndroidBackgroundUpgradeIfNeeded', () {
+      test('at most one real attempt per controller lifetime, even across repeated calls', () async {
+        when(() => geolocator.requestPermission()).thenAnswer((_) async => LocationPermission.whileInUse);
+        when(() => foregroundTask.isIgnoringBatteryOptimizations).thenAnswer((_) async => false);
+        when(() => foregroundTask.requestIgnoreBatteryOptimization()).thenAnswer((_) async => true);
+
+        final container = containerFor();
+        final controller = container.read(emsTrackingProvider.notifier);
+
+        // Mirrors the real sequence this exists for: the upload form's own
+        // 15s poll calling this repeatedly while permission stays
+        // whileInUse (the user hasn't answered the native dialog yet, or
+        // it's an Android 11+ device where no dialog appears at all).
+        await controller.requestAndroidBackgroundUpgradeIfNeeded(LocationPermission.whileInUse);
+        await controller.requestAndroidBackgroundUpgradeIfNeeded(LocationPermission.whileInUse);
+        await controller.requestAndroidBackgroundUpgradeIfNeeded(LocationPermission.whileInUse);
+
+        verify(() => geolocator.requestPermission()).called(1);
+        verify(() => foregroundTask.isIgnoringBatteryOptimizations).called(1);
+        verify(() => foregroundTask.requestIgnoreBatteryOptimization()).called(1);
+      });
+
+      test('no-op on iOS — never touches Geolocator.requestPermission() or the battery-optimization check', () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+
+        final container = containerFor();
+        final controller = container.read(emsTrackingProvider.notifier);
+        await controller.requestAndroidBackgroundUpgradeIfNeeded(LocationPermission.whileInUse);
+
+        verifyNever(() => geolocator.requestPermission());
+        verifyNever(() => foregroundTask.isIgnoringBatteryOptimizations);
+      });
+
+      for (final permission in [LocationPermission.denied, LocationPermission.deniedForever, LocationPermission.always]) {
+        test('no-op on Android when permission is $permission (not whileInUse)', () async {
+          final container = containerFor();
+          final controller = container.read(emsTrackingProvider.notifier);
+          await controller.requestAndroidBackgroundUpgradeIfNeeded(permission);
+
+          verifyNever(() => geolocator.requestPermission());
+          verifyNever(() => foregroundTask.isIgnoringBatteryOptimizations);
+        });
+      }
+
+      test('does not re-request the battery-optimization exemption when already granted', () async {
+        when(() => geolocator.requestPermission()).thenAnswer((_) async => LocationPermission.whileInUse);
+        when(() => foregroundTask.isIgnoringBatteryOptimizations).thenAnswer((_) async => true);
+
+        final container = containerFor();
+        final controller = container.read(emsTrackingProvider.notifier);
+        await controller.requestAndroidBackgroundUpgradeIfNeeded(LocationPermission.whileInUse);
+
+        verifyNever(() => foregroundTask.requestIgnoreBatteryOptimization());
+      });
+
+      test(
+        'a Geolocator.requestPermission() failure is swallowed, and the battery-optimization request still runs',
+        () async {
+          when(() => geolocator.requestPermission()).thenThrow(Exception('boom'));
+          when(() => foregroundTask.isIgnoringBatteryOptimizations).thenAnswer((_) async => false);
+          when(() => foregroundTask.requestIgnoreBatteryOptimization()).thenAnswer((_) async => true);
+
+          final container = containerFor();
+          final controller = container.read(emsTrackingProvider.notifier);
+
+          // Reaching here without throwing is the assertion.
+          await controller.requestAndroidBackgroundUpgradeIfNeeded(LocationPermission.whileInUse);
+          verify(() => foregroundTask.requestIgnoreBatteryOptimization()).called(1);
+        },
+      );
+
+      test('a battery-optimization request failure is swallowed too', () async {
+        when(() => geolocator.requestPermission()).thenAnswer((_) async => LocationPermission.whileInUse);
+        when(() => foregroundTask.isIgnoringBatteryOptimizations).thenThrow(Exception('boom'));
+
+        final container = containerFor();
+        final controller = container.read(emsTrackingProvider.notifier);
+
+        // Reaching here without throwing is the assertion.
+        await controller.requestAndroidBackgroundUpgradeIfNeeded(LocationPermission.whileInUse);
+      });
+    });
   });
 
   group('openBackgroundLocationSettings', () {
