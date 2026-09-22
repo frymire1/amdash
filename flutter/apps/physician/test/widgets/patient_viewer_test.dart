@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:amdash_core/amdash_core.dart';
 import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:mocktail/mocktail.dart';
@@ -245,6 +246,92 @@ void main() {
 
       final map = tester.widget<GoogleMap>(find.byType(GoogleMap));
       expect(map.markers.map((m) => m.markerId.value), ['vehicle']);
+    });
+  });
+
+  group('marker icons', () {
+    testWidgets('an icon resolving after mount updates an already-open map, via the listener wiring', (tester) async {
+      // See setMarkerIconsForTesting's own doc comment on why this drives
+      // the notifiers directly rather than waiting on a real
+      // _emojiMarkerBitmap render: this test's job is to prove
+      // _LiveMapCardState's listener wiring propagates a *later* icon
+      // change to an already-mounted map (_onVehicleIconChanged/
+      // _onHospitalIconChanged), which is exactly what lets a map opened
+      // before the real render (or a web retry) resolves still pick up
+      // the corrected icon in place, not just maps opened afterward.
+      resetMarkerIconsForTesting();
+      when(
+        () => directionsService.fetchDirections(origin: any(named: 'origin'), destination: any(named: 'destination')),
+      ).thenAnswer((_) async => _directionsResult());
+
+      await pumpViewer(
+        tester,
+        patient: _patient(destination: 'Ottawa Civic'),
+        hospitals: const [_hospital],
+        emsState: EmsLocationState(
+          hasLoadedOnce: true,
+          info: {'patient-1': EmsTrackingInfo(status: EmsTrackingStatus.active, location: _fix(updatedAtMs: 1000))},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final testVehicleIcon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue);
+      final testHospitalIcon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow);
+      setMarkerIconsForTesting(vehicle: testVehicleIcon, hospital: testHospitalIcon);
+      await tester.pump();
+
+      final map = tester.widget<GoogleMap>(find.byType(GoogleMap));
+      final vehicle = map.markers.firstWhere((m) => m.markerId.value == 'vehicle');
+      final hospitalMarker = map.markers.firstWhere((m) => m.markerId.value == 'hospital');
+
+      expect(vehicle.icon, equals(testVehicleIcon));
+      expect(hospitalMarker.icon, equals(testHospitalIcon));
+    });
+
+    testWidgets('a systemFonts change re-renders both icons', (tester) async {
+      // Simulates PaintingBinding.systemFonts firing for real, the same
+      // way the engine does it (a 'flutter/system' platform message
+      // decoded by ServicesBinding.handleSystemMessage) — see
+      // _ensureMarkerIconsRequested's own doc comment on why this is the
+      // actual completion signal the fix now waits on, not a guessed
+      // delay, and why that's what makes it deterministically testable at
+      // all (a fixed-delay Timer, gated behind kIsWeb, never ran in a
+      // plain `flutter test` VM run in the first place).
+      resetMarkerIconsForTesting();
+      when(
+        () => directionsService.fetchDirections(origin: any(named: 'origin'), destination: any(named: 'destination')),
+      ).thenAnswer((_) async => _directionsResult());
+
+      await pumpViewer(
+        tester,
+        patient: _patient(destination: 'Ottawa Civic'),
+        hospitals: const [_hospital],
+        emsState: EmsLocationState(
+          hasLoadedOnce: true,
+          info: {'patient-1': EmsTrackingInfo(status: EmsTrackingStatus.active, location: _fix(updatedAtMs: 1000))},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The initial mount already rendered both icons once each — a
+      // baseline, not a magic number, so this doesn't silently start
+      // passing for the wrong reason if that initial-render count ever
+      // changes for an unrelated reason.
+      final countAfterMount = debugMarkerRenderCount;
+
+      final message = const JSONMessageCodec().encodeMessage(<String, dynamic>{'type': 'fontsChange'});
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.handlePlatformMessage(
+        'flutter/system',
+        message,
+        (_) {},
+      );
+      await tester.pump();
+
+      expect(
+        debugMarkerRenderCount,
+        countAfterMount + 2,
+        reason: 'a systemFonts change should re-render both the vehicle and hospital icons again',
+      );
     });
   });
 

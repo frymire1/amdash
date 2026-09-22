@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:amdash_core/amdash_core.dart';
@@ -39,14 +40,119 @@ const _routeWidth = 6;
 const _markerIconSize = 96.0;
 const _markerDisplaySize = 36.0;
 
-// Cached module-level, not per-widget-instance: both markers' bitmaps are
-// identical every time (same glyph, same size, nothing per-patient about
-// them), so there's no reason to regenerate them on every _LiveMapCard
-// mount — the first caller pays the (small, local, no-network) render cost
-// once, every later mount/patient switch/expand just reuses the
-// already-resolved Future.
-Future<BitmapDescriptor>? _vehicleMarkerIcon;
-Future<BitmapDescriptor>? _hospitalMarkerIcon;
+// Rendered module-level, not per-widget-instance: both markers' bitmaps
+// are identical every time (same glyph, same size, nothing per-patient
+// about them), so there's no reason to regenerate them on every
+// _LiveMapCard mount. ValueNotifiers rather than a plain cached Future
+// (an earlier version of this code) so a render can be *rebroadcast*
+// later, not just cached once — see _ensureMarkerIconsRequested for why
+// that matters.
+final ValueNotifier<BitmapDescriptor?> _vehicleMarkerIcon = ValueNotifier(null);
+final ValueNotifier<BitmapDescriptor?> _hospitalMarkerIcon = ValueNotifier(null);
+bool _markerIconsRequested = false;
+
+/// Idempotent, safe to call from every [_LiveMapCard.initState] — the
+/// actual rendering work below only ever runs once per icon per app
+/// session (guarded by [_markerIconsRequested]), same "first mount pays
+/// the cost, every later one reuses it" shape the previous Future-based
+/// cache had.
+///
+/// Also registers a listener on [PaintingBinding.systemFonts] — confirmed
+/// for real via a throwaway debug harness (three timed renders of the
+/// same glyph, same page load) that Flutter Web's CanvasKit emoji-font
+/// fallback loads asynchronously, and the very first render can lose that
+/// race: [_emojiMarkerBitmap] synchronously lays out and paints the glyph
+/// before its first `await`, so if the fallback font hasn't finished
+/// fetching at that exact moment, the glyph comes out blank (a literal
+/// tofu box in the debug harness), and — unlike a live on-screen `Text`
+/// widget — nothing about a static rasterized-to-PNG marker icon
+/// self-heals once the font does arrive, since nothing re-triggers a
+/// layout on its own.
+///
+/// [PaintingBinding.systemFonts] is the framework's own documented signal
+/// for exactly this ("Objects that show text and/or measure text... should
+/// listen to this and redraw/remeasure" — see its own doc comment):
+/// engine/src/flutter/lib/web_ui/lib/src/engine/font_fallbacks.dart fires
+/// it (via a real `flutter/system` platform message, batched onto the next
+/// animation frame) the moment a newly-fetched fallback font is actually
+/// registered — a genuine completion event, not a guess. An earlier
+/// version of this code instead scheduled two blind re-renders at fixed
+/// 2s/6s delays; this replaced that entirely — strictly better, since it
+/// fires exactly when ready regardless of whether that's faster or slower
+/// than any fixed guess, costs nothing extra when the immediate render was
+/// already correct (native has no async fallback fetch to trigger this at
+/// all), and is deterministic enough to actually unit-test (a test can
+/// dispatch the same platform message and observe the re-render) instead
+/// of being structurally unreachable in a plain `flutter test` VM run the
+/// way a `kIsWeb`-gated timer was.
+void _ensureMarkerIconsRequested() {
+  if (_markerIconsRequested) return;
+  _markerIconsRequested = true;
+
+  _renderMarkerIcon(_vehicleMarkerIcon, '🚑');
+  _renderMarkerIcon(_hospitalMarkerIcon, '🏥');
+  PaintingBinding.instance.systemFonts.addListener(_onSystemFontsChanged);
+}
+
+void _onSystemFontsChanged() {
+  _renderMarkerIcon(_vehicleMarkerIcon, '🚑');
+  _renderMarkerIcon(_hospitalMarkerIcon, '🏥');
+}
+
+// Diagnostic only, same rationale/shape as patient_upload_service.dart's
+// own debugCallCount — lets a test prove _onSystemFontsChanged actually
+// re-rendered (not just that it ran without throwing), which a plain
+// value-equality check on the notifier can't: two separate renders of the
+// same emoji at the same size produce byte-identical output in this VM,
+// so "did the value change" alone can't distinguish a real re-render from
+// one that never happened.
+@visibleForTesting
+int debugMarkerRenderCount = 0;
+
+void _renderMarkerIcon(ValueNotifier<BitmapDescriptor?> notifier, String emoji) {
+  debugMarkerRenderCount++;
+  unawaited(_emojiMarkerBitmap(emoji).then((icon) => notifier.value = icon));
+}
+
+/// This module state is deliberately file-lifetime, not per-widget (see
+/// _ensureMarkerIconsRequested) — which a plain `flutter test` run would
+/// otherwise leak between tests, since a test running after an earlier
+/// one that already mounted a `_LiveMapCard` would find both notifiers
+/// pre-resolved and never actually exercise
+/// _onVehicleIconChanged/_onHospitalIconChanged for real. Lets a test
+/// force a fresh render instead of depending on file execution order.
+///
+/// Also removes the [PaintingBinding.systemFonts] listener
+/// _ensureMarkerIconsRequested adds — harmless no-op if it was never
+/// added yet, but required before a later test's own mount re-adds it:
+/// [Listenable.addListener] doesn't deduplicate identical callbacks, so
+/// without this a listener from an earlier test would still fire (and
+/// re-render) alongside the current test's own, inflating
+/// [debugMarkerRenderCount] by however many earlier tests happened to run
+/// first in this same file.
+@visibleForTesting
+void resetMarkerIconsForTesting() {
+  _markerIconsRequested = false;
+  PaintingBinding.instance.systemFonts.removeListener(_onSystemFontsChanged);
+  debugMarkerRenderCount = 0;
+  _vehicleMarkerIcon.value = null;
+  _hospitalMarkerIcon.value = null;
+}
+
+/// Sets the notifiers directly, bypassing [_emojiMarkerBitmap]'s real
+/// (async, engine-dependent) rasterization entirely — lets a test drive
+/// _LiveMapCardState's listener wiring
+/// (_onVehicleIconChanged/_onHospitalIconChanged) deterministically,
+/// rather than depending on real Canvas/PictureRecorder timing racing
+/// against Riverpod's own initial-build churn in a widget test (that race
+/// is real and not what this specific wiring needs to prove — the emoji
+/// render's own web-specific timing race is covered separately, by the
+/// throwaway debug harness that originally found it).
+@visibleForTesting
+void setMarkerIconsForTesting({BitmapDescriptor? vehicle, BitmapDescriptor? hospital}) {
+  if (vehicle != null) _vehicleMarkerIcon.value = vehicle;
+  if (hospital != null) _hospitalMarkerIcon.value = hospital;
+}
 
 /// Renders [emoji] centered on a plain white circle (with a soft drop
 /// shadow so it still reads against a light basemap, matching the look
@@ -60,7 +166,9 @@ Future<BitmapDescriptor>? _hospitalMarkerIcon;
 /// this replaced (see the published marker-icon-options comparison — a
 /// plain white circle with the real 🚑/🏥 emoji read more clearly at
 /// marker size than either the Material Symbols or Font Awesome glyphs
-/// tried first).
+/// tried first). On Flutter Web that fallback font load is async and can
+/// race a same-frame render — see [_ensureMarkerIconsRequested] for the
+/// confirmed failure mode and how it's covered.
 Future<BitmapDescriptor> _emojiMarkerBitmap(String emoji) async {
   final recorder = PictureRecorder();
   final canvas = Canvas(recorder);
@@ -284,29 +392,37 @@ class _LiveMapCardState extends ConsumerState<_LiveMapCard> with TickerProviderS
   // re-fetch is fine, since it checks the surviving cache's own timestamp.
   final Set<String> _pendingDirectionsFetches = {};
 
-  // Resolved copies of the module-level cached Futures above — build()
-  // needs synchronous access to hand markers a BitmapDescriptor, and a
-  // second (or later) _LiveMapCard mount finds these Futures already
-  // resolved, so setState here fires on essentially the next microtask, not
-  // a visible delay. Only the very first map any user ever opens briefly
-  // falls back to the plain default pins (see build()) while the real
-  // icons render for the first time.
+  // Mirrors the module-level notifiers above — build() needs synchronous
+  // access to hand markers a BitmapDescriptor. Kept in sync by the
+  // listeners registered in initState below, not just read once: web's
+  // retries (see _ensureMarkerIconsRequested) can update the notifiers
+  // well after this widget already mounted, and an already-open map
+  // should pick up the corrected icon too, not only maps opened later.
   BitmapDescriptor? _vehicleIcon;
   BitmapDescriptor? _hospitalIcon;
 
   @override
   void initState() {
     super.initState();
-    (_vehicleMarkerIcon ??= _emojiMarkerBitmap('🚑')).then((icon) {
-      if (mounted) setState(() => _vehicleIcon = icon);
-    });
-    (_hospitalMarkerIcon ??= _emojiMarkerBitmap('🏥')).then((icon) {
-      if (mounted) setState(() => _hospitalIcon = icon);
-    });
+    _ensureMarkerIconsRequested();
+    _vehicleIcon = _vehicleMarkerIcon.value;
+    _hospitalIcon = _hospitalMarkerIcon.value;
+    _vehicleMarkerIcon.addListener(_onVehicleIconChanged);
+    _hospitalMarkerIcon.addListener(_onHospitalIconChanged);
+  }
+
+  void _onVehicleIconChanged() {
+    if (mounted) setState(() => _vehicleIcon = _vehicleMarkerIcon.value);
+  }
+
+  void _onHospitalIconChanged() {
+    if (mounted) setState(() => _hospitalIcon = _hospitalMarkerIcon.value);
   }
 
   @override
   void dispose() {
+    _vehicleMarkerIcon.removeListener(_onVehicleIconChanged);
+    _hospitalMarkerIcon.removeListener(_onHospitalIconChanged);
     _ticker?.dispose();
     super.dispose();
   }
