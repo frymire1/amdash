@@ -47,6 +47,7 @@ import 'package:ems/services/ems_tracking_service.dart';
 import 'package:ems/widgets/patient_summary_card.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:patrol/patrol.dart';
@@ -155,6 +156,14 @@ void main() {
     // not something this test's own routine path should rely on.
     final baselineFixAtMs = EmsTrackingController.debugLastFixAtMs;
     expect(baselineFixAtMs, isNotNull, reason: 'the confirming publish at submit time should have recorded a fix');
+    // Diagnostic only (not an assertion) — narrows down *where* a failure
+    // below actually lives if one happens: isRunningService false means
+    // the foreground service itself never started/already died; true
+    // means it's alive and the gap is somewhere inside its own recurring
+    // publish logic instead (see ems_tracking_task_handler.dart's own new
+    // onRepeatEvent/_publishAllTracked debugPrint calls for the next
+    // layer down).
+    debugPrint('DIAG: isRunningService before backgrounding = ${await FlutterForegroundTask.isRunningService}');
 
     try {
       await $.platform.mobile.pressHome();
@@ -166,6 +175,7 @@ void main() {
       // Home, never navigated away or killed the process).
       await $.pump(const Duration(seconds: 1));
 
+      debugPrint('DIAG: isRunningService after resuming = ${await FlutterForegroundTask.isRunningService}');
       final resumedFixAtMs = EmsTrackingController.debugLastFixAtMs;
       expect(
         resumedFixAtMs,

@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -114,6 +114,11 @@ class EmsTrackingTaskHandler extends TaskHandler {
 
   @override
   void onRepeatEvent(DateTime timestamp) {
+    // Confirms this isolate's own recurring timer is genuinely still
+    // ticking at all — the one signal none of the try/catch blocks below
+    // could ever surface on their own, since a service that silently
+    // stopped being scheduled by the OS wouldn't reach any of them either.
+    debugPrint('EmsTrackingTaskHandler.onRepeatEvent: tracking ${_trackedPatientIds.length} patient(s)');
     _publishAllTracked();
   }
 
@@ -129,12 +134,16 @@ class EmsTrackingTaskHandler extends TaskHandler {
           timeLimit: Duration(seconds: 10),
         ),
       );
-    } catch (_) {
+    } catch (error) {
       // Same tolerance as the web version: a revoked/unavailable permission
       // just means this cycle's publish is skipped, not a crash. Also means
       // no fix is reported back, so the main isolate's freshness clock goes
       // stale and the chip falls back to "No GPS Signal" — the intended
-      // behavior when GPS drops mid-transport.
+      // behavior when GPS drops mid-transport. Logged, not just silently
+      // swallowed — confirmed for real this silence cost real debugging
+      // time once already (a genuine failure here was indistinguishable
+      // from the service simply not running at all).
+      debugPrint('EmsTrackingTaskHandler._publishAllTracked: getCurrentPosition failed: $error');
       return;
     }
 
@@ -149,11 +158,14 @@ class EmsTrackingTaskHandler extends TaskHandler {
           'latitude': position.latitude,
           'longitude': position.longitude,
         });
-      } catch (_) {
+      } catch (error) {
         // Swallowed the same way the web interval's recurring publishes
         // are — the main isolate's own confirming publish (see
         // EmsTrackingController.startTracking) is what surfaces a real
         // failure to the UI; this loop just tries again next cycle.
+        // Logged for the same visibility reason as the Geolocator catch
+        // above.
+        debugPrint('EmsTrackingTaskHandler._publishAllTracked: publishEmsLocation failed for $patientId: $error');
       }
     }
   }
