@@ -326,4 +326,39 @@ void main() {
       expect(find.text('Failed to save. Please try again.'), findsOneWidget);
     });
   });
+
+  group('Multiple ambulance view', () {
+    testWidgets('defaults to disabled', (tester) async {
+      await pumpScreen(tester, organization: const Organization(id: 'org-1', name: 'Acme Health'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Disabled'), findsOneWidget);
+    });
+
+    testWidgets('toggling on calls the service with the new value', (tester) async {
+      when(() => adminService.setOrganizationMultipleAmbulanceView(any())).thenAnswer((_) async {});
+
+      await pumpScreen(tester, organization: const Organization(id: 'org-1', name: 'Acme Health'));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byType(Switch).at(4));
+      await tester.tap(find.byType(Switch).at(4));
+      await tester.pumpAndSettle();
+
+      verify(() => adminService.setOrganizationMultipleAmbulanceView(true)).called(1);
+    });
+
+    testWidgets('a toggle failure shows the inline error', (tester) async {
+      when(() => adminService.setOrganizationMultipleAmbulanceView(any())).thenThrow(Exception('boom'));
+
+      await pumpScreen(tester, organization: const Organization(id: 'org-1', name: 'Acme Health'));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byType(Switch).at(4));
+      await tester.tap(find.byType(Switch).at(4));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Failed to save. Please try again.'), findsOneWidget);
+    });
+  });
 }

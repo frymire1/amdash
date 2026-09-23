@@ -11,6 +11,7 @@ void main() {
         'cmekRequested': true,
         'auditLoggingEnabled': false,
         'fhirExportEnabled': true,
+        'enableMultipleAmbulanceView': true,
       });
 
       expect(org.id, 'org-1');
@@ -20,6 +21,7 @@ void main() {
       expect(org.cmekRequested, true);
       expect(org.auditLoggingEnabled, false);
       expect(org.fhirExportEnabled, true);
+      expect(org.enableMultipleAmbulanceView, true);
     });
 
     test('defaults name to an empty string and leaves every toggle null when the document is empty', () {
@@ -35,6 +37,7 @@ void main() {
       expect(org.cmekRequested, isNull);
       expect(org.auditLoggingEnabled, isNull);
       expect(org.fhirExportEnabled, isNull);
+      expect(org.enableMultipleAmbulanceView, isNull);
     });
   });
 }

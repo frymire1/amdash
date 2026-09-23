@@ -17,6 +17,13 @@ const functionsRegion = 'northamerica-northeast2';
 /// EmsTrackingController._onTaskData.
 const emsFixReportSignal = 'ems-fix';
 
+// How often an identified-but-idle ambulance publishes its own location —
+// see EmsTrackingController's own identical constant (ems_tracking_service
+// .dart) for the full "why 4x the 15s tick" reasoning; kept as a separate
+// constant here (not shared) since this file runs in a genuinely separate
+// isolate with no shared Dart state.
+const _idleAmbulancePublishInterval = Duration(seconds: 60);
+
 /// Must be a top-level (or static) function — this is what
 /// `FlutterForegroundTask.startService(callback: ...)` runs to install the
 /// handler in the dedicated background isolate the foreground service
@@ -87,6 +94,8 @@ class EmsTrackingTaskHandler extends TaskHandler {
   FirebaseFunctions? _functions;
   final Set<String> _trackedPatientIds = {};
   bool _firebaseReady;
+  String? _ambulanceId;
+  DateTime? _lastAmbulancePublishAt;
 
   FirebaseFunctions get _functionsInstance =>
       _functions ??= _functionsOverride ?? FirebaseFunctions.instanceFor(region: functionsRegion); // coverage:ignore-line
@@ -118,12 +127,30 @@ class EmsTrackingTaskHandler extends TaskHandler {
     // ticking at all — the one signal none of the try/catch blocks below
     // could ever surface on their own, since a service that silently
     // stopped being scheduled by the OS wouldn't reach any of them either.
-    debugPrint('EmsTrackingTaskHandler.onRepeatEvent: tracking ${_trackedPatientIds.length} patient(s)');
-    _publishAllTracked();
+    debugPrint(
+      'EmsTrackingTaskHandler.onRepeatEvent: tracking ${_trackedPatientIds.length} patient(s), '
+      'ambulance ${_ambulanceId ?? "none"}',
+    );
+    _publishAllTracked(timestamp);
   }
 
-  Future<void> _publishAllTracked() async {
-    if (_trackedPatientIds.isEmpty) return;
+  Future<void> _publishAllTracked(DateTime timestamp) async {
+    final isTransporting = _trackedPatientIds.isNotEmpty;
+    // Due immediately while actively transporting — piggybacks the
+    // existing per-patient tick below rather than a separate timer (see
+    // EmsTrackingController._syncAmbulanceTracking's own doc comment on
+    // why). Otherwise due once _idleAmbulancePublishInterval has actually
+    // elapsed since the last ambulance-specific publish — this is a
+    // genuinely separate cadence from the per-patient one below, which
+    // this method still runs every 15s regardless (it just skips the
+    // ambulance publish on ticks that aren't due yet).
+    final ambulanceDue =
+        _ambulanceId != null &&
+        (isTransporting ||
+            _lastAmbulancePublishAt == null ||
+            timestamp.difference(_lastAmbulancePublishAt!) >= _idleAmbulancePublishInterval);
+
+    if (_trackedPatientIds.isEmpty && !ambulanceDue) return;
     await _ensureFirebase();
 
     final Position position;
@@ -168,25 +195,51 @@ class EmsTrackingTaskHandler extends TaskHandler {
         debugPrint('EmsTrackingTaskHandler._publishAllTracked: publishEmsLocation failed for $patientId: $error');
       }
     }
+
+    if (ambulanceDue) {
+      _lastAmbulancePublishAt = timestamp;
+      try {
+        await _functionsInstance.httpsCallable('publishAmbulanceLocation').call<Object?>({
+          'ambulanceId': _ambulanceId,
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+          'isTransporting': isTransporting,
+        });
+      } catch (error) {
+        // Same visibility/tolerance reasoning as the per-patient catch
+        // above.
+        debugPrint('EmsTrackingTaskHandler._publishAllTracked: publishAmbulanceLocation failed: $error');
+      }
+    }
   }
 
   @override
   void onReceiveData(Object data) {
     if (data is! String) return;
     final decoded = jsonDecode(data) as Map<String, Object?>;
-    final patientId = decoded['patientId'] as String?;
-    if (patientId == null) return;
 
+    // Per-case null checks, not one blanket early return on a missing
+    // patientId (the shape the track/untrack cases used to share) —
+    // setAmbulanceId/clearAmbulanceId messages never carry a patientId at
+    // all, so a blanket check would have silently dropped them too.
     switch (decoded['action']) {
       case 'track':
-        _trackedPatientIds.add(patientId);
+        final patientId = decoded['patientId'] as String?;
+        if (patientId != null) _trackedPatientIds.add(patientId);
       case 'untrack':
-        _trackedPatientIds.remove(patientId);
+        final patientId = decoded['patientId'] as String?;
+        if (patientId != null) _trackedPatientIds.remove(patientId);
+      case 'setAmbulanceId':
+        _ambulanceId = decoded['ambulanceId'] as String?;
+      case 'clearAmbulanceId':
+        _ambulanceId = null;
     }
   }
 
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     _trackedPatientIds.clear();
+    _ambulanceId = null;
+    _lastAmbulancePublishAt = null;
   }
 }

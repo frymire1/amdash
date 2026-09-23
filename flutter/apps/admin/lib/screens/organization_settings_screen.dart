@@ -56,6 +56,10 @@ class _OrganizationSettingsScreenState
   String? _fhirExportMessage;
   bool _fhirExportIsError = false;
 
+  bool _savingMultipleAmbulanceView = false;
+  String? _multipleAmbulanceViewMessage;
+  bool _multipleAmbulanceViewIsError = false;
+
   Future<void> _setRetention(bool value) async {
     setState(() {
       _saving = true;
@@ -163,6 +167,25 @@ class _OrganizationSettingsScreenState
     }
   }
 
+  Future<void> _setMultipleAmbulanceViewEnabled(bool value) async {
+    setState(() {
+      _savingMultipleAmbulanceView = true;
+      _multipleAmbulanceViewMessage = null;
+    });
+    try {
+      await ref.read(adminServiceProvider).setOrganizationMultipleAmbulanceView(value);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _multipleAmbulanceViewMessage = 'Failed to save. Please try again.';
+          _multipleAmbulanceViewIsError = true;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _savingMultipleAmbulanceView = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final organization = ref.watch(ownOrganizationProvider).valueOrNull;
@@ -177,6 +200,8 @@ class _OrganizationSettingsScreenState
     final auditLoggingEnabled = organization?.auditLoggingEnabled ?? true;
     // Opt-in, unlike auditLoggingEnabled — missing/never-set means off.
     final fhirExportEnabled = organization?.fhirExportEnabled ?? false;
+    // Opt-in — missing/never-set means off, same convention as fhirExportEnabled.
+    final multipleAmbulanceViewEnabled = organization?.enableMultipleAmbulanceView ?? false;
 
     return AdminPage(
       children: [
@@ -413,6 +438,50 @@ class _OrganizationSettingsScreenState
                 FormMessage(
                   text: _fhirExportMessage!,
                   isError: _fhirExportIsError,
+                ),
+            ],
+          ),
+        ),
+        AdminCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Multiple Ambulance View',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Let physicians see every ambulance\'s live location on a fleet-wide map. Turning this on '
+                'will prompt every EMS crew to identify their vehicle the next time they sign in.',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Switch(
+                    key: const Key('multiple_ambulance_view_switch'),
+                    value: multipleAmbulanceViewEnabled,
+                    onChanged: _savingMultipleAmbulanceView || organization == null
+                        ? null
+                        : _setMultipleAmbulanceViewEnabled,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(multipleAmbulanceViewEnabled ? 'Enabled' : 'Disabled'),
+                  if (_savingMultipleAmbulanceView) ...[
+                    const SizedBox(width: 12),
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ],
+                ],
+              ),
+              if (_multipleAmbulanceViewMessage != null)
+                FormMessage(
+                  text: _multipleAmbulanceViewMessage!,
+                  isError: _multipleAmbulanceViewIsError,
                 ),
             ],
           ),

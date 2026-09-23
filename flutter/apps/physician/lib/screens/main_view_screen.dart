@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/patient_service.dart';
+import '../widgets/multiple_ambulance_view.dart';
 import '../widgets/patient_list.dart';
 import '../widgets/patient_viewer.dart';
+
+enum _ViewMode { patients, allAmbulances, transportingAmbulances }
 
 /// Mirrors `main-view.component.ts`/`.html`: patient list + patient viewer,
 /// side-by-side on wide screens, toggled between on narrow ones. The
@@ -31,6 +34,7 @@ class _MainViewScreenState extends ConsumerState<MainViewScreen> {
   // the open detail pane.
   String? _selectedPatientId;
   bool _showListOnMobile = false;
+  _ViewMode _viewMode = _ViewMode.patients;
 
   void _onSelected(Patient patient) {
     setState(() {
@@ -50,6 +54,51 @@ class _MainViewScreenState extends ConsumerState<MainViewScreen> {
       }
     }
 
+    // Only orgs that opted in ever see the SegmentedButton at all — an org
+    // with the flag off always renders the patients body, regardless of
+    // whatever _viewMode a prior enabled state left behind (never mutated
+    // here; just not consulted while disabled).
+    final multipleAmbulanceViewEnabled =
+        ref.watch(ownOrganizationProvider).valueOrNull?.enableMultipleAmbulanceView ?? false;
+    final effectiveViewMode = multipleAmbulanceViewEnabled ? _viewMode : _ViewMode.patients;
+
+    final body = switch (effectiveViewMode) {
+      _ViewMode.allAmbulances => const MultipleAmbulanceView(filter: AmbulanceViewFilter.all),
+      _ViewMode.transportingAmbulances => const MultipleAmbulanceView(filter: AmbulanceViewFilter.transportingOnly),
+      _ViewMode.patients => _buildPatientBody(context, patients, selectedPatient),
+    };
+
+    if (!multipleAmbulanceViewEnabled) return body;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: SegmentedButton<_ViewMode>(
+            segments: const [
+              ButtonSegment(value: _ViewMode.patients, label: Text('Patients'), icon: Icon(Icons.list_alt)),
+              ButtonSegment(
+                value: _ViewMode.allAmbulances,
+                label: Text('All Ambulances'),
+                icon: Icon(Icons.local_shipping),
+              ),
+              ButtonSegment(
+                value: _ViewMode.transportingAmbulances,
+                label: Text('Transporting'),
+                icon: Icon(Icons.local_shipping_outlined),
+              ),
+            ],
+            selected: {_viewMode},
+            onSelectionChanged: (selection) => setState(() => _viewMode = selection.first),
+          ),
+        ),
+        Expanded(child: body),
+      ],
+    );
+  }
+
+  Widget _buildPatientBody(BuildContext context, List<Patient> patients, Patient? selectedPatient) {
     // No Scaffold/NavBar of its own — this screen lives inside the app's
     // ShellRoute now, which owns those.
     return LayoutBuilder(

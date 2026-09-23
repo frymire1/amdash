@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as crypto from 'crypto';
 import { fakeCallableRequest, fakeDocumentEvent } from './test-utils';
 
 // vi.hoisted() is required (not plain top-level consts) — see
@@ -20,6 +21,9 @@ const {
   mockPatientsWhere,
   mockPatientsActiveGet,
   mockUsersGet,
+  mockOrgGet,
+  mockAmbulanceLocationSet,
+  mockAmbulanceLocationDoc,
   mockNotifyPatientProximity,
   mockSendAlertPush,
   mockLoggerError,
@@ -37,6 +41,9 @@ const {
   const mockPatientsActiveGet = vi.fn();
   const mockPatientsWhere = vi.fn(() => ({ get: mockPatientsActiveGet }));
   const mockUsersGet = vi.fn();
+  const mockOrgGet = vi.fn();
+  const mockAmbulanceLocationSet = vi.fn();
+  const mockAmbulanceLocationDoc = vi.fn((_id: string) => ({ set: mockAmbulanceLocationSet }));
 
   return {
     mockPatientGet,
@@ -44,6 +51,8 @@ const {
       if (name === 'patients') return { doc: (id: string) => ({ get: mockPatientGet, id }), where: mockPatientsWhere };
       if (name === 'hospitals') return { where: mockHospitalsWhere1 };
       if (name === 'users') return { doc: (id: string) => ({ get: mockUsersGet, id, ref: `USER_REF_${id}` }) };
+      if (name === 'organizations') return { doc: (id: string) => ({ get: mockOrgGet, id }) };
+      if (name === 'ambulanceLocations') return { doc: mockAmbulanceLocationDoc };
       throw new Error(`Unexpected collection in test: ${name}`);
     }),
     mockRecursiveDelete: vi.fn(),
@@ -60,6 +69,9 @@ const {
     mockPatientsWhere,
     mockPatientsActiveGet,
     mockUsersGet,
+    mockOrgGet,
+    mockAmbulanceLocationSet,
+    mockAmbulanceLocationDoc,
     mockNotifyPatientProximity: vi.fn(),
     mockSendAlertPush: vi.fn(),
     mockLoggerError: vi.fn(),
@@ -103,7 +115,14 @@ vi.mock('./physician', () => ({
   sendAlertPush: mockSendAlertPush,
 }));
 
-import { checkEmsConnectivity, onEmsLocationEvent, onPatientDeleted, publishEmsLocation, stopEmsLocation } from './ems';
+import {
+  checkEmsConnectivity,
+  onEmsLocationEvent,
+  onPatientDeleted,
+  publishAmbulanceLocation,
+  publishEmsLocation,
+  stopEmsLocation,
+} from './ems';
 
 const EMS_PROFILE = { uid: 'ems-uid', email: 'ems@example.com', role: ['ems'], organizationId: 'org-1' };
 
@@ -144,6 +163,10 @@ beforeEach(() => {
   mockPatientGet.mockResolvedValue({ data: () => undefined });
   mockUsersGet.mockResolvedValue({ exists: false, data: () => undefined });
   mockPatientsActiveGet.mockResolvedValue({ docs: [] });
+  // Default for publishAmbulanceLocation's own tests below — most of them
+  // don't care about this gate specifically, only the one dedicated to it
+  // overrides it to false/missing.
+  mockOrgGet.mockResolvedValue({ data: () => ({ enableMultipleAmbulanceView: true }) });
 });
 
 describe('publishEmsLocation', () => {
@@ -189,6 +212,94 @@ describe('publishEmsLocation', () => {
     expect(mockPublishMessage).toHaveBeenCalledWith({
       json: { patientId: 'p1', organizationId: 'org-1', active: true, latitude: 43.65, longitude: -79.38 },
     });
+    expect(result).toEqual({ published: true });
+  });
+});
+
+describe('publishAmbulanceLocation', () => {
+  it('throws permission-denied for a non-EMS caller', async () => {
+    mockGetCallerProfile.mockResolvedValue({ ...EMS_PROFILE, role: ['physician'] });
+    await expect(
+      publishAmbulanceLocation.run(
+        fakeCallableRequest({ ambulanceId: 'Unit 5', latitude: 1, longitude: 2, isTransporting: false }, 'uid-1'),
+      ),
+    ).rejects.toThrow('Only EMS accounts can publish an ambulance location update.');
+  });
+
+  it('throws failed-precondition when the caller has no organization on record', async () => {
+    mockGetCallerProfile.mockResolvedValue({ ...EMS_PROFILE, organizationId: undefined });
+    await expect(
+      publishAmbulanceLocation.run(
+        fakeCallableRequest({ ambulanceId: 'Unit 5', latitude: 1, longitude: 2, isTransporting: false }, 'uid-1'),
+      ),
+    ).rejects.toThrow('Your account has no organization on record.');
+  });
+
+  it('throws invalid-argument when ambulanceId is empty or only whitespace', async () => {
+    mockGetCallerProfile.mockResolvedValue(EMS_PROFILE);
+    await expect(
+      publishAmbulanceLocation.run(
+        fakeCallableRequest({ ambulanceId: '   ', latitude: 1, longitude: 2, isTransporting: false }, 'uid-1'),
+      ),
+    ).rejects.toThrow('ambulanceId is required and must be 100 characters or fewer.');
+  });
+
+  it('throws invalid-argument when ambulanceId is missing entirely (not even the wrong type)', async () => {
+    mockGetCallerProfile.mockResolvedValue(EMS_PROFILE);
+    await expect(
+      publishAmbulanceLocation.run(fakeCallableRequest({ latitude: 1, longitude: 2, isTransporting: false } as never, 'uid-1')),
+    ).rejects.toThrow('ambulanceId is required and must be 100 characters or fewer.');
+  });
+
+  it('throws invalid-argument when ambulanceId is longer than 100 characters', async () => {
+    mockGetCallerProfile.mockResolvedValue(EMS_PROFILE);
+    await expect(
+      publishAmbulanceLocation.run(
+        fakeCallableRequest({ ambulanceId: 'x'.repeat(101), latitude: 1, longitude: 2, isTransporting: false }, 'uid-1'),
+      ),
+    ).rejects.toThrow('ambulanceId is required and must be 100 characters or fewer.');
+  });
+
+  it('throws invalid-argument when latitude/longitude/isTransporting are missing or the wrong type', async () => {
+    mockGetCallerProfile.mockResolvedValue(EMS_PROFILE);
+    await expect(
+      publishAmbulanceLocation.run(
+        fakeCallableRequest({ ambulanceId: 'Unit 5', latitude: 1, longitude: 2, isTransporting: 'no' as never }, 'uid-1'),
+      ),
+    ).rejects.toThrow('latitude, longitude, and isTransporting are required.');
+  });
+
+  it('throws failed-precondition when the organization has not enabled multiple ambulance view', async () => {
+    mockGetCallerProfile.mockResolvedValue(EMS_PROFILE);
+    mockOrgGet.mockResolvedValue({ data: () => ({ enableMultipleAmbulanceView: false }) });
+    await expect(
+      publishAmbulanceLocation.run(
+        fakeCallableRequest({ ambulanceId: 'Unit 5', latitude: 1, longitude: 2, isTransporting: false }, 'uid-1'),
+      ),
+    ).rejects.toThrow('Multiple ambulance view is not enabled for this organization.');
+  });
+
+  it('writes ambulanceLocations/{hash(orgId:ambulanceId)}, trimmed, on success', async () => {
+    mockGetCallerProfile.mockResolvedValue(EMS_PROFILE);
+
+    const result = await publishAmbulanceLocation.run(
+      fakeCallableRequest({ ambulanceId: '  Unit 5  ', latitude: 43.65, longitude: -79.38, isTransporting: true }, 'uid-1'),
+    );
+
+    const expectedDocId = crypto.createHash('sha256').update('org-1:Unit 5').digest('hex');
+    expect(mockAmbulanceLocationDoc).toHaveBeenCalledWith(expectedDocId);
+    expect(mockAmbulanceLocationSet).toHaveBeenCalledWith(
+      {
+        ambulanceId: 'Unit 5',
+        organizationId: 'org-1',
+        latitude: 43.65,
+        longitude: -79.38,
+        isTransporting: true,
+        updatedAt: 'SERVER_TIMESTAMP',
+        publishedByUid: 'ems-uid',
+      },
+      { merge: true },
+    );
     expect(result).toEqual({ published: true });
   });
 });

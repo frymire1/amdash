@@ -1,5 +1,7 @@
 import 'dart:math';
 
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+
 const _earthRadiusM = 6371000.0;
 
 /// Haversine distance in meters. Angular duplicates this (once in km in
@@ -17,3 +19,25 @@ double distanceMeters(double lat1, double lng1, double lat2, double lng2) {
 }
 
 double _degToRad(double deg) => deg * (pi / 180);
+
+/// Smallest bounding box containing every point in [points] — extracted
+/// from `patient_viewer.dart`'s own (formerly private) `_boundsFromPoints`,
+/// pure math with no font/platform coupling, so it's safe to share directly
+/// (unlike that file's marker-icon rendering — see
+/// `multiple_ambulance_view.dart`'s own doc comment on why that stays
+/// duplicated instead). Used by both `PatientViewer`'s Directions-route
+/// camera fit and `MultipleAmbulanceView`'s fleet camera fit. [points] must
+/// be non-empty.
+LatLngBounds boundsFromPoints(List<LatLng> points) {
+  var minLat = points.first.latitude;
+  var maxLat = points.first.latitude;
+  var minLng = points.first.longitude;
+  var maxLng = points.first.longitude;
+  for (final point in points) {
+    if (point.latitude < minLat) minLat = point.latitude;
+    if (point.latitude > maxLat) maxLat = point.latitude;
+    if (point.longitude < minLng) minLng = point.longitude;
+    if (point.longitude > maxLng) maxLng = point.longitude;
+  }
+  return LatLngBounds(southwest: LatLng(minLat, minLng), northeast: LatLng(maxLat, maxLng));
+}

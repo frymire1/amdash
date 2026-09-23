@@ -91,6 +91,14 @@ void main() {
     h.onReceiveData(jsonEncode({'action': 'untrack', 'patientId': patientId}));
   }
 
+  void setAmbulanceId(EmsTrackingTaskHandler h, String ambulanceId) {
+    h.onReceiveData(jsonEncode({'action': 'setAmbulanceId', 'ambulanceId': ambulanceId}));
+  }
+
+  void clearAmbulanceId(EmsTrackingTaskHandler h) {
+    h.onReceiveData(jsonEncode({'action': 'clearAmbulanceId'}));
+  }
+
   group('onReceiveData', () {
     test('non-String data is ignored', () {
       final h = handler();
@@ -213,6 +221,131 @@ void main() {
       await pumpEventQueue();
 
       expect(callCount, 2);
+    });
+  });
+
+  group('onRepeatEvent -> _publishAllTracked ambulance publishing', () {
+    late _MockHttpsCallable ambulanceCallable;
+
+    setUp(() {
+      ambulanceCallable = _MockHttpsCallable();
+      when(() => functions.httpsCallable('publishAmbulanceLocation')).thenReturn(ambulanceCallable);
+      when(
+        () => ambulanceCallable.call<Object?>(any()),
+      ).thenAnswer((_) async => _MockHttpsCallableResult<Object?>());
+      when(
+        () => geolocator.getCurrentPosition(locationSettings: any(named: 'locationSettings')),
+      ).thenAnswer((_) async => _position());
+    });
+
+    test('an identified ambulance with no tracked patients publishes on the very first tick', () async {
+      final h = handler();
+      setAmbulanceId(h, 'Unit 5');
+
+      h.onRepeatEvent(DateTime(2026));
+      await pumpEventQueue();
+
+      verify(
+        () => ambulanceCallable.call<Object?>(
+          any(
+            that: predicate<Map<Object?, Object?>>(
+              (m) => m['ambulanceId'] == 'Unit 5' && m['isTransporting'] == false,
+            ),
+          ),
+        ),
+      ).called(1);
+      verifyNever(() => callable.call<Object?>(any()));
+    });
+
+    test('a second tick before the idle interval elapses is a total no-op (no publish attempted at all)', () async {
+      final h = handler();
+      setAmbulanceId(h, 'Unit 5');
+      final t0 = DateTime(2026);
+      h.onRepeatEvent(t0);
+      await pumpEventQueue();
+
+      h.onRepeatEvent(t0.add(const Duration(seconds: 30)));
+      await pumpEventQueue();
+
+      // Still due to run just once — the second tick's own ambulanceDue
+      // check itself returns false, so _publishAllTracked's early-return
+      // fires before Geolocator is ever touched again.
+      verify(() => geolocator.getCurrentPosition(locationSettings: any(named: 'locationSettings'))).called(1);
+      verify(() => ambulanceCallable.call<Object?>(any())).called(1);
+    });
+
+    test('a tick once the idle interval has elapsed republishes', () async {
+      final h = handler();
+      setAmbulanceId(h, 'Unit 5');
+      final t0 = DateTime(2026);
+      h.onRepeatEvent(t0);
+      await pumpEventQueue();
+
+      h.onRepeatEvent(t0.add(const Duration(seconds: 61)));
+      await pumpEventQueue();
+
+      verify(() => ambulanceCallable.call<Object?>(any())).called(2);
+    });
+
+    test('clearAmbulanceId stops further ambulance publishing entirely', () async {
+      final h = handler();
+      setAmbulanceId(h, 'Unit 5');
+      final t0 = DateTime(2026);
+      h.onRepeatEvent(t0);
+      await pumpEventQueue();
+
+      clearAmbulanceId(h);
+      h.onRepeatEvent(t0.add(const Duration(seconds: 61)));
+      await pumpEventQueue();
+
+      // No ambulance ID and no tracked patients -> the early-return fires
+      // before Geolocator is touched a second time at all.
+      verify(() => geolocator.getCurrentPosition(locationSettings: any(named: 'locationSettings'))).called(1);
+      verify(() => ambulanceCallable.call<Object?>(any())).called(1);
+    });
+
+    test('a tracked patient plus an identified ambulance publishes both, with isTransporting true', () async {
+      final h = handler();
+      track(h, 'patient-1');
+      setAmbulanceId(h, 'Unit 9');
+      when(() => callable.call<Object?>(any())).thenAnswer((_) async => _MockHttpsCallableResult<Object?>());
+
+      h.onRepeatEvent(DateTime(2026));
+      await pumpEventQueue();
+
+      verify(
+        () => ambulanceCallable.call<Object?>(
+          any(
+            that: predicate<Map<Object?, Object?>>(
+              (m) => m['ambulanceId'] == 'Unit 9' && m['isTransporting'] == true,
+            ),
+          ),
+        ),
+      ).called(1);
+      verify(
+        () => callable.call<Object?>(
+          any(that: predicate<Map<Object?, Object?>>((m) => m['patientId'] == 'patient-1')),
+        ),
+      ).called(1);
+    });
+
+    test('a publishAmbulanceLocation failure is swallowed — the per-patient publishes still succeed', () async {
+      when(() => ambulanceCallable.call<Object?>(any())).thenThrow(Exception('publish failed'));
+      when(() => callable.call<Object?>(any())).thenAnswer((_) async => _MockHttpsCallableResult<Object?>());
+
+      final h = handler();
+      track(h, 'patient-1');
+      setAmbulanceId(h, 'Unit 9');
+
+      // Reaching here without throwing is part of the assertion.
+      h.onRepeatEvent(DateTime(2026));
+      await pumpEventQueue();
+
+      verify(
+        () => callable.call<Object?>(
+          any(that: predicate<Map<Object?, Object?>>((m) => m['patientId'] == 'patient-1')),
+        ),
+      ).called(1);
     });
   });
 

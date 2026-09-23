@@ -23,6 +23,7 @@ export type AuditAction =
   | 'organization.setCmekPreference'
   | 'organization.setAuditLogging'
   | 'organization.setFhirExportEnabled'
+  | 'organization.setMultipleAmbulanceView'
   | 'patient.create'
   | 'patient.update'
   | 'patient.complete'

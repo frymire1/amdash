@@ -216,6 +216,7 @@ import {
   setOrganizationCmekPreference,
   setOrganizationCountry,
   setOrganizationFhirExportEnabled,
+  setOrganizationMultipleAmbulanceView,
   setOrganizationRetention,
   setUserDisabled,
   setUserRole,
@@ -1014,6 +1015,21 @@ describe('organization settings toggles', () => {
     const result = await setOrganizationFhirExportEnabled.run(fakeCallableRequest({ fhirExportEnabled: true }, 'uid-1'));
     expect(mockOrgUpdate).toHaveBeenCalledWith({ fhirExportEnabled: true });
     expect(result).toEqual({ fhirExportEnabled: true });
+  });
+
+  it('setOrganizationMultipleAmbulanceView rejects a non-boolean enableMultipleAmbulanceView', async () => {
+    await expect(
+      setOrganizationMultipleAmbulanceView.run(fakeCallableRequest({ enableMultipleAmbulanceView: 'yes' as never }, 'uid-1')),
+    ).rejects.toThrow('enableMultipleAmbulanceView must be a boolean.');
+  });
+
+  it('setOrganizationMultipleAmbulanceView updates and logs', async () => {
+    const result = await setOrganizationMultipleAmbulanceView.run(
+      fakeCallableRequest({ enableMultipleAmbulanceView: true }, 'uid-1'),
+    );
+    expect(mockOrgUpdate).toHaveBeenCalledWith({ enableMultipleAmbulanceView: true });
+    expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'organization.setMultipleAmbulanceView' }));
+    expect(result).toEqual({ enableMultipleAmbulanceView: true });
   });
 });
 

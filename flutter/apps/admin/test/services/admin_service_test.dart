@@ -553,6 +553,19 @@ void main() {
         () => service.setOrganizationFhirExportEnabled(true),
       );
     });
+
+    test('setOrganizationMultipleAmbulanceView sends enableMultipleAmbulanceView', () async {
+      final callable = stub('setOrganizationMultipleAmbulanceView', const <String, Object?>{});
+      await service.setOrganizationMultipleAmbulanceView(true);
+      verify(() => callable.call<Map<Object?, Object?>>({'enableMultipleAmbulanceView': true})).called(1);
+    });
+
+    test('setOrganizationMultipleAmbulanceView retries once on a cold-start "internal" failure', () async {
+      await expectRetriesOnceOnInternal(
+        'setOrganizationMultipleAmbulanceView',
+        () => service.setOrganizationMultipleAmbulanceView(true),
+      );
+    });
   });
 
   group('adminServiceProvider', () {

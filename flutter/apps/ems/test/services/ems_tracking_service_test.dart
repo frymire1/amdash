@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:amdash_core/amdash_core.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:ems/services/ambulance_id_service.dart';
 import 'package:ems/services/ems_tracking_service.dart';
 import 'package:ems/services/ems_tracking_task_handler.dart';
 import 'package:flutter/foundation.dart';
@@ -130,8 +131,14 @@ void main() {
     when(() => foregroundTask.requestNotificationPermission()).thenAnswer((_) async => NotificationPermission.granted);
   }
 
-  ProviderContainer containerFor() {
-    final container = ProviderContainer(overrides: [firebaseFunctionsProvider.overrideWithValue(functions)]);
+  ProviderContainer containerFor({String? ambulanceId, Organization? organization}) {
+    final container = ProviderContainer(
+      overrides: [
+        firebaseFunctionsProvider.overrideWithValue(functions),
+        ambulanceIdProvider.overrideWith((ref) => Future.value(ambulanceId)),
+        ownOrganizationProvider.overrideWith((ref) => Stream.value(organization)),
+      ],
+    );
     addTearDown(container.dispose);
     return container;
   }
@@ -915,6 +922,164 @@ void main() {
 
       await controller.stopTracking('patient-2');
       expect(positionController.hasListener, false);
+    });
+  });
+
+  group('continuous ambulance tracking (_syncAmbulanceTracking)', () {
+    group('Android', () {
+      test('ambulanceId + org flag on from the start starts the foreground service and sends setAmbulanceId', () async {
+        stubForegroundServiceLifecycle();
+        when(() => foregroundTask.sendDataToTask(any())).thenReturn(null);
+
+        final container = containerFor(
+          ambulanceId: 'Unit 5',
+          organization: const Organization(id: 'org1', name: 'Org', enableMultipleAmbulanceView: true),
+        );
+        container.read(emsTrackingProvider.notifier);
+        await pumpEventQueue();
+
+        verify(() => foregroundTask.sendDataToTask(any(that: contains('"action":"setAmbulanceId"')))).called(1);
+        expect(FlutterForegroundTask.isInitialized, true);
+      });
+
+      test(
+        'turning the org flag off with no patient tracked sends clearAmbulanceId and stops the service',
+        () async {
+          stubForegroundServiceLifecycle();
+          when(() => foregroundTask.sendDataToTask(any())).thenReturn(null);
+
+          final orgController = StreamController<Organization?>();
+          addTearDown(orgController.close);
+          final container = ProviderContainer(
+            overrides: [
+              firebaseFunctionsProvider.overrideWithValue(functions),
+              ambulanceIdProvider.overrideWith((ref) => Future.value('Unit 5')),
+              ownOrganizationProvider.overrideWith((ref) => orgController.stream),
+            ],
+          );
+          addTearDown(container.dispose);
+          container.read(emsTrackingProvider.notifier);
+          orgController.add(const Organization(id: 'org1', name: 'Org', enableMultipleAmbulanceView: true));
+          await pumpEventQueue();
+
+          orgController.add(const Organization(id: 'org1', name: 'Org', enableMultipleAmbulanceView: false));
+          await pumpEventQueue();
+
+          verify(() => foregroundTask.sendDataToTask(any(that: contains('"action":"clearAmbulanceId"')))).called(1);
+          verify(() => foregroundTask.stopService()).called(1);
+        },
+      );
+
+      test(
+        'turning the org flag off while a patient is still tracked sends clearAmbulanceId but does not stop '
+        'the service',
+        () async {
+          when(() => geolocator.checkPermission()).thenAnswer((_) async => LocationPermission.always);
+          when(
+            () => geolocator.getCurrentPosition(locationSettings: any(named: 'locationSettings')),
+          ).thenAnswer((_) async => _position());
+          stubForegroundServiceLifecycle();
+          stubNotificationPermission(NotificationPermission.granted);
+          when(() => foregroundTask.sendDataToTask(any())).thenReturn(null);
+
+          final orgController = StreamController<Organization?>();
+          addTearDown(orgController.close);
+          final container = ProviderContainer(
+            overrides: [
+              firebaseFunctionsProvider.overrideWithValue(functions),
+              ambulanceIdProvider.overrideWith((ref) => Future.value('Unit 5')),
+              ownOrganizationProvider.overrideWith((ref) => orgController.stream),
+            ],
+          );
+          addTearDown(container.dispose);
+          final controller = container.read(emsTrackingProvider.notifier);
+          orgController.add(const Organization(id: 'org1', name: 'Org', enableMultipleAmbulanceView: true));
+          await pumpEventQueue();
+
+          await controller.startTracking('patient-1');
+
+          orgController.add(const Organization(id: 'org1', name: 'Org', enableMultipleAmbulanceView: false));
+          await pumpEventQueue();
+
+          verify(() => foregroundTask.sendDataToTask(any(that: contains('"action":"clearAmbulanceId"')))).called(1);
+          verifyNever(() => foregroundTask.stopService());
+        },
+      );
+    });
+
+    group('iOS', () {
+      setUp(() => debugDefaultTargetPlatformOverride = TargetPlatform.iOS);
+
+      test('ambulanceId + org flag on starts the position stream even with no tracked patient', () async {
+        when(
+          () => geolocator.getPositionStream(locationSettings: any(named: 'locationSettings')),
+        ).thenAnswer((_) => const Stream.empty());
+
+        final container = containerFor(
+          ambulanceId: 'Unit 5',
+          organization: const Organization(id: 'org1', name: 'Org', enableMultipleAmbulanceView: true),
+        );
+        container.read(emsTrackingProvider.notifier);
+        await pumpEventQueue();
+
+        verify(() => geolocator.getPositionStream(locationSettings: any(named: 'locationSettings'))).called(1);
+      });
+
+      test('a position fix publishes the ambulance location (isTransporting false) when no patient is tracked', () async {
+        final positionController = StreamController<Position>.broadcast();
+        addTearDown(positionController.close);
+        when(
+          () => geolocator.getPositionStream(locationSettings: any(named: 'locationSettings')),
+        ).thenAnswer((_) => positionController.stream);
+
+        final container = containerFor(
+          ambulanceId: 'Unit 5',
+          organization: const Organization(id: 'org1', name: 'Org', enableMultipleAmbulanceView: true),
+        );
+        container.read(emsTrackingProvider.notifier);
+        await pumpEventQueue();
+
+        positionController.add(_position(latitude: 46, longitude: -76));
+        await pumpEventQueue();
+
+        verify(
+          () => callable.call<Object?>(
+            any(
+              that: predicate<Map<Object?, Object?>>(
+                (m) => m['ambulanceId'] == 'Unit 5' && m['isTransporting'] == false && m['latitude'] == 46,
+              ),
+            ),
+          ),
+        ).called(1);
+      });
+
+      test('turning the org flag off with no tracked patient cancels the shared position stream', () async {
+        final positionController = StreamController<Position>.broadcast();
+        addTearDown(positionController.close);
+        when(
+          () => geolocator.getPositionStream(locationSettings: any(named: 'locationSettings')),
+        ).thenAnswer((_) => positionController.stream);
+
+        final orgController = StreamController<Organization?>();
+        addTearDown(orgController.close);
+        final container = ProviderContainer(
+          overrides: [
+            firebaseFunctionsProvider.overrideWithValue(functions),
+            ambulanceIdProvider.overrideWith((ref) => Future.value('Unit 5')),
+            ownOrganizationProvider.overrideWith((ref) => orgController.stream),
+          ],
+        );
+        addTearDown(container.dispose);
+        container.read(emsTrackingProvider.notifier);
+        orgController.add(const Organization(id: 'org1', name: 'Org', enableMultipleAmbulanceView: true));
+        await pumpEventQueue();
+        expect(positionController.hasListener, true);
+
+        orgController.add(const Organization(id: 'org1', name: 'Org', enableMultipleAmbulanceView: false));
+        await pumpEventQueue();
+
+        expect(positionController.hasListener, false);
+      });
     });
   });
 

@@ -5,10 +5,12 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { logger } from 'firebase-functions/v2';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { PubSub } from '@google-cloud/pubsub';
+import * as crypto from 'crypto';
 import { CallerProfile } from './classes/caller-profile';
 import { EmsLocationEvent } from './classes/ems-location-event';
 import { PublishLocationRequest } from './classes/publish-location-request';
 import { StopLocationRequest } from './classes/stop-location-request';
+import { PublishAmbulanceLocationRequest } from './classes/publish-ambulance-location-request';
 import { REGION, getCallerProfile } from './auth';
 import { DIRECTIONS_API_KEY, callDirectionsApi, haversineDistanceKm, resolveDestinationHospitalLatLng } from './directions';
 import { notifyPatientProximity, sendAlertPush } from './physician';
@@ -70,6 +72,82 @@ async function patientOrganizationId(patientId: string, caller: CallerProfile): 
   }
   return organizationId;
 }
+
+const AMBULANCE_ID_MAX_LENGTH = 100;
+
+// ambulanceLocations/{docId} — a flat top-level collection, not a
+// subcollection like patients/{id}/location/current: there's no parent
+// document an ambulance belongs to (ambulanceId alone is the identity,
+// the same way patientId alone identifies a patient with no separate
+// registry doc). docId is a hash of organizationId+ambulanceId, not
+// either value alone — ambulanceId is free text chosen independently by
+// each org's paramedics, so two different orgs could otherwise collide
+// on the same document (e.g. both using "Unit 5"); hashing also
+// sidesteps Firestore's document-ID character restrictions on arbitrary
+// free text. Same technique as rate-limit.ts's own docIdFor.
+function ambulanceLocationRef(organizationId: string, ambulanceId: string) {
+  const docId = crypto.createHash('sha256').update(`${organizationId}:${ambulanceId}`).digest('hex');
+  return getFirestore().collection('ambulanceLocations').doc(docId);
+}
+
+// Deliberately a direct Firestore write, not routed through
+// LOCATION_TOPIC like publishEmsLocation above — that two-hop Pub/Sub
+// relay exists there specifically so onEmsLocationEvent can also run
+// checkProximityAlertThresholds, a patient/destination-specific side
+// effect ambulance location has no equivalent of. No stopAmbulanceLocation
+// counterpart either, unlike stopEmsLocation above — an ambulance doesn't
+// "stop existing" the way a patient's active transport does; a stale
+// updatedAt (client-computed on the physician side, same pattern
+// EmsLocationController already uses) is what removes a marker, no
+// explicit opt-out call needed.
+export const publishAmbulanceLocation = onCall<PublishAmbulanceLocationRequest>({ region: REGION }, async (request) => {
+  const profile = await getCallerProfile(request.auth?.uid);
+  if (!profile.role.includes('ems')) {
+    throw new HttpsError('permission-denied', 'Only EMS accounts can publish an ambulance location update.');
+  }
+  if (!profile.organizationId) {
+    throw new HttpsError('failed-precondition', 'Your account has no organization on record.');
+  }
+
+  const { ambulanceId, latitude, longitude, isTransporting } = request.data;
+  const trimmedAmbulanceId = typeof ambulanceId === 'string' ? ambulanceId.trim() : '';
+  if (!trimmedAmbulanceId || trimmedAmbulanceId.length > AMBULANCE_ID_MAX_LENGTH) {
+    throw new HttpsError('invalid-argument', `ambulanceId is required and must be ${AMBULANCE_ID_MAX_LENGTH} characters or fewer.`);
+  }
+  if (typeof latitude !== 'number' || typeof longitude !== 'number' || typeof isTransporting !== 'boolean') {
+    throw new HttpsError('invalid-argument', 'latitude, longitude, and isTransporting are required.');
+  }
+
+  // Org resolution: unlike publishEmsLocation (which reads the *patient's*
+  // organizationId, since a patient doc is the trustworthy source there),
+  // there's no parent doc for an ambulance to resolve organizationId
+  // from — read it straight off the EMS caller's own profile instead,
+  // same as how setOrganizationFhirExportEnabled resolves org for its
+  // own write.
+  //
+  // Authoritative gate-check — never trust client-side UI hiding alone,
+  // same reasoning as exportPatientFhirBundle's own re-check of
+  // fhirExportEnabled (patient-data.ts).
+  const orgDoc = await getFirestore().collection('organizations').doc(profile.organizationId).get();
+  if (orgDoc.data()?.['enableMultipleAmbulanceView'] !== true) {
+    throw new HttpsError('failed-precondition', 'Multiple ambulance view is not enabled for this organization.');
+  }
+
+  await ambulanceLocationRef(profile.organizationId, trimmedAmbulanceId).set(
+    {
+      ambulanceId: trimmedAmbulanceId,
+      organizationId: profile.organizationId,
+      latitude,
+      longitude,
+      isTransporting,
+      updatedAt: FieldValue.serverTimestamp(),
+      publishedByUid: profile.uid,
+    },
+    { merge: true },
+  );
+
+  return { published: true };
+});
 
 export const onEmsLocationEvent = onMessagePublished(
   // retry: true — without it, Pub/Sub does not retry a failed delivery (a

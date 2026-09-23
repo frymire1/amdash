@@ -319,6 +319,19 @@ class AdminService {
       }),
     );
   }
+
+  // Gates the whole ambulance-location feature: physician's fleet-map
+  // filter options, EMS's mandatory Ambulance ID prompt, and the
+  // publishAmbulanceLocation callable itself (which re-checks this same
+  // flag server-side on every call, same reasoning as
+  // setOrganizationFhirExportEnabled above).
+  Future<void> setOrganizationMultipleAmbulanceView(bool enableMultipleAmbulanceView) {
+    return _callWithColdStartRetry(
+      () => _functions.httpsCallable('setOrganizationMultipleAmbulanceView').call<Map<Object?, Object?>>({
+        'enableMultipleAmbulanceView': enableMultipleAmbulanceView,
+      }),
+    );
+  }
 }
 
 final adminServiceProvider = Provider<AdminService>((ref) {

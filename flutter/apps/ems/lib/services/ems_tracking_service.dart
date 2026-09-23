@@ -10,10 +10,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'ambulance_id_service.dart';
 import 'ems_tracking_task_handler.dart';
 
 const _updateInterval = Duration(seconds: 15);
 const _storageKeyPrefix = 'amdash-ems-tracking:';
+
+// How often an identified-but-idle ambulance publishes its own location —
+// 4x _updateInterval, so "publish every 4th tick" is an exact throttle on
+// Android without needing separate timer machinery. Actively transporting
+// (state.isNotEmpty) still publishes at the full _updateInterval cadence,
+// piggybacking the existing per-patient tick — see _syncAmbulanceTracking
+// and ems_tracking_task_handler.dart's own identical constant.
+const _idleAmbulancePublishInterval = Duration(seconds: 60);
 
 /// Talks straight to CoreLocation (via
 /// `ios/Runner/LocationAlwaysUpgradeHandler.swift`) to trigger the
@@ -79,6 +88,14 @@ class EmsTrackingController extends Notifier<Set<String>> {
   final Map<String, Timer> _webTimers = {};
   StreamSubscription<Position>? _iosPositionSubscription;
 
+  // Set by the two ref.listen callbacks in build() — see
+  // _syncAmbulanceTracking's own doc comment for how these two combine to
+  // decide whether continuous (not just per-patient) tracking should be
+  // running at all.
+  String? _ambulanceId;
+  bool _multipleAmbulanceViewEnabled = false;
+  Timer? _ambulanceWebTimer;
+
   // Wall-clock ms of the last confirmed location fix, from whichever
   // delivery path is active (iOS stream / web timer / Android isolate
   // report). Drives the "No GPS Signal" freshness fallback — see
@@ -120,8 +137,21 @@ class EmsTrackingController extends Notifier<Set<String>> {
         timer.cancel(); // coverage:ignore-line
       }
       _iosPositionSubscription?.cancel();
+      _ambulanceWebTimer?.cancel(); // coverage:ignore-line
       FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
     });
+    // fireImmediately — build() itself may run after the ambulance ID/org
+    // flag are already resolved (e.g. a hot restart, or this provider
+    // being recreated), so the very first evaluation needs each
+    // provider's *current* value, not just future changes.
+    ref.listen(ambulanceIdProvider, (_, next) {
+      _ambulanceId = next.valueOrNull;
+      unawaited(_syncAmbulanceTracking());
+    }, fireImmediately: true);
+    ref.listen(ownOrganizationProvider, (_, next) {
+      _multipleAmbulanceViewEnabled = next.valueOrNull?.enableMultipleAmbulanceView ?? false;
+      unawaited(_syncAmbulanceTracking());
+    }, fireImmediately: true);
     // Fire-and-forget, matching the web version's own constructor-time
     // resume — this shouldn't block the provider's own creation.
     unawaited(_resumePersisted());
@@ -308,7 +338,10 @@ class EmsTrackingController extends Notifier<Set<String>> {
     // coverage:ignore-end
 
     if (_isIOS) {
-      if (state.isEmpty) {
+      // Also gated on _shouldRunAmbulanceTracking — the stream needs to
+      // stay alive if an identified ambulance is still meant to be
+      // publishing on its own, even once the last tracked patient stops.
+      if (state.isEmpty && !_shouldRunAmbulanceTracking) {
         await _iosPositionSubscription?.cancel();
         _iosPositionSubscription = null;
         _lastIOSPublishMs = null;
@@ -317,7 +350,10 @@ class EmsTrackingController extends Notifier<Set<String>> {
     }
 
     FlutterForegroundTask.sendDataToTask(jsonEncode({'action': 'untrack', 'patientId': patientId}));
-    if (state.isEmpty) {
+    // Same reasoning as the iOS branch above — the foreground service
+    // itself needs to keep running for ambulance-only tracking even once
+    // the last patient stops.
+    if (state.isEmpty && !_shouldRunAmbulanceTracking) {
       await FlutterForegroundTask.stopService();
     }
   }
@@ -356,14 +392,25 @@ class EmsTrackingController extends Notifier<Set<String>> {
         // often than the other two platforms for no real benefit. Still
         // fully event-driven, not a poll — this just bounds *how often*
         // a real event is allowed to actually publish.
+        //
+        // effectiveInterval: full _updateInterval while a patient is
+        // actively being transported (unchanged from before), but backed
+        // off to _idleAmbulancePublishInterval once state is empty and
+        // only ambulance-level tracking is what's keeping this stream
+        // alive at all — same idle/transporting distinction
+        // ems_tracking_task_handler.dart's own Android isolate makes.
+        final effectiveInterval = state.isNotEmpty ? _updateInterval : _idleAmbulancePublishInterval;
         final nowMs = DateTime.now().millisecondsSinceEpoch;
-        if (_lastIOSPublishMs != null && nowMs - _lastIOSPublishMs! < _updateInterval.inMilliseconds) {
+        if (_lastIOSPublishMs != null && nowMs - _lastIOSPublishMs! < effectiveInterval.inMilliseconds) {
           return;
         }
         _lastIOSPublishMs = nowMs;
 
         for (final patientId in state.toList()) {
           unawaited(_publishPosition(patientId, position));
+        }
+        if (_ambulanceId != null) {
+          unawaited(_publishAmbulanceLocationCall(position));
         }
       },
       // A stream error (e.g. location services disabled mid-stream) just
@@ -387,6 +434,115 @@ class EmsTrackingController extends Notifier<Set<String>> {
       // in startTracking() instead.
     }
   }
+
+  bool get _shouldRunAmbulanceTracking => _ambulanceId != null && _multipleAmbulanceViewEnabled;
+
+  // Tracks whether the LAST sync actually told the platform mechanism
+  // ambulance tracking should be running — lets _syncAmbulanceTracking
+  // no-op on a call that wouldn't change anything, rather than touching a
+  // real platform channel on every single invocation regardless of
+  // whether there's anything to do. Confirmed for real: without this
+  // guard, build()'s own fireImmediately: true calls this once
+  // immediately on every controller creation — including the ordinary
+  // "nothing set, nothing tracked" case — which reached
+  // FlutterForegroundTask.sendDataToTask unconditionally in the Android
+  // else branch below and threw "Binding has not yet been initialized"
+  // in any plain `test()` (no Flutter bindings) that merely constructed
+  // this controller, even ones with nothing to do with ambulance
+  // tracking at all.
+  bool _ambulanceTrackingActive = false;
+
+  /// Keeps continuous ambulance-level tracking in sync with
+  /// [_ambulanceId]/[_multipleAmbulanceViewEnabled] (see the two
+  /// `ref.listen` calls in [build]) — independent of [state]/patient
+  /// tracking, which [_activate]/[_deactivate] already manage on their
+  /// own. Reuses the SAME platform mechanism [_activate] does (one
+  /// Android foreground-service isolate, one iOS position stream, one web
+  /// timer per concern) rather than running a second one — a second
+  /// independent tracking mechanism would double the exact battery/OS-
+  /// kill problem this three-platform architecture already exists to
+  /// solve, for no benefit: the existing 15s tick is already fine-grained
+  /// enough for both cadences (_idleAmbulancePublishInterval is just
+  /// "publish every 4th tick" on Android, or a throttle adjustment on
+  /// iOS). [_deactivate] additionally checks
+  /// [_shouldRunAmbulanceTracking] before ever tearing the mechanism down
+  /// on its own — this method only ever needs to tear it down when *it*
+  /// stops being needed while [state] is already empty.
+  Future<void> _syncAmbulanceTracking() async {
+    final shouldRun = _shouldRunAmbulanceTracking;
+    if (shouldRun == _ambulanceTrackingActive) return;
+    _ambulanceTrackingActive = shouldRun;
+
+    // Web's ambulance publish is its own dedicated timer, independent of
+    // _webTimers (the per-patient map) — see this class's own header
+    // comment on web being the lowest-priority fallback tier, covered
+    // only by Chrome e2e, not unit tests.
+    // coverage:ignore-start
+    if (kIsWeb) {
+      if (shouldRun) {
+        _ambulanceWebTimer ??= Timer.periodic(_idleAmbulancePublishInterval, (_) => _publishAmbulancePositionForWeb());
+      } else {
+        _ambulanceWebTimer?.cancel();
+        _ambulanceWebTimer = null;
+      }
+      return;
+    }
+    // coverage:ignore-end
+
+    if (_isIOS) {
+      if (shouldRun) {
+        _ensureIOSPositionStream();
+      } else if (state.isEmpty) {
+        await _iosPositionSubscription?.cancel();
+        _iosPositionSubscription = null;
+        _lastIOSPublishMs = null;
+      }
+      return;
+    }
+
+    if (shouldRun) {
+      await _ensureForegroundServiceRunning();
+      FlutterForegroundTask.sendDataToTask(jsonEncode({'action': 'setAmbulanceId', 'ambulanceId': _ambulanceId}));
+    } else {
+      FlutterForegroundTask.sendDataToTask(jsonEncode({'action': 'clearAmbulanceId'}));
+      if (state.isEmpty) {
+        await FlutterForegroundTask.stopService();
+      }
+    }
+  }
+
+  // Shared by the iOS stream listener (which already has a fresh
+  // Position from CoreLocation, no extra fetch needed) and
+  // _publishAmbulancePositionForWeb below (which fetches its own).
+  Future<void> _publishAmbulanceLocationCall(Position position) async {
+    if (_ambulanceId == null) return;
+    try {
+      await _functions.httpsCallable('publishAmbulanceLocation').call<Object?>({
+        'ambulanceId': _ambulanceId,
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+        'isTransporting': state.isNotEmpty,
+      });
+    } catch (_) {
+      // Best-effort, same tolerance as this class's other recurring
+      // publishes (_publishPosition above).
+    }
+  }
+
+  // coverage:ignore-start
+  Future<void> _publishAmbulancePositionForWeb() async {
+    if (_ambulanceId == null) return;
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, timeLimit: Duration(seconds: 10)),
+      );
+      await _publishAmbulanceLocationCall(position);
+    } catch (_) {
+      // A failed fetch just means this tick's publish is skipped — same
+      // tolerance as every other best-effort publish in this class.
+    }
+  }
+  // coverage:ignore-end
 
   Future<void> _ensurePermissions() async {
     var permission = await Geolocator.checkPermission();

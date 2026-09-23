@@ -43,6 +43,14 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/organizations/$(orgId)).data.get('cmekRequested', false) == true;
     }
 
+    // Same pattern as orgRequiresCmek above — gates the ambulanceLocations
+    // read below on the org's own toggle, not just org membership,
+    // mirroring publishAmbulanceLocation's own server-side re-check
+    // (functions/src/ems.ts).
+    function orgHasMultipleAmbulanceView(orgId) {
+      return get(/databases/$(database)/documents/organizations/$(orgId)).data.get('enableMultipleAmbulanceView', false) == true;
+    }
+
     // Defense-in-depth for the patients rules below: a shape check, not a
     // cryptographic guarantee (rules can't verify a blob actually decrypts
     // correctly, only that it looks like one) — see functions/src/kms.ts's
@@ -174,6 +182,26 @@ service cloud.firestore {
     // directly.
     match /hospitals/{hospitalId} {
       allow read: if isSuperAdmin() || sameOrgAsCaller(resource.data.get('organizationId', null));
+      allow write: if false;
+    }
+
+    // Live ambulance-fleet positions — physician's multi-ambulance map.
+    // A flat top-level collection with organizationId denormalized onto
+    // each doc, same shape as hospitals just above — NOT a subcollection
+    // (see ambulanceLocationRef's own comment in functions/src/ems.ts:
+    // there's no parent document an ambulance belongs to). Physician
+    // queries this with a plain `.where('organizationId', ...)` — a
+    // normal COLLECTION-scope query, not collectionGroup(...) — so the
+    // top-level-wildcard form the `location` block above needs for its
+    // own collection-group query does NOT apply here; a normal match is
+    // correct and sufficient. Read is additionally gated on the org's own
+    // enableMultipleAmbulanceView flag, not just membership — see
+    // orgHasMultipleAmbulanceView above. Only ever written by
+    // publishAmbulanceLocation (Admin SDK, bypasses these rules).
+    match /ambulanceLocations/{docId} {
+      allow read: if isSuperAdmin()
+        || (sameOrgAsCaller(resource.data.get('organizationId', null))
+            && orgHasMultipleAmbulanceView(resource.data.get('organizationId', null)));
       allow write: if false;
     }
 

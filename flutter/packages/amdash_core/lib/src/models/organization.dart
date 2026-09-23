@@ -8,6 +8,7 @@ class Organization {
     this.cmekRequested,
     this.auditLoggingEnabled,
     this.fhirExportEnabled,
+    this.enableMultipleAmbulanceView,
   });
 
   factory Organization.fromFirestore(String id, Map<String, Object?> data) {
@@ -23,6 +24,7 @@ class Organization {
       cmekRequested: data['cmekRequested'] as bool?,
       auditLoggingEnabled: data['auditLoggingEnabled'] as bool?,
       fhirExportEnabled: data['fhirExportEnabled'] as bool?,
+      enableMultipleAmbulanceView: data['enableMultipleAmbulanceView'] as bool?,
     );
   }
 
@@ -43,4 +45,12 @@ class Organization {
   // Same nullable-here/defaulted-at-the-call-site convention as every
   // other toggle on this class.
   final bool? fhirExportEnabled;
+
+  // Gates the whole ambulance-location feature: physician's fleet map
+  // filter options, EMS's mandatory Ambulance ID prompt, and the
+  // publishAmbulanceLocation callable itself (functions/src/ems.ts
+  // re-checks this server-side on every call, never trusting client UI
+  // alone). Null (never set) means disabled — same opt-in convention as
+  // fhirExportEnabled.
+  final bool? enableMultipleAmbulanceView;
 }

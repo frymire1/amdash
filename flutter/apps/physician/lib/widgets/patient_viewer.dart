@@ -507,7 +507,7 @@ class _LiveMapCardState extends ConsumerState<_LiveMapCard> with TickerProviderS
       // (Angular never set preserveViewport, so this was always on).
       if (mounted && result.polylinePoints.isNotEmpty) {
         _mapController?.animateCamera(
-          CameraUpdate.newLatLngBounds(_boundsFromPoints(result.polylinePoints), 40),
+          CameraUpdate.newLatLngBounds(boundsFromPoints(result.polylinePoints), 40),
         );
       }
     } catch (_) {
@@ -516,20 +516,6 @@ class _LiveMapCardState extends ConsumerState<_LiveMapCard> with TickerProviderS
     } finally {
       _pendingDirectionsFetches.remove(patientId);
     }
-  }
-
-  LatLngBounds _boundsFromPoints(List<LatLng> points) {
-    var minLat = points.first.latitude;
-    var maxLat = points.first.latitude;
-    var minLng = points.first.longitude;
-    var maxLng = points.first.longitude;
-    for (final point in points) {
-      if (point.latitude < minLat) minLat = point.latitude;
-      if (point.latitude > maxLat) maxLat = point.latitude;
-      if (point.longitude < minLng) minLng = point.longitude;
-      if (point.longitude > maxLng) maxLng = point.longitude;
-    }
-    return LatLngBounds(southwest: LatLng(minLat, minLng), northeast: LatLng(maxLat, maxLng));
   }
 
   void _openExpandedMap() {
@@ -616,7 +602,7 @@ class _LiveMapCardState extends ConsumerState<_LiveMapCard> with TickerProviderS
         // fit to it immediately instead of waiting for the next refresh.
         if (directionsResult != null && directionsResult.polylinePoints.isNotEmpty) {
           controller.animateCamera(
-            CameraUpdate.newLatLngBounds(_boundsFromPoints(directionsResult.polylinePoints), 40),
+            CameraUpdate.newLatLngBounds(boundsFromPoints(directionsResult.polylinePoints), 40),
           );
         }
       },

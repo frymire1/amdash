@@ -23,6 +23,7 @@ import { SetOrganizationCountryRequest } from './classes/set-organization-countr
 import { SetOrganizationCmekRequest } from './classes/set-organization-cmek-request';
 import { SetOrganizationAuditLoggingRequest } from './classes/set-organization-audit-logging-request';
 import { SetOrganizationFhirExportRequest } from './classes/set-organization-fhir-export-request';
+import { SetOrganizationMultipleAmbulanceViewRequest } from './classes/set-organization-multiple-ambulance-view-request';
 import { ListAuditLogRequest } from './classes/list-audit-log-request';
 import { GeocodeResult } from './classes/geocode-result';
 import { REGION, findUserByEmail, getCallerProfile } from './auth';
@@ -867,6 +868,36 @@ export const setOrganizationFhirExportEnabled = onCall<SetOrganizationFhirExport
     });
 
     return { fhirExportEnabled };
+  },
+);
+
+// Toggles the whole ambulance-location feature for this org: physician's
+// fleet-map filter options, EMS's mandatory Ambulance ID prompt, and the
+// publishAmbulanceLocation callable itself (functions/src/ems.ts) — that
+// callable re-checks this same flag on every call, same "never trust
+// client-side UI alone" reasoning as setOrganizationFhirExportEnabled
+// above.
+export const setOrganizationMultipleAmbulanceView = onCall<SetOrganizationMultipleAmbulanceViewRequest>(
+  { region: REGION },
+  async (request) => {
+    const profile = await getCallerProfile(request.auth?.uid);
+    requireAdmin(profile, 'Only admins can change multiple ambulance view settings.');
+
+    const { enableMultipleAmbulanceView } = request.data;
+    if (typeof enableMultipleAmbulanceView !== 'boolean') {
+      throw new HttpsError('invalid-argument', 'enableMultipleAmbulanceView must be a boolean.');
+    }
+
+    await getFirestore().collection('organizations').doc(profile.organizationId as string).update({ enableMultipleAmbulanceView });
+
+    await logAudit({
+      action: 'organization.setMultipleAmbulanceView',
+      actor: profile,
+      organizationId: profile.organizationId,
+      details: { enableMultipleAmbulanceView },
+    });
+
+    return { enableMultipleAmbulanceView };
   },
 );
 

@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:physician/utils/geo.dart';
 
 // R * (1 degree in radians) — a pure latitude-only (or, at the equator,
@@ -38,6 +39,26 @@ void main() {
       final distance = distanceMeters(0.01, -0.01, -0.01, 0.01);
       expect(distance, greaterThan(0));
       expect(distance, lessThan(_oneDegreeMeters));
+    });
+  });
+
+  group('boundsFromPoints', () {
+    test('a single point produces a zero-area box at that point', () {
+      final bounds = boundsFromPoints(const [LatLng(45.4, -75.7)]);
+      expect(bounds.southwest, const LatLng(45.4, -75.7));
+      expect(bounds.northeast, const LatLng(45.4, -75.7));
+    });
+
+    test('takes the min/max across every point, regardless of input order', () {
+      final bounds = boundsFromPoints(const [LatLng(45.4, -75.7), LatLng(46.0, -76.0), LatLng(44.9, -75.5)]);
+      expect(bounds.southwest, const LatLng(44.9, -76.0));
+      expect(bounds.northeast, const LatLng(46.0, -75.5));
+    });
+
+    test('duplicate points collapse to the same zero-area box as a single point', () {
+      final bounds = boundsFromPoints(const [LatLng(45.4, -75.7), LatLng(45.4, -75.7)]);
+      expect(bounds.southwest, const LatLng(45.4, -75.7));
+      expect(bounds.northeast, const LatLng(45.4, -75.7));
     });
   });
 }
