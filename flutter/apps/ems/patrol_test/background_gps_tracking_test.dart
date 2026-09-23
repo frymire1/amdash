@@ -59,6 +59,27 @@ import 'package:patrol/patrol.dart';
 // the claim credible.
 const _backgroundedWait = Duration(seconds: 40);
 
+// Retries the whole find-then-tap cycle, not just the initial wait — same
+// reasoning as ems_test.dart's own tapCardButton retry: a real GHA
+// failure there found pumpUntil locating the target, then tapFinder's own
+// tap() throwing "Found 0 widgets" moments later, since the screen
+// rebuilds on every Firestore/Riverpod snapshot from a live watch. Hit
+// for real here too, on the "Add Patient" tap specifically (2026-09-22 CI
+// run, right after HomeScreen's own pumpUntil found it) — same root
+// cause, same fix.
+Future<void> _retryTap(PatrolIntegrationTester $, Finder finder) async {
+  for (var attempt = 0; attempt < 3; attempt++) {
+    await pumpUntil($, () => finder.evaluate().isNotEmpty, maxIterations: 30);
+    try {
+      await tapFinder($, finder);
+      return;
+    } catch (_) {
+      if (attempt == 2) rethrow;
+      await $.pump(const Duration(milliseconds: 300));
+    }
+  }
+}
+
 void main() {
   patrolTest('a live-tracked patient keeps publishing GPS fixes while the app is backgrounded', (
     $,
@@ -78,7 +99,7 @@ void main() {
 
     final patientName = 'Patrol Background GPS Test Patient ${DateTime.now().millisecondsSinceEpoch}';
 
-    await tapText($, 'Add Patient');
+    await _retryTap($, find.text('Add Patient'));
     await pumpUntil($, () => find.byType(PatientUploadScreen).evaluate().isNotEmpty);
 
     // Grants "While Using" for real via Patrol's native permission API —
@@ -119,7 +140,7 @@ void main() {
     // suite, which explicitly turns it off to dodge the permission
     // dependency this test exists to exercise.
     await settleLocationPrompts($, grantLocation: true);
-    await tapKey($, 'patient_upload_submit');
+    await _retryTap($, find.byKey(const Key('patient_upload_submit')));
 
     final patientCard = find.descendant(of: find.byType(PatientSummaryCard), matching: find.text(patientName));
     await pumpUntil($, () => patientCard.evaluate().isNotEmpty, maxIterations: 40);
