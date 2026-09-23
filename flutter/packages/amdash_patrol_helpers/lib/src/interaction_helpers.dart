@@ -55,20 +55,39 @@ Future<void> tapIcon(PatrolIntegrationTester $, IconData icon) => tapFinder($, f
 /// visibly changed (e.g. new title text present). Patrol's own high-level
 /// `.enterText()` waits up to 10s before acting; this loop is that same
 /// safety net without going through Patrol's own hit-testable check.
+///
+/// Retries the whole wait-then-enter cycle, not just the initial wait —
+/// same reasoning as [tapFinder]'s own retry-wrapped callers elsewhere in
+/// this codebase (e.g. ems_test.dart's tapCardButton): the existence
+/// check above and the actual `enterText` call are two separate awaits
+/// with a rebuild-prone gap between them (ensureVisible + a pump), and a
+/// live Firestore/Riverpod-backed screen can rebuild in that exact
+/// window — confirmed for real via two independent CI failures (2026-09)
+/// where the wait loop's own check had already passed, yet
+/// `find.byType(TextField).at(index)` still threw "no indices are valid"
+/// moments later.
 Future<void> enterTextAt(PatrolIntegrationTester $, int index, String text) async {
-  for (var i = 0; i < 20; i++) {
-    if (find.byType(TextField).evaluate().length > index) break;
+  for (var attempt = 0; attempt < 3; attempt++) {
+    for (var i = 0; i < 20; i++) {
+      if (find.byType(TextField).evaluate().length > index) break;
+      await $.pump(const Duration(milliseconds: 200));
+    }
+    final finder = find.byType(TextField).at(index);
+    try {
+      await $.tester.ensureVisible(finder);
+    } catch (_) {
+      // Best-effort — see tapFinder's own doc comment.
+    }
     await $.pump(const Duration(milliseconds: 200));
+    try {
+      await $.tester.enterText(finder, text);
+      await $.pump(const Duration(milliseconds: 400));
+      return;
+    } catch (_) {
+      if (attempt == 2) rethrow;
+      await $.pump(const Duration(milliseconds: 300));
+    }
   }
-  final finder = find.byType(TextField).at(index);
-  try {
-    await $.tester.ensureVisible(finder);
-  } catch (_) {
-    // Best-effort — see tapFinder's own doc comment.
-  }
-  await $.pump(const Duration(milliseconds: 200));
-  await $.tester.enterText(finder, text);
-  await $.pump(const Duration(milliseconds: 400));
 }
 
 /// Polls with fixed pumps rather than a one-shot wait — network round
