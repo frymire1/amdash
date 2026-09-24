@@ -98,6 +98,27 @@ void main() {
     await signInWithTotp($, email, password, totpSecret);
     await pumpUntil($, () => find.byType(HomeScreen).evaluate().isNotEmpty, maxIterations: 50);
 
+    // HomeScreen's own uploadedPatientsProvider watch keeps rebuilding the
+    // screen for a while after this: first once the live Firestore
+    // snapshot resolves (the CircularProgressIndicator below is that
+    // signal), then AGAIN once withCachedDecryptedFields' own
+    // decryptPatientFields Cloud Function round trip resolves for any of
+    // this shared persistent account's existing patients — a real network
+    // call with no visible loading indicator at all. Confirmed as the real
+    // cause of this test's own recurring "Add Patient" tap flakiness
+    // (2026-09-22/23 CI runs, both a "Found 0 widgets" and a "found the
+    // widget but the tap didn't register" variant) via the Test Lab
+    // logcat: repeated tap failures roughly 2s apart, matching two
+    // separate rebuild waves rather than one. Two rounds of retrying the
+    // tap itself (_retryTap below, and amdash_patrol_helpers' own
+    // enterTextAt hardening) didn't fix it, since retrying doesn't help if
+    // every retry still lands inside an active rebuild — waiting for the
+    // known rebuild sources to actually finish first does. The spinner
+    // wait covers the first rebuild; the fixed buffer covers the second,
+    // unsignaled one (no widget-tree state to poll for it specifically).
+    await pumpUntil($, () => find.byType(CircularProgressIndicator).evaluate().isEmpty, maxIterations: 30);
+    await $.pump(const Duration(seconds: 3));
+
     final patientName = 'Patrol Background GPS Test Patient ${DateTime.now().millisecondsSinceEpoch}';
 
     await _retryTap($, find.text('Add Patient'));
