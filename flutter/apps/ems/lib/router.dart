@@ -17,8 +17,30 @@ import 'services/ambulance_id_service.dart';
 class _EmsRouterRefreshNotifier extends ChangeNotifier {
   _EmsRouterRefreshNotifier(Ref ref) {
     _inner = RouterRefreshNotifier(ref)..addListener(notifyListeners);
-    ref.listen(ambulanceIdProvider, (_, _) => notifyListeners());
-    ref.listen(ownOrganizationProvider, (_, _) => notifyListeners());
+    // Only the *value* AmbulanceIdGuard actually branches on, not every
+    // raw emission — a live Firestore listener (ownOrganizationProvider)
+    // commonly re-emits more than once for what's effectively the same
+    // data (a local-cache echo, then the server-acknowledged write), and
+    // each notifyListeners() call makes GoRouter re-evaluate its whole
+    // redirect chain, which can rebuild the *currently displayed* route
+    // too even when nothing about the redirect decision changes. Comparing
+    // against the guard's own inputs keeps that down to real changes only
+    // — this app is the one Flutter e2e failure this session (a rebuild
+    // landing between finding and reading a widget, on the shared
+    // MFA-enrollment screen — see amdash_patrol_helpers' own
+    // _readMfaSecret comment) ever actually happened on, and this is the
+    // one extra source of router-driven rebuild churn EMS alone carries
+    // that physician/admin don't.
+    ref.listen(ambulanceIdProvider, (previous, next) {
+      if (previous?.valueOrNull == next.valueOrNull) return;
+      notifyListeners();
+    });
+    ref.listen(ownOrganizationProvider, (previous, next) {
+      if (previous?.valueOrNull?.enableMultipleAmbulanceView == next.valueOrNull?.enableMultipleAmbulanceView) {
+        return;
+      }
+      notifyListeners();
+    });
   }
 
   late final RouterRefreshNotifier _inner;

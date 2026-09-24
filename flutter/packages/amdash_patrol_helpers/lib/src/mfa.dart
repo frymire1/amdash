@@ -100,11 +100,17 @@ Future<void> signInWithTotp(
 // claimPasswordlessAccount (set-password + immediate sign-in) rather
 // than the plainer signIn() path this helper was originally proven
 // against; something about that extra async hop makes the setup screen
-// more prone to an intermediate rebuild here, though not so much that
-// this needed a `maxIterations` bump — the second attempt reliably
-// finds it, once already fully settled.
+// more prone to an intermediate rebuild here.
+//
+// Attempts bumped from 3 to 5 (2026-09-24): the same race recurred on
+// EMS's own first_login_test.dart, this time exhausting all 3 attempts —
+// EMS's router refreshes more often than physician/admin's own while a
+// fresh account is settling (see ems/lib/router.dart's own
+// _EmsRouterRefreshNotifier comment, hardened the same day to reduce how
+// often that happens at all), so a bit more retry budget here is
+// reasonable insurance on top of that fix, not a replacement for it.
 Future<String> _readMfaSecret(PatrolIntegrationTester $) async {
-  for (var attempt = 0; attempt < 3; attempt++) {
+  for (var attempt = 0; attempt < 5; attempt++) {
     await pumpUntil(
       $,
       () => find.byKey(const Key('mfa_secret_key')).evaluate().isNotEmpty,
@@ -113,7 +119,7 @@ Future<String> _readMfaSecret(PatrolIntegrationTester $) async {
     try {
       return $.tester.widget<SelectableText>(find.byKey(const Key('mfa_secret_key'))).data!;
     } catch (_) {
-      if (attempt == 2) rethrow;
+      if (attempt == 4) rethrow;
       await $.pump(const Duration(milliseconds: 300));
     }
   }
