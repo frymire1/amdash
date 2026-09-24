@@ -68,6 +68,12 @@ void main() {
       await tapText($, 'Set Password');
 
       await completeMfaEnrollment($);
+      // Must run before the HomeScreen wait below — see this helper's own
+      // doc comment for the real race it closes (test-org has
+      // enableMultipleAmbulanceView on, so a fresh account/device gets
+      // redirected to the mandatory Ambulance ID prompt before ever
+      // reaching HomeScreen).
+      await settleAmbulanceIdPrompt($);
 
       await pumpUntil(
         $,

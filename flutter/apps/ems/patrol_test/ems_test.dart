@@ -143,6 +143,12 @@ void main() {
       // on a different platform/renderer than where it was originally
       // found.
       await signInWithTotp($, email, password, totpSecret);
+      // Must run before the HomeScreen wait below, not after — see this
+      // helper's own doc comment for the real race it closes (test-org
+      // has enableMultipleAmbulanceView on, so a fresh Test Lab device
+      // gets redirected to the mandatory Ambulance ID prompt before ever
+      // reaching HomeScreen).
+      await settleAmbulanceIdPrompt($);
 
       // Was $(HomeScreen).waitUntilVisible(...) — Patrol's own hit-test
       // check proved unreliable on Flutter Web here (confirmed for the

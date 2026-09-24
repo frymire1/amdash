@@ -3,6 +3,7 @@
 /// this instead of defining its own copies of these functions.
 library;
 
+export 'src/ambulance_id_prompt.dart';
 export 'src/interaction_helpers.dart';
 export 'src/location_prompts.dart';
 export 'src/mfa.dart';

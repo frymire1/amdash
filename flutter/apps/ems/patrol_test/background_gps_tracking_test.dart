@@ -96,6 +96,13 @@ void main() {
     await $.pumpWidgetAndSettle(const ProviderScope(child: EmsApp()));
 
     await signInWithTotp($, email, password, totpSecret);
+    // Must run before the HomeScreen wait below — see this helper's own
+    // doc comment for the real race it closes (test-org has
+    // enableMultipleAmbulanceView on, so a fresh Test Lab device gets
+    // redirected to the mandatory Ambulance ID prompt before ever
+    // reaching HomeScreen; this is what "Found 0 widgets with text 'Add
+    // Patient'" actually traced back to, not a rebuild-timing flake).
+    await settleAmbulanceIdPrompt($);
     await pumpUntil($, () => find.byType(HomeScreen).evaluate().isNotEmpty, maxIterations: 50);
 
     // HomeScreen's own uploadedPatientsProvider watch keeps rebuilding the
