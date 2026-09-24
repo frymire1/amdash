@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_functions/cloud_functions.dart';
@@ -97,8 +98,52 @@ class EmsTrackingTaskHandler extends TaskHandler {
   String? _ambulanceId;
   DateTime? _lastAmbulancePublishAt;
 
+  // The most recent fix from the persistent stream below — read directly
+  // by _publishAllTracked instead of a fresh per-tick request. See
+  // _ensurePositionStream's own doc comment for why a one-shot request
+  // per tick doesn't work here.
+  Position? _lastPosition;
+  StreamSubscription<Position>? _positionSubscription;
+
   FirebaseFunctions get _functionsInstance =>
       _functions ??= _functionsOverride ?? FirebaseFunctions.instanceFor(region: functionsRegion); // coverage:ignore-line
+
+  /// A single, long-lived position stream for this isolate's entire
+  /// lifetime, rather than a fresh `Geolocator.getCurrentPosition()`
+  /// one-shot request on every 15s tick (the original design). Confirmed
+  /// via a real Firebase Test Lab run's full logcat (not just its own
+  /// debugPrint output — the raw GCS logcat, since the CI step's own
+  /// filtered dump truncates at 20000 bytes) that switching this isolate
+  /// truly backgrounded broke `getCurrentPosition()` outright: the
+  /// device's real GNSS hardware kept delivering fixes at the native layer
+  /// throughout (`Gnss:onGnssLocationCb` firing roughly once a second, the
+  /// whole 40s window), yet `getCurrentPosition()` — called fresh on three
+  /// separate ticks, each with its own 10s `timeLimit` — never resolved
+  /// *or* rejected even once; no fix was ever recorded, and no timeout
+  /// error was ever logged either. A one-shot request appears not to bind
+  /// reliably to this isolate's own location-provider client once the
+  /// host Activity is genuinely backgrounded, even though the isolate
+  /// itself (kept alive by the foreground-service exemption) is still
+  /// very much running. A persistent stream, established once in
+  /// [onStart] rather than re-requested every tick, is the same mechanism
+  /// this app's own iOS path already uses successfully
+  /// (`EmsTrackingController._ensureIOSPositionStream`,
+  /// ems_tracking_service.dart) — each tick here just reads whatever
+  /// [_lastPosition] the stream has already delivered, rather than
+  /// blocking on a fresh request of its own.
+  void _ensurePositionStream() {
+    if (_positionSubscription != null) return;
+    _positionSubscription = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 0),
+    ).listen(
+      (position) => _lastPosition = position,
+      // A stream error just means fixes stop updating — the next tick's
+      // own "no position yet" branch in _publishAllTracked is what
+      // surfaces that (via debugLastFixAtMs going stale on the main
+      // isolate side), not a crash here.
+      onError: (Object error) => debugPrint('EmsTrackingTaskHandler: position stream error: $error'),
+    );
+  }
 
   // Firebase.initializeApp is genuine isolate-bootstrap glue — same
   // category TESTING.md already excludes main.dart's own call for
@@ -119,6 +164,7 @@ class EmsTrackingTaskHandler extends TaskHandler {
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     await _ensureFirebase();
+    _ensurePositionStream();
   }
 
   @override
@@ -152,25 +198,22 @@ class EmsTrackingTaskHandler extends TaskHandler {
 
     if (_trackedPatientIds.isEmpty && !ambulanceDue) return;
     await _ensureFirebase();
+    // Real device/isolate-context bootstrapping — see this getter's own
+    // constructor-comment reasoning for why _ensureFirebase runs first,
+    // same idea here: the stream is idempotently (re-)ensured on every
+    // tick in case onStart's own call somehow hasn't landed yet by the
+    // very first tick, though in practice it always has by then.
+    _ensurePositionStream();
 
-    final Position position;
-    try {
-      position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 10),
-        ),
-      );
-    } catch (error) {
-      // Same tolerance as the web version: a revoked/unavailable permission
-      // just means this cycle's publish is skipped, not a crash. Also means
-      // no fix is reported back, so the main isolate's freshness clock goes
-      // stale and the chip falls back to "No GPS Signal" — the intended
-      // behavior when GPS drops mid-transport. Logged, not just silently
-      // swallowed — confirmed for real this silence cost real debugging
-      // time once already (a genuine failure here was indistinguishable
-      // from the service simply not running at all).
-      debugPrint('EmsTrackingTaskHandler._publishAllTracked: getCurrentPosition failed: $error');
+    final position = _lastPosition;
+    if (position == null) {
+      // No fix delivered yet — same tolerance as the old one-shot
+      // request's own failure path: this cycle's publish is skipped, not
+      // a crash, and no fix is reported back, so the main isolate's
+      // freshness clock goes stale and the chip falls back to "No GPS
+      // Signal". Logged for the same visibility reason the one-shot
+      // version's own catch block was.
+      debugPrint('EmsTrackingTaskHandler._publishAllTracked: no position fix yet');
       return;
     }
 
@@ -241,5 +284,8 @@ class EmsTrackingTaskHandler extends TaskHandler {
     _trackedPatientIds.clear();
     _ambulanceId = null;
     _lastAmbulancePublishAt = null;
+    await _positionSubscription?.cancel();
+    _positionSubscription = null;
+    _lastPosition = null;
   }
 }
