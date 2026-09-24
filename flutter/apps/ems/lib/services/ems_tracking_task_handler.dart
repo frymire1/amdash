@@ -219,13 +219,14 @@ class EmsTrackingTaskHandler extends TaskHandler {
 
     // A fix genuinely came through — let the main isolate know so its
     // status chip stays "live" (see EmsTrackingController._onTaskData).
-    // Temporary diagnostic print bracketing this call — see
-    // EmsTrackingController._onTaskData's own identical temporary comment
-    // for why (narrows down whether this call is even reached/completing
-    // on a real device, vs. the main isolate side not receiving it).
-    debugPrint('EmsTrackingTaskHandler._publishAllTracked: calling sendDataToMain($emsFixReportSignal)');
+    // Reaching the main isolate at all depends on
+    // FlutterForegroundTask.initCommunicationPort() having been called on
+    // that side (main.dart's own real bootstrap does; a Patrol test has
+    // to call it too, since it constructs EmsApp() directly rather than
+    // going through main() — see background_gps_tracking_test.dart's own
+    // doc comment for the real failure chasing this down without that
+    // context cost, before finding it).
     FlutterForegroundTask.sendDataToMain(emsFixReportSignal);
-    debugPrint('EmsTrackingTaskHandler._publishAllTracked: sendDataToMain call returned');
 
     for (final patientId in _trackedPatientIds.toList()) {
       try {
@@ -234,9 +235,6 @@ class EmsTrackingTaskHandler extends TaskHandler {
           'latitude': position.latitude,
           'longitude': position.longitude,
         });
-        // Temporary diagnostic — see the debugPrint above this method's
-        // own sendDataToMain call for why.
-        debugPrint('EmsTrackingTaskHandler._publishAllTracked: publishEmsLocation succeeded for $patientId');
       } catch (error) {
         // Swallowed the same way the web interval's recurring publishes
         // are — the main isolate's own confirming publish (see

@@ -3,8 +3,7 @@ import 'dart:convert';
 
 import 'package:amdash_core/amdash_core.dart';
 import 'package:cloud_functions/cloud_functions.dart';
-import 'package:flutter/foundation.dart'
-    show TargetPlatform, debugPrint, defaultTargetPlatform, kIsWeb, visibleForTesting;
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb, visibleForTesting;
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -183,14 +182,6 @@ class EmsTrackingController extends Notifier<Set<String>> {
   void _registerIdleActivity() => ref.read(externalActivityProvider.notifier).register();
 
   void _onTaskData(Object data) {
-    // Temporary diagnostic — narrows down whether the background isolate's
-    // own sendDataToMain call is actually reaching the main isolate at all
-    // on a real device (background_gps_tracking_test.dart's own baseline/
-    // resumed debugLastFixAtMs values have come back identical across two
-    // real Test Lab runs even once the isolate's own position stream was
-    // confirmed delivering fixes — this print is what actually tells the
-    // two possibilities apart). Remove once that's resolved.
-    debugPrint('EmsTrackingController._onTaskData: received $data');
     if (data == emsFixReportSignal) _recordFix();
   }
 

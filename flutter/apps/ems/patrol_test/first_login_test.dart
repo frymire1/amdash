@@ -26,6 +26,7 @@ import 'package:ems/services/ems_alert_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:patrol/patrol.dart';
@@ -46,6 +47,13 @@ void main() {
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
       );
+      // main.dart's own real bootstrap calls this before runApp() — a
+      // Patrol test constructs EmsApp() directly instead, so this needs
+      // its own call too (this file is Android-only, so no kIsWeb guard
+      // needed the way ems_test.dart's own identical call has — see that
+      // file's doc comment, and background_gps_tracking_test.dart's own
+      // for the real failure this fixes).
+      FlutterForegroundTask.initCommunicationPort();
       await $.pumpWidgetAndSettle(const ProviderScope(child: EmsApp()));
 
       await enterTextAt($, 0, email);

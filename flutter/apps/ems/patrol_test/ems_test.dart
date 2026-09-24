@@ -45,6 +45,7 @@ import 'package:ems/widgets/patient_summary_card.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:patrol/patrol.dart';
@@ -77,6 +78,14 @@ void main() {
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
       );
+      // main.dart's own real bootstrap calls this (guarded the same way,
+      // web has no flutter_foreground_task implementation at all) before
+      // runApp() — a Patrol test constructs EmsApp() directly instead, so
+      // this needs its own call too. See background_gps_tracking_test
+      // .dart's own doc comment for the real failure this fixes
+      // (EmsTrackingTaskHandler's sendDataToMain calls were silently
+      // reaching nothing without it).
+      if (!kIsWeb) FlutterForegroundTask.initCommunicationPort();
       await $.pumpWidgetAndSettle(const ProviderScope(child: EmsApp()));
 
       // ---- Phase 0 (web only): a physician-role account is rejected at

@@ -93,6 +93,22 @@ void main() {
     expect(totpSecret, isNotEmpty, reason: 'pass --dart-define=SMOKE_TOTP_SECRET=...');
 
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    // main.dart's own real bootstrap calls this before runApp() — a Patrol
+    // test constructs EmsApp() directly instead (same reason
+    // Firebase.initializeApp is duplicated here rather than relied on from
+    // main()), so this needs its own call too. Missing this is exactly
+    // what made this test's own core assertion fail on every real Test
+    // Lab run so far: without it, IsolateNameServer never has anything
+    // registered under flutter_foreground_task's receive port name, so
+    // EmsTrackingTaskHandler's own sendDataToMain calls (confirmed via a
+    // temporary diagnostic print, now removed, to return successfully on
+    // every tick) were silently sending into a void — no crash, no error,
+    // just nothing on the other end. EmsTrackingController._onTaskData
+    // genuinely never fired, even though the real underlying feature this
+    // test exists to verify (a GPS fix actually reaching
+    // publishEmsLocation while backgrounded) was working correctly the
+    // whole time.
+    FlutterForegroundTask.initCommunicationPort();
     await $.pumpWidgetAndSettle(const ProviderScope(child: EmsApp()));
 
     await signInWithTotp($, email, password, totpSecret);
