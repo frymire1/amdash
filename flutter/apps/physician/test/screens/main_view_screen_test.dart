@@ -6,6 +6,7 @@ import 'package:physician/screens/main_view_screen.dart';
 import 'package:physician/services/ambulance_location_service.dart';
 import 'package:physician/services/ems_location_service.dart';
 import 'package:physician/services/patient_service.dart';
+import 'package:physician/widgets/ambulance_list.dart';
 import 'package:physician/widgets/multiple_ambulance_view.dart';
 import 'package:physician/widgets/patient_card.dart';
 import 'package:physician/widgets/patient_list.dart';
@@ -182,39 +183,11 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('All Ambulances'), findsNothing);
-      expect(find.text('Transporting'), findsNothing);
+      expect(find.text('Empty'), findsNothing);
       expect(find.byType(PatientList), findsOneWidget);
     });
 
-    testWidgets('the view-mode control shows once the org flag is on, defaulting to Patients', (tester) async {
-      await pumpScreen(
-        tester,
-        organization: const Organization(id: 'org-1', name: 'Org', enableMultipleAmbulanceView: true),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.text('All Ambulances'), findsOneWidget);
-      expect(find.text('Transporting'), findsOneWidget);
-      expect(find.byType(PatientList), findsOneWidget);
-      expect(find.byType(MultipleAmbulanceView), findsNothing);
-    });
-
-    testWidgets('selecting "All Ambulances" swaps the body for MultipleAmbulanceView(filter: all)', (tester) async {
-      await pumpScreen(
-        tester,
-        organization: const Organization(id: 'org-1', name: 'Org', enableMultipleAmbulanceView: true),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('All Ambulances'));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(PatientList), findsNothing);
-      final view = tester.widget<MultipleAmbulanceView>(find.byType(MultipleAmbulanceView));
-      expect(view.filter, AmbulanceViewFilter.all);
-    });
-
-    testWidgets('selecting "Transporting" swaps the body for MultipleAmbulanceView(filter: transportingOnly)', (
+    testWidgets('the view-mode control shows once the org flag is on, defaulting to Active Patients', (
       tester,
     ) async {
       await pumpScreen(
@@ -223,14 +196,53 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Transporting'));
-      await tester.pumpAndSettle();
-
-      final view = tester.widget<MultipleAmbulanceView>(find.byType(MultipleAmbulanceView));
-      expect(view.filter, AmbulanceViewFilter.transportingOnly);
+      expect(find.text('Active Patients'), findsOneWidget);
+      expect(find.text('All Ambulances'), findsOneWidget);
+      expect(find.text('Empty'), findsOneWidget);
+      expect(find.byType(PatientList), findsOneWidget);
+      expect(find.byType(MultipleAmbulanceView), findsNothing);
     });
 
-    testWidgets('switching back to "Patients" restores the normal list/viewer body', (tester) async {
+    testWidgets(
+      'selecting "All Ambulances" swaps the viewer for MultipleAmbulanceView(filter: all), '
+      'keeping the sidebar in place as AmbulanceList',
+      (tester) async {
+        await pumpScreen(
+          tester,
+          organization: const Organization(id: 'org-1', name: 'Org', enableMultipleAmbulanceView: true),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('All Ambulances'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(PatientList), findsNothing);
+        expect(find.byType(AmbulanceList), findsOneWidget);
+        final view = tester.widget<MultipleAmbulanceView>(find.byType(MultipleAmbulanceView));
+        expect(view.filter, AmbulanceViewFilter.all);
+      },
+    );
+
+    testWidgets(
+      'selecting "Empty" swaps the viewer for MultipleAmbulanceView(filter: emptyOnly), '
+      'keeping the sidebar in place',
+      (tester) async {
+        await pumpScreen(
+          tester,
+          organization: const Organization(id: 'org-1', name: 'Org', enableMultipleAmbulanceView: true),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Empty'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(AmbulanceList), findsOneWidget);
+        final view = tester.widget<MultipleAmbulanceView>(find.byType(MultipleAmbulanceView));
+        expect(view.filter, AmbulanceViewFilter.emptyOnly);
+      },
+    );
+
+    testWidgets('switching back to "Active Patients" restores the normal list/viewer body', (tester) async {
       await pumpScreen(
         tester,
         organization: const Organization(id: 'org-1', name: 'Org', enableMultipleAmbulanceView: true),
@@ -239,11 +251,57 @@ void main() {
 
       await tester.tap(find.text('All Ambulances'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Patients'));
+      await tester.tap(find.text('Active Patients'));
       await tester.pumpAndSettle();
 
       expect(find.byType(PatientList), findsOneWidget);
+      expect(find.byType(AmbulanceList), findsNothing);
       expect(find.byType(MultipleAmbulanceView), findsNothing);
+    });
+  });
+
+  group('narrow-width ambulance mode (its own list/map toggle)', () {
+    testWidgets('defaults to the map, with a button to reveal the ambulance list', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(400, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await pumpScreen(
+        tester,
+        organization: const Organization(id: 'org-1', name: 'Org', enableMultipleAmbulanceView: true),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('All Ambulances'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(MultipleAmbulanceView), findsOneWidget);
+      expect(find.byType(AmbulanceList), findsNothing);
+      expect(find.text('Ambulance List'), findsOneWidget);
+    });
+
+    testWidgets('the "Ambulance List" button reveals the list, with a button back to the map', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(400, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await pumpScreen(
+        tester,
+        organization: const Organization(id: 'org-1', name: 'Org', enableMultipleAmbulanceView: true),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('All Ambulances'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Ambulance List'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AmbulanceList), findsOneWidget);
+      expect(find.byType(MultipleAmbulanceView), findsNothing);
+      expect(find.text('Map'), findsOneWidget);
+
+      await tester.tap(find.text('Map'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(MultipleAmbulanceView), findsOneWidget);
+      expect(find.byType(AmbulanceList), findsNothing);
     });
   });
 }

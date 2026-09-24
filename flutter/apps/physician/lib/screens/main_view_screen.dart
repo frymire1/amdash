@@ -3,11 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/patient_service.dart';
+import '../widgets/ambulance_list.dart';
 import '../widgets/multiple_ambulance_view.dart';
 import '../widgets/patient_list.dart';
 import '../widgets/patient_viewer.dart';
 
-enum _ViewMode { patients, allAmbulances, transportingAmbulances }
+enum _ViewMode { patients, allAmbulances, emptyAmbulances }
 
 /// Mirrors `main-view.component.ts`/`.html`: patient list + patient viewer,
 /// side-by-side on wide screens, toggled between on narrow ones. The
@@ -34,6 +35,15 @@ class _MainViewScreenState extends ConsumerState<MainViewScreen> {
   // the open detail pane.
   String? _selectedPatientId;
   bool _showListOnMobile = false;
+
+  // Ambulance mode's own narrow-screen list/map toggle — kept separate
+  // from _showListOnMobile rather than reused: there's no per-ambulance
+  // "selection" the way a patient tap has (an ambulance card only ever
+  // highlights a marker, see AmbulanceCard's own doc comment), so this
+  // mode needs an explicit switch instead of _showListOnMobile's
+  // "nothing selected yet, fall back to the list" logic.
+  bool _showAmbulanceListOnMobile = false;
+
   _ViewMode _viewMode = _ViewMode.patients;
 
   void _onSelected(Patient patient) {
@@ -63,8 +73,8 @@ class _MainViewScreenState extends ConsumerState<MainViewScreen> {
     final effectiveViewMode = multipleAmbulanceViewEnabled ? _viewMode : _ViewMode.patients;
 
     final body = switch (effectiveViewMode) {
-      _ViewMode.allAmbulances => const MultipleAmbulanceView(filter: AmbulanceViewFilter.all),
-      _ViewMode.transportingAmbulances => const MultipleAmbulanceView(filter: AmbulanceViewFilter.transportingOnly),
+      _ViewMode.allAmbulances => _buildAmbulanceBody(AmbulanceViewFilter.all),
+      _ViewMode.emptyAmbulances => _buildAmbulanceBody(AmbulanceViewFilter.emptyOnly),
       _ViewMode.patients => _buildPatientBody(context, patients, selectedPatient),
     };
 
@@ -77,15 +87,15 @@ class _MainViewScreenState extends ConsumerState<MainViewScreen> {
           padding: const EdgeInsets.all(16),
           child: SegmentedButton<_ViewMode>(
             segments: const [
-              ButtonSegment(value: _ViewMode.patients, label: Text('Patients'), icon: Icon(Icons.list_alt)),
+              ButtonSegment(value: _ViewMode.patients, label: Text('Active Patients'), icon: Icon(Icons.list_alt)),
               ButtonSegment(
                 value: _ViewMode.allAmbulances,
                 label: Text('All Ambulances'),
                 icon: Icon(Icons.local_shipping),
               ),
               ButtonSegment(
-                value: _ViewMode.transportingAmbulances,
-                label: Text('Transporting'),
+                value: _ViewMode.emptyAmbulances,
+                label: Text('Empty'),
                 icon: Icon(Icons.local_shipping_outlined),
               ),
             ],
@@ -148,5 +158,66 @@ class _MainViewScreenState extends ConsumerState<MainViewScreen> {
           );
         },
       );
+  }
+
+  // Mirrors _buildPatientBody's desktop split (list pane + a vertical
+  // divider + the map), generalized for either ambulance filter — keeps
+  // AmbulanceList visible alongside the map on wide screens instead of the
+  // map replacing the whole body: switching into "All Ambulances" or
+  // "Empty" should never make the sidebar disappear. On narrow
+  // screens, defaults to the map (the primary content for this mode) with
+  // a button to reveal the ambulance list, and back.
+  Widget _buildAmbulanceBody(AmbulanceViewFilter filter) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isDesktop = constraints.maxWidth >= 768;
+        final list = AmbulanceList(filter: filter);
+        final map = MultipleAmbulanceView(filter: filter);
+
+        if (isDesktop) {
+          return Row(
+            children: [
+              SizedBox(width: constraints.maxWidth * 0.35, child: list),
+              const VerticalDivider(width: 1),
+              Expanded(child: map),
+            ],
+          );
+        }
+
+        if (_showAmbulanceListOnMobile) {
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilledButton.icon(
+                    onPressed: () => setState(() => _showAmbulanceListOnMobile = false),
+                    icon: const Icon(Icons.map),
+                    label: const Text('Map'),
+                  ),
+                ),
+              ),
+              Expanded(child: list),
+            ],
+          );
+        }
+
+        return Stack(
+          children: [
+            Positioned.fill(child: map),
+            Positioned(
+              top: 8,
+              left: 8,
+              child: FilledButton.icon(
+                onPressed: () => setState(() => _showAmbulanceListOnMobile = true),
+                icon: const Icon(Icons.list),
+                label: const Text('Ambulance List'),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 }

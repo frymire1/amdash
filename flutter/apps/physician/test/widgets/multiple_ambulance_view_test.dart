@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:physician/classes/active_ambulance_location.dart';
+import 'package:physician/services/ambulance_highlight_service.dart';
 import 'package:physician/services/ambulance_location_service.dart';
 import 'package:physician/widgets/multiple_ambulance_view.dart';
 
@@ -47,6 +49,7 @@ AmbulanceTrackingInfo _info(
 void main() {
   setUpAll(() {
     registerGoogleMapsFallbackValues();
+    registerFallbackValue(const MarkerId(''));
   });
 
   late MockGoogleMapsFlutterPlatform mapPlatform;
@@ -55,18 +58,29 @@ void main() {
     mapPlatform = installMockGoogleMaps();
   });
 
-  Future<_FakeAmbulanceLocationController> pumpView(
+  // Returns both the fake location controller and the widget tree's own
+  // ProviderContainer (via ProviderScope.containerOf, same pattern
+  // main_view_screen_test.dart's own pumpScreen uses) — the highlight
+  // tests below need the container to read/seed ambulanceHighlightProvider
+  // directly, not just the location controller.
+  Future<(_FakeAmbulanceLocationController, ProviderContainer)> pumpView(
     WidgetTester tester, {
     AmbulanceViewFilter filter = AmbulanceViewFilter.all,
     AmbulanceLocationState state = const AmbulanceLocationState(hasLoadedOnce: true),
   }) async {
     final controller = _FakeAmbulanceLocationController(state);
+    late ProviderContainer container;
     await pumpApp(
       tester,
-      MultipleAmbulanceView(filter: filter),
+      Builder(
+        builder: (context) {
+          container = ProviderScope.containerOf(context);
+          return MultipleAmbulanceView(filter: filter);
+        },
+      ),
       overrides: [ambulanceLocationProvider.overrideWith(() => controller)],
     );
-    return controller;
+    return (controller, container);
   }
 
   group('loading', () {
@@ -88,17 +102,17 @@ void main() {
       expect(find.byType(GoogleMap), findsNothing);
     });
 
-    testWidgets('transportingOnly filter shows its own empty-state copy when nothing is transporting', (
+    testWidgets('emptyOnly filter shows its own empty-state copy when nothing is empty', (
       tester,
     ) async {
       await pumpView(
         tester,
-        filter: AmbulanceViewFilter.transportingOnly,
-        state: AmbulanceLocationState(hasLoadedOnce: true, info: {'Unit 5': _info('Unit 5')}),
+        filter: AmbulanceViewFilter.emptyOnly,
+        state: AmbulanceLocationState(hasLoadedOnce: true, info: {'Unit 5': _info('Unit 5', isTransporting: true)}),
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('No ambulances are currently transporting'), findsOneWidget);
+      expect(find.text('No empty ambulances right now'), findsOneWidget);
     });
   });
 
@@ -117,10 +131,10 @@ void main() {
       expect(map.markers.map((m) => m.markerId.value), containsAll(['Unit 5', 'Unit 9']));
     });
 
-    testWidgets('transportingOnly hides idle ambulances', (tester) async {
+    testWidgets('emptyOnly hides transporting ambulances', (tester) async {
       await pumpView(
         tester,
-        filter: AmbulanceViewFilter.transportingOnly,
+        filter: AmbulanceViewFilter.emptyOnly,
         state: AmbulanceLocationState(
           hasLoadedOnce: true,
           info: {'Unit 5': _info('Unit 5'), 'Unit 9': _info('Unit 9', isTransporting: true)},
@@ -129,7 +143,7 @@ void main() {
       await tester.pumpAndSettle();
 
       final map = tester.widget<GoogleMap>(find.byType(GoogleMap));
-      expect(map.markers.map((m) => m.markerId.value), ['Unit 9']);
+      expect(map.markers.map((m) => m.markerId.value), ['Unit 5']);
     });
 
     testWidgets('a stale ambulance still shows (not hidden), same as a patient staying visible', (tester) async {
@@ -148,7 +162,7 @@ void main() {
   });
 
   group('marker info window', () {
-    testWidgets('an active idle ambulance shows "Idle"', (tester) async {
+    testWidgets('an active empty ambulance shows "Empty"', (tester) async {
       await pumpView(
         tester,
         state: AmbulanceLocationState(hasLoadedOnce: true, info: {'Unit 5': _info('Unit 5')}),
@@ -158,7 +172,7 @@ void main() {
       final map = tester.widget<GoogleMap>(find.byType(GoogleMap));
       final marker = map.markers.first;
       expect(marker.infoWindow.title, 'Unit 5');
-      expect(marker.infoWindow.snippet, 'Idle');
+      expect(marker.infoWindow.snippet, 'Empty');
     });
 
     testWidgets('an active transporting ambulance shows "Transporting a patient"', (tester) async {
@@ -274,7 +288,7 @@ void main() {
     });
 
     testWidgets('only fits once — a later snapshot does not yank the camera again', (tester) async {
-      final controller = await pumpView(
+      final (controller, _) = await pumpView(
         tester,
         state: AmbulanceLocationState(hasLoadedOnce: true, info: {'Unit 5': _info('Unit 5')}),
       );
@@ -291,6 +305,121 @@ void main() {
       await tester.pumpAndSettle();
 
       verifyNever(() => mapPlatform.animateCameraWithConfiguration(any(), any(), mapId: any(named: 'mapId')));
+    });
+  });
+
+  group('highlighting (ambulanceHighlightProvider sync)', () {
+    testWidgets('tapping a marker selects it — the reverse (marker hover) is not implemented, see this '
+        "widget's own doc comment on why", (tester) async {
+      final (_, container) = await pumpView(
+        tester,
+        state: AmbulanceLocationState(hasLoadedOnce: true, info: {'Unit 5': _info('Unit 5')}),
+      );
+      await tester.pumpAndSettle();
+
+      final map = tester.widget<GoogleMap>(find.byType(GoogleMap));
+      map.markers.first.onTap!();
+
+      expect(container.read(ambulanceHighlightProvider).selectedId, 'Unit 5');
+    });
+
+    testWidgets('the highlighted marker stays fully opaque and is raised to the front; others are dimmed', (
+      tester,
+    ) async {
+      final (_, container) = await pumpView(
+        tester,
+        state: AmbulanceLocationState(
+          hasLoadedOnce: true,
+          info: {'Unit 5': _info('Unit 5'), 'Unit 9': _info('Unit 9', latitude: 46, longitude: -76)},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      container.read(ambulanceHighlightProvider.notifier).select('Unit 5');
+      await tester.pump();
+
+      final map = tester.widget<GoogleMap>(find.byType(GoogleMap));
+      final highlighted = map.markers.firstWhere((m) => m.markerId.value == 'Unit 5');
+      final dimmed = map.markers.firstWhere((m) => m.markerId.value == 'Unit 9');
+      expect(highlighted.alpha, 1.0);
+      expect(highlighted.zIndexInt, greaterThan(dimmed.zIndexInt));
+      expect(dimmed.alpha, lessThan(1.0));
+    });
+
+    testWidgets('nothing highlighted leaves every marker fully opaque', (tester) async {
+      await pumpView(
+        tester,
+        state: AmbulanceLocationState(
+          hasLoadedOnce: true,
+          info: {'Unit 5': _info('Unit 5'), 'Unit 9': _info('Unit 9', latitude: 46, longitude: -76)},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final map = tester.widget<GoogleMap>(find.byType(GoogleMap));
+      expect(map.markers.every((m) => m.alpha == 1.0), true);
+    });
+
+    testWidgets('a highlight change shows the new marker\'s info window and hides the previous one', (
+      tester,
+    ) async {
+      when(
+        () => mapPlatform.showMarkerInfoWindow(any(), mapId: any(named: 'mapId')),
+      ).thenAnswer((_) async {});
+      when(
+        () => mapPlatform.hideMarkerInfoWindow(any(), mapId: any(named: 'mapId')),
+      ).thenAnswer((_) async {});
+
+      final (_, container) = await pumpView(
+        tester,
+        state: AmbulanceLocationState(
+          hasLoadedOnce: true,
+          info: {'Unit 5': _info('Unit 5'), 'Unit 9': _info('Unit 9', latitude: 46, longitude: -76)},
+        ),
+      );
+      await tester.pumpAndSettle();
+      await connectGoogleMap(tester, mapPlatform);
+
+      final notifier = container.read(ambulanceHighlightProvider.notifier);
+      notifier.select('Unit 5');
+      await tester.pump();
+      verify(
+        () => mapPlatform.showMarkerInfoWindow(const MarkerId('Unit 5'), mapId: any(named: 'mapId')),
+      ).called(1);
+
+      notifier.select('Unit 9');
+      await tester.pump();
+      verify(
+        () => mapPlatform.hideMarkerInfoWindow(const MarkerId('Unit 5'), mapId: any(named: 'mapId')),
+      ).called(1);
+      verify(
+        () => mapPlatform.showMarkerInfoWindow(const MarkerId('Unit 9'), mapId: any(named: 'mapId')),
+      ).called(1);
+    });
+
+    testWidgets('re-selecting the same ambulance does not re-touch the info-window platform channel', (
+      tester,
+    ) async {
+      when(
+        () => mapPlatform.showMarkerInfoWindow(any(), mapId: any(named: 'mapId')),
+      ).thenAnswer((_) async {});
+
+      final (_, container) = await pumpView(
+        tester,
+        state: AmbulanceLocationState(hasLoadedOnce: true, info: {'Unit 5': _info('Unit 5')}),
+      );
+      await tester.pumpAndSettle();
+      await connectGoogleMap(tester, mapPlatform);
+
+      final notifier = container.read(ambulanceHighlightProvider.notifier);
+      notifier.select('Unit 5');
+      await tester.pump();
+      notifier.hover('Unit 5');
+      await tester.pump();
+
+      verify(
+        () => mapPlatform.showMarkerInfoWindow(const MarkerId('Unit 5'), mapId: any(named: 'mapId')),
+      ).called(1);
     });
   });
 }
