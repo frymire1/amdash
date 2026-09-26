@@ -74,6 +74,7 @@ async function patientOrganizationId(patientId: string, caller: CallerProfile): 
 }
 
 const AMBULANCE_ID_MAX_LENGTH = 100;
+const PHONE_NUMBER_MAX_LENGTH = 30;
 
 // ambulanceLocations/{docId} — a flat top-level collection, not a
 // subcollection like patients/{id}/location/current: there's no parent
@@ -109,10 +110,17 @@ export const publishAmbulanceLocation = onCall<PublishAmbulanceLocationRequest>(
     throw new HttpsError('failed-precondition', 'Your account has no organization on record.');
   }
 
-  const { ambulanceId, latitude, longitude, isTransporting } = request.data;
+  const { ambulanceId, phoneNumber, latitude, longitude, isTransporting } = request.data;
   const trimmedAmbulanceId = typeof ambulanceId === 'string' ? ambulanceId.trim() : '';
   if (!trimmedAmbulanceId || trimmedAmbulanceId.length > AMBULANCE_ID_MAX_LENGTH) {
     throw new HttpsError('invalid-argument', `ambulanceId is required and must be ${AMBULANCE_ID_MAX_LENGTH} characters or fewer.`);
+  }
+  // No format/regex validation — deliberately as loose as ambulanceId's
+  // own "no validation against a live list" above, so extensions,
+  // international formats, or a short note aren't rejected.
+  const trimmedPhoneNumber = typeof phoneNumber === 'string' ? phoneNumber.trim() : '';
+  if (!trimmedPhoneNumber || trimmedPhoneNumber.length > PHONE_NUMBER_MAX_LENGTH) {
+    throw new HttpsError('invalid-argument', `phoneNumber is required and must be ${PHONE_NUMBER_MAX_LENGTH} characters or fewer.`);
   }
   if (typeof latitude !== 'number' || typeof longitude !== 'number' || typeof isTransporting !== 'boolean') {
     throw new HttpsError('invalid-argument', 'latitude, longitude, and isTransporting are required.');
@@ -136,6 +144,7 @@ export const publishAmbulanceLocation = onCall<PublishAmbulanceLocationRequest>(
   await ambulanceLocationRef(profile.organizationId, trimmedAmbulanceId).set(
     {
       ambulanceId: trimmedAmbulanceId,
+      phoneNumber: trimmedPhoneNumber,
       organizationId: profile.organizationId,
       latitude,
       longitude,

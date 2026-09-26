@@ -11,6 +11,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'ambulance_id_service.dart';
+import 'ambulance_phone_service.dart';
 import 'ems_tracking_task_handler.dart';
 
 const _updateInterval = Duration(seconds: 15);
@@ -88,11 +89,13 @@ class EmsTrackingController extends Notifier<Set<String>> {
   final Map<String, Timer> _webTimers = {};
   StreamSubscription<Position>? _iosPositionSubscription;
 
-  // Set by the two ref.listen callbacks in build() — see
-  // _syncAmbulanceTracking's own doc comment for how these two combine to
+  // Set by the three ref.listen callbacks in build() — see
+  // _syncAmbulanceTracking's own doc comment for how these combine to
   // decide whether continuous (not just per-patient) tracking should be
-  // running at all.
+  // running at all, and how the Android identity-resend logic uses
+  // _ambulancePhone alongside _ambulanceId.
   String? _ambulanceId;
+  String? _ambulancePhone;
   bool _multipleAmbulanceViewEnabled = false;
   Timer? _ambulanceWebTimer;
 
@@ -146,6 +149,10 @@ class EmsTrackingController extends Notifier<Set<String>> {
     // provider's *current* value, not just future changes.
     ref.listen(ambulanceIdProvider, (_, next) {
       _ambulanceId = next.valueOrNull;
+      unawaited(_syncAmbulanceTracking());
+    }, fireImmediately: true);
+    ref.listen(ambulancePhoneProvider, (_, next) {
+      _ambulancePhone = next.valueOrNull;
       unawaited(_syncAmbulanceTracking());
     }, fireImmediately: true);
     ref.listen(ownOrganizationProvider, (_, next) {
@@ -452,6 +459,13 @@ class EmsTrackingController extends Notifier<Set<String>> {
   // tracking at all.
   bool _ambulanceTrackingActive = false;
 
+  // What was last actually pushed to the Android isolate — see
+  // _syncAmbulanceTracking's own doc comment on why this is compared
+  // against _ambulanceId/_ambulancePhone directly, not just the
+  // shouldRun boolean above.
+  String? _lastSentAmbulanceId;
+  String? _lastSentAmbulancePhone;
+
   /// Keeps continuous ambulance-level tracking in sync with
   /// [_ambulanceId]/[_multipleAmbulanceViewEnabled] (see the two
   /// `ref.listen` calls in [build]) — independent of [state]/patient
@@ -468,9 +482,30 @@ class EmsTrackingController extends Notifier<Set<String>> {
   /// [_shouldRunAmbulanceTracking] before ever tearing the mechanism down
   /// on its own — this method only ever needs to tear it down when *it*
   /// stops being needed while [state] is already empty.
+  ///
+  /// [_ambulanceId]/[_ambulancePhone] arrive from two INDEPENDENT
+  /// `FutureProvider`s with no guaranteed resolution order (both read
+  /// SharedPreferences, but each provider's own async chain resolves on
+  /// its own). If ambulanceId resolves first, this method's dedup already
+  /// sends `{id, phone: null}` to the Android isolate (shouldRun flips
+  /// false→true, passing the guard below) — a phone number that resolves
+  /// a moment later would find `shouldRun` unchanged and, on the ORIGINAL
+  /// `shouldRun == _ambulanceTrackingActive` guard alone, never get resent
+  /// at all. `identityChanged` below closes that gap: it still preserves
+  /// the guard's original job (a call that would genuinely do nothing —
+  /// both booleans equal AND nothing about the identity differs — still
+  /// returns immediately), while also letting an already-running call
+  /// through when the identity itself changed. This isn't platform-
+  /// specific despite living ahead of the kIsWeb/iOS branches below — it's
+  /// safe for those too because `_ensureIOSPositionStream()`/the web
+  /// timer's `??=` are already idempotent no-ops on a redundant call, and
+  /// both read `_ambulanceId`/`_ambulancePhone` live from this same
+  /// instance at publish time rather than needing a pushed message the
+  /// way the separate-isolate Android path does.
   Future<void> _syncAmbulanceTracking() async {
     final shouldRun = _shouldRunAmbulanceTracking;
-    if (shouldRun == _ambulanceTrackingActive) return;
+    final identityChanged = _ambulanceId != _lastSentAmbulanceId || _ambulancePhone != _lastSentAmbulancePhone;
+    if (shouldRun == _ambulanceTrackingActive && !(shouldRun && identityChanged)) return;
     _ambulanceTrackingActive = shouldRun;
 
     // Web's ambulance publish is its own dedicated timer, independent of
@@ -502,9 +537,15 @@ class EmsTrackingController extends Notifier<Set<String>> {
 
     if (shouldRun) {
       await _ensureForegroundServiceRunning();
-      FlutterForegroundTask.sendDataToTask(jsonEncode({'action': 'setAmbulanceId', 'ambulanceId': _ambulanceId}));
+      FlutterForegroundTask.sendDataToTask(
+        jsonEncode({'action': 'setAmbulanceId', 'ambulanceId': _ambulanceId, 'phoneNumber': _ambulancePhone}),
+      );
+      _lastSentAmbulanceId = _ambulanceId;
+      _lastSentAmbulancePhone = _ambulancePhone;
     } else {
       FlutterForegroundTask.sendDataToTask(jsonEncode({'action': 'clearAmbulanceId'}));
+      _lastSentAmbulanceId = null;
+      _lastSentAmbulancePhone = null;
       if (state.isEmpty) {
         await FlutterForegroundTask.stopService();
       }
@@ -519,6 +560,7 @@ class EmsTrackingController extends Notifier<Set<String>> {
     try {
       await _functions.httpsCallable('publishAmbulanceLocation').call<Object?>({
         'ambulanceId': _ambulanceId,
+        'phoneNumber': _ambulancePhone,
         'latitude': position.latitude,
         'longitude': position.longitude,
         'isTransporting': state.isNotEmpty,

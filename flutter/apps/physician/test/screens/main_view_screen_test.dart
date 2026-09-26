@@ -2,6 +2,7 @@ import 'package:amdash_core/amdash_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:physician/classes/active_ambulance_location.dart';
 import 'package:physician/screens/main_view_screen.dart';
 import 'package:physician/services/ambulance_location_service.dart';
 import 'package:physician/services/ems_location_service.dart';
@@ -62,6 +63,7 @@ void main() {
     WidgetTester tester, {
     List<Patient> patients = const [],
     Organization? organization,
+    AmbulanceLocationState ambulanceState = const AmbulanceLocationState(hasLoadedOnce: true),
   }) async {
     late ProviderContainer container;
     await pumpApp(
@@ -80,7 +82,7 @@ void main() {
         userProfileProvider.overrideWith((ref) => Stream.value(const UserProfile(workLocation: 'Ottawa Civic'))),
         emsLocationProvider.overrideWith(_FakeEmsLocationController.new),
         ownOrganizationProvider.overrideWith((ref) => Stream.value(organization)),
-        ambulanceLocationProvider.overrideWith(_FakeAmbulanceLocationController.new),
+        ambulanceLocationProvider.overrideWith(() => _FakeAmbulanceLocationController(ambulanceState)),
       ],
     );
     return container;
@@ -298,6 +300,46 @@ void main() {
       expect(find.text('Map'), findsOneWidget);
 
       await tester.tap(find.text('Map'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(MultipleAmbulanceView), findsOneWidget);
+      expect(find.byType(AmbulanceList), findsNothing);
+    });
+
+    testWidgets('tapping a card in the ambulance list switches back to the map, so its focus/zoom is visible', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(400, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await pumpScreen(
+        tester,
+        organization: const Organization(id: 'org-1', name: 'Org', enableMultipleAmbulanceView: true),
+        ambulanceState: AmbulanceLocationState(
+          hasLoadedOnce: true,
+          info: {
+            'Unit 5': AmbulanceTrackingInfo(
+              status: AmbulanceStatus.active,
+              location: const ActiveAmbulanceLocation(
+                ambulanceId: 'Unit 5',
+                latitude: 45.4,
+                longitude: -75.7,
+                isTransporting: false,
+                updatedAtMs: 1000,
+              ),
+            ),
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('All Ambulances'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Ambulance List'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AmbulanceList), findsOneWidget);
+
+      await tester.tap(find.text('Unit 5'));
       await tester.pumpAndSettle();
 
       expect(find.byType(MultipleAmbulanceView), findsOneWidget);

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:amdash_core/amdash_core.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -119,6 +120,32 @@ Future<BitmapDescriptor> _emojiMarkerBitmap(String emoji, Color backgroundColor)
 /// options ("View All Ambulances" / "View All Empty Ambulances").
 enum AmbulanceViewFilter { all, emptyOnly }
 
+// google_maps_flutter_web renders InfoWindow.snippet through
+// sanitizeHtml() + innerHTML (confirmed against its installed
+// convert.dart), not as plain text — a bare '\n' is just whitespace in a
+// text node and collapses to a space there (default CSS
+// white-space: normal). '<br>' is on sanitize_html's element allowlist,
+// so it survives there and renders as a real line break — but native
+// Android/iOS pass the snippet straight to the platform SDK's own
+// plain-text snippet renderer with no HTML interpretation at all, where
+// '\n' is what actually produces a break and a literal '<br>' would
+// render as text. kIsWeb is a compile-time constant, always false under
+// `flutter test` (Dart VM, not a web build) — see
+// ems_tracking_service.dart's identical note — so the web half of this
+// line is unreachable there, same as directions_service.dart's own
+// `??` fallback.
+final _infoWindowLineBreak = kIsWeb ? '<br>' : '\n'; // coverage:ignore-line
+
+String _infoWindowSnippet(AmbulanceTrackingInfo entry) {
+  final statusText = entry.status == AmbulanceStatus.stale
+      ? 'Last updated at ${DateFormat('h:mm:ss a').format(DateTime.fromMillisecondsSinceEpoch(entry.location.updatedAtMs))}'
+      : entry.location.isTransporting
+      ? 'Transporting a patient'
+      : 'Empty';
+  final phoneNumber = entry.location.phoneNumber;
+  return phoneNumber.isEmpty ? statusText : '$phoneNumber$_infoWindowLineBreak$statusText';
+}
+
 /// The fleet-wide map, rendered alongside [AmbulanceList] (its sidebar
 /// counterpart) when [MainViewScreen]'s view-mode control is set to either
 /// ambulance filter. Structurally mirrors patient_viewer.dart's
@@ -178,6 +205,21 @@ class _MultipleAmbulanceViewState extends ConsumerState<MultipleAmbulanceView> {
     _openInfoWindowId = highlightedId;
   }
 
+  // Only ever called for a genuine selection (a card tap or a marker tap),
+  // never a hover — see the ref.listen call below, which gates this on
+  // selectedId actually changing, not effectiveId (hover would fire this
+  // on every mouse-over otherwise). Reads the ambulance's position fresh
+  // via ref.read rather than a closed-over build()-time value, since this
+  // runs from a listener callback that can fire between builds.
+  void _focusOnAmbulance(String ambulanceId) {
+    final controller = _mapController;
+    final location = ref.read(ambulanceLocationProvider).info[ambulanceId]?.location;
+    if (controller == null || location == null) return;
+    unawaited(
+      controller.animateCamera(CameraUpdate.newLatLngZoom(LatLng(location.latitude, location.longitude), 16)),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -222,10 +264,16 @@ class _MultipleAmbulanceViewState extends ConsumerState<MultipleAmbulanceView> {
     // Called unconditionally, ahead of every early return below — a
     // ref.listen skipped on some builds (e.g. while state.hasLoadedOnce is
     // still false) but not others isn't a supported Riverpod pattern.
-    ref.listen<AmbulanceHighlightState>(
-      ambulanceHighlightProvider,
-      (previous, next) => _syncInfoWindow(next.effectiveId),
-    );
+    ref.listen<AmbulanceHighlightState>(ambulanceHighlightProvider, (previous, next) {
+      _syncInfoWindow(next.effectiveId);
+      // Only a genuine new *selection* focuses the camera — checking
+      // selectedId specifically (not effectiveId) means a hover alone
+      // never moves the map, matching "when someone clicks" rather than
+      // "when someone mouses over."
+      if (next.selectedId != null && next.selectedId != previous?.selectedId) {
+        _focusOnAmbulance(next.selectedId!);
+      }
+    });
 
     if (!state.hasLoadedOnce) {
       return const Center(child: CircularProgressIndicator());
@@ -269,11 +317,7 @@ class _MultipleAmbulanceViewState extends ConsumerState<MultipleAmbulanceView> {
           onTap: () => ref.read(ambulanceHighlightProvider.notifier).select(entry.location.ambulanceId),
           infoWindow: InfoWindow(
             title: entry.location.ambulanceId,
-            snippet: entry.status == AmbulanceStatus.stale
-                ? 'Last updated at ${DateFormat('h:mm:ss a').format(DateTime.fromMillisecondsSinceEpoch(entry.location.updatedAtMs))}'
-                : entry.location.isTransporting
-                ? 'Transporting a patient'
-                : 'Empty',
+            snippet: _infoWindowSnippet(entry),
           ),
         ),
     };
@@ -283,6 +327,16 @@ class _MultipleAmbulanceViewState extends ConsumerState<MultipleAmbulanceView> {
       onMapCreated: (controller) {
         _mapController = controller;
         _fitToPoints(points);
+        // MainViewScreen disposes and recreates this widget when it swaps
+        // between the mobile ambulance-list and map views — a selection
+        // made while the list was showing (and this instance didn't
+        // exist) fires before this widget's own ref.listen above can ever
+        // see it. Catch up on whatever's already selected the instant the
+        // map connects, so returning to the map still focuses it.
+        // Double-animates alongside _fitToPoints on this one path
+        // (fleet-fit, then zoom-in) — a bit busy, but correct.
+        final selectedId = ref.read(ambulanceHighlightProvider).selectedId;
+        if (selectedId != null) _focusOnAmbulance(selectedId);
       },
       markers: markers,
     );

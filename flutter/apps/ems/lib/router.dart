@@ -10,10 +10,12 @@ import 'screens/patient_upload_screen.dart';
 import 'screens/patient_viewer_screen.dart';
 import 'screens/user_settings_screen.dart';
 import 'services/ambulance_id_service.dart';
+import 'services/ambulance_phone_service.dart';
 
-// Extends amdash_core's own RouterRefreshNotifier with the two additional
-// providers AmbulanceIdGuard reads — kept local to this app (not folded
-// into the shared class) since physician/admin have no use for either.
+// Extends amdash_core's own RouterRefreshNotifier with the three
+// additional providers AmbulanceIdGuard reads — kept local to this app
+// (not folded into the shared class) since physician/admin have no use
+// for any of them.
 class _EmsRouterRefreshNotifier extends ChangeNotifier {
   _EmsRouterRefreshNotifier(Ref ref) {
     _inner = RouterRefreshNotifier(ref)..addListener(notifyListeners);
@@ -39,6 +41,10 @@ class _EmsRouterRefreshNotifier extends ChangeNotifier {
       if (previous?.valueOrNull?.enableMultipleAmbulanceView == next.valueOrNull?.enableMultipleAmbulanceView) {
         return;
       }
+      notifyListeners();
+    });
+    ref.listen(ambulancePhoneProvider, (previous, next) {
+      if (previous?.valueOrNull == next.valueOrNull) return;
       notifyListeners();
     });
   }

@@ -33,6 +33,7 @@ AmbulanceTrackingInfo _info(
   bool isTransporting = false,
   AmbulanceStatus status = AmbulanceStatus.active,
   int updatedAtMs = 1000,
+  String phoneNumber = '',
 }) {
   return AmbulanceTrackingInfo(
     status: status,
@@ -42,6 +43,7 @@ AmbulanceTrackingInfo _info(
       longitude: longitude,
       isTransporting: isTransporting,
       updatedAtMs: updatedAtMs,
+      phoneNumber: phoneNumber,
     ),
   );
 }
@@ -56,6 +58,12 @@ void main() {
 
   setUp(() {
     mapPlatform = installMockGoogleMaps();
+    // Every test below can select/hover an ambulance (which always
+    // touches _syncInfoWindow too, regardless of what it's testing) —
+    // stubbed globally rather than per-test so a test focused on camera
+    // behavior doesn't also need to know about the info-window channel.
+    when(() => mapPlatform.showMarkerInfoWindow(any(), mapId: any(named: 'mapId'))).thenAnswer((_) async {});
+    when(() => mapPlatform.hideMarkerInfoWindow(any(), mapId: any(named: 'mapId'))).thenAnswer((_) async {});
   });
 
   // Returns both the fake location controller and the widget tree's own
@@ -198,6 +206,33 @@ void main() {
 
       final map = tester.widget<GoogleMap>(find.byType(GoogleMap));
       expect(map.markers.first.infoWindow.snippet, startsWith('Last updated at'));
+    });
+
+    testWidgets('a phone number shows on its own line above the status text', (tester) async {
+      await pumpView(
+        tester,
+        state: AmbulanceLocationState(
+          hasLoadedOnce: true,
+          info: {'Unit 5': _info('Unit 5', phoneNumber: '555-0123')},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final map = tester.widget<GoogleMap>(find.byType(GoogleMap));
+      // Native (this is a `flutter test` run, not web — kIsWeb is a
+      // compile-time constant, always false here) uses a plain '\n'.
+      expect(map.markers.first.infoWindow.snippet, '555-0123\nEmpty');
+    });
+
+    testWidgets('no phone number on record falls back to just the status text, unchanged', (tester) async {
+      await pumpView(
+        tester,
+        state: AmbulanceLocationState(hasLoadedOnce: true, info: {'Unit 5': _info('Unit 5')}),
+      );
+      await tester.pumpAndSettle();
+
+      final map = tester.widget<GoogleMap>(find.byType(GoogleMap));
+      expect(map.markers.first.infoWindow.snippet, 'Empty');
     });
   });
 
@@ -420,6 +455,113 @@ void main() {
       verify(
         () => mapPlatform.showMarkerInfoWindow(const MarkerId('Unit 5'), mapId: any(named: 'mapId')),
       ).called(1);
+    });
+  });
+
+  group('camera focus on selection', () {
+    testWidgets('selecting an ambulance zooms the map to it, at a tighter zoom than the fleet fit', (
+      tester,
+    ) async {
+      final (_, container) = await pumpView(
+        tester,
+        state: AmbulanceLocationState(
+          hasLoadedOnce: true,
+          info: {'Unit 5': _info('Unit 5'), 'Unit 9': _info('Unit 9', latitude: 46, longitude: -76)},
+        ),
+      );
+      await tester.pumpAndSettle();
+      await connectGoogleMap(tester, mapPlatform);
+      clearInteractions(mapPlatform);
+
+      container.read(ambulanceHighlightProvider.notifier).select('Unit 9');
+      await tester.pump();
+
+      final captured = verify(
+        () => mapPlatform.animateCameraWithConfiguration(captureAny(), any(), mapId: any(named: 'mapId')),
+      ).captured;
+      expect(
+        captured.map((call) => (call as CameraUpdate).toJson()),
+        // contains() on an Iterable checks membership via `==`, which
+        // Dart's built-in List doesn't override for structural equality —
+        // anyElement(equals(...)) is what actually performs a deep
+        // (recursive) comparison against the nested [lat, lng] list.
+        anyElement(equals(['newLatLngZoom', [46.0, -76.0], 16.0])),
+      );
+    });
+
+    testWidgets('hovering alone does not move the camera — only a genuine selection does', (tester) async {
+      final (_, container) = await pumpView(
+        tester,
+        state: AmbulanceLocationState(hasLoadedOnce: true, info: {'Unit 5': _info('Unit 5')}),
+      );
+      await tester.pumpAndSettle();
+      await connectGoogleMap(tester, mapPlatform);
+      clearInteractions(mapPlatform);
+
+      container.read(ambulanceHighlightProvider.notifier).hover('Unit 5');
+      await tester.pump();
+
+      verifyNever(() => mapPlatform.animateCameraWithConfiguration(any(), any(), mapId: any(named: 'mapId')));
+    });
+
+    testWidgets('selecting before the map controller connects is a no-op, not a crash', (tester) async {
+      final (_, container) = await pumpView(
+        tester,
+        state: AmbulanceLocationState(hasLoadedOnce: true, info: {'Unit 5': _info('Unit 5')}),
+      );
+      await tester.pumpAndSettle();
+
+      container.read(ambulanceHighlightProvider.notifier).select('Unit 5');
+      await tester.pump();
+      // No exception — _mapController is still null at this point, and
+      // _focusOnAmbulance no-ops rather than crashing on it.
+    });
+
+    testWidgets('selecting an ambulance absent from the current snapshot is a no-op', (tester) async {
+      final (_, container) = await pumpView(
+        tester,
+        state: AmbulanceLocationState(hasLoadedOnce: true, info: {'Unit 5': _info('Unit 5')}),
+      );
+      await tester.pumpAndSettle();
+      await connectGoogleMap(tester, mapPlatform);
+      clearInteractions(mapPlatform);
+
+      container.read(ambulanceHighlightProvider.notifier).select('Unit 9');
+      await tester.pump();
+
+      verifyNever(() => mapPlatform.animateCameraWithConfiguration(any(), any(), mapId: any(named: 'mapId')));
+    });
+
+    testWidgets('an already-selected ambulance is focused immediately once the map reconnects', (tester) async {
+      // Simulates MainViewScreen disposing/recreating this widget when
+      // toggling between the mobile list and map views — the selection
+      // lives in ambulanceHighlightProvider, outside this widget's own
+      // lifecycle, so it can already be set before this instance (and its
+      // own ref.listen) ever exists. Selecting on the container directly,
+      // before pumping the widget at all, reproduces that ordering.
+      final controller = _FakeAmbulanceLocationController(
+        AmbulanceLocationState(hasLoadedOnce: true, info: {'Unit 5': _info('Unit 5')}),
+      );
+      final container = ProviderContainer(overrides: [ambulanceLocationProvider.overrideWith(() => controller)]);
+      addTearDown(container.dispose);
+      container.read(ambulanceHighlightProvider.notifier).select('Unit 5');
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: Scaffold(body: MultipleAmbulanceView(filter: AmbulanceViewFilter.all))),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await connectGoogleMap(tester, mapPlatform);
+
+      final captured = verify(
+        () => mapPlatform.animateCameraWithConfiguration(captureAny(), any(), mapId: any(named: 'mapId')),
+      ).captured;
+      expect(
+        captured.map((call) => (call as CameraUpdate).toJson()),
+        anyElement(equals(['newLatLngZoom', [45.4, -75.7], 16.0])),
+      );
     });
   });
 }

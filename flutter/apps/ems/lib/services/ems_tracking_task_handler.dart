@@ -96,6 +96,7 @@ class EmsTrackingTaskHandler extends TaskHandler {
   final Set<String> _trackedPatientIds = {};
   bool _firebaseReady;
   String? _ambulanceId;
+  String? _phoneNumber;
   DateTime? _lastAmbulancePublishAt;
 
   // The most recent fix from the persistent stream below — read directly
@@ -251,6 +252,7 @@ class EmsTrackingTaskHandler extends TaskHandler {
       try {
         await _functionsInstance.httpsCallable('publishAmbulanceLocation').call<Object?>({
           'ambulanceId': _ambulanceId,
+          'phoneNumber': _phoneNumber,
           'latitude': position.latitude,
           'longitude': position.longitude,
           'isTransporting': isTransporting,
@@ -281,8 +283,10 @@ class EmsTrackingTaskHandler extends TaskHandler {
         if (patientId != null) _trackedPatientIds.remove(patientId);
       case 'setAmbulanceId':
         _ambulanceId = decoded['ambulanceId'] as String?;
+        _phoneNumber = decoded['phoneNumber'] as String?;
       case 'clearAmbulanceId':
         _ambulanceId = null;
+        _phoneNumber = null;
     }
   }
 
@@ -290,6 +294,7 @@ class EmsTrackingTaskHandler extends TaskHandler {
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     _trackedPatientIds.clear();
     _ambulanceId = null;
+    _phoneNumber = null;
     _lastAmbulancePublishAt = null;
     await _positionSubscription?.cancel();
     _positionSubscription = null;

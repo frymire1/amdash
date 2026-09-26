@@ -131,6 +131,10 @@ class AmbulanceLocationController extends Notifier<AmbulanceLocationState> {
         longitude: longitude,
         isTransporting: data['isTransporting'] as bool? ?? false,
         updatedAtMs: updatedAt.millisecondsSinceEpoch,
+        // Defensive fallback for any doc written before this field
+        // existed — the backend has required it on every publish since,
+        // so in practice this only matters for pre-migration data.
+        phoneNumber: (data['phoneNumber'] as String?) ?? '',
       );
     }
     // Deliberately not removing entries whose doc is missing from this

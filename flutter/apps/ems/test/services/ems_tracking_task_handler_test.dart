@@ -110,8 +110,8 @@ void main() {
     h.onReceiveData(jsonEncode({'action': 'untrack', 'patientId': patientId}));
   }
 
-  void setAmbulanceId(EmsTrackingTaskHandler h, String ambulanceId) {
-    h.onReceiveData(jsonEncode({'action': 'setAmbulanceId', 'ambulanceId': ambulanceId}));
+  void setAmbulanceId(EmsTrackingTaskHandler h, String ambulanceId, [String? phoneNumber]) {
+    h.onReceiveData(jsonEncode({'action': 'setAmbulanceId', 'ambulanceId': ambulanceId, 'phoneNumber': phoneNumber}));
   }
 
   void clearAmbulanceId(EmsTrackingTaskHandler h) {
@@ -340,7 +340,7 @@ void main() {
     test('an identified ambulance with no tracked patients publishes on the very first tick', () async {
       final h = await handler();
       await deliverPosition(_position());
-      setAmbulanceId(h, 'Unit 5');
+      setAmbulanceId(h, 'Unit 5', '555-0123');
 
       h.onRepeatEvent(DateTime(2026));
       await pumpEventQueue();
@@ -349,7 +349,7 @@ void main() {
         () => ambulanceCallable.call<Object?>(
           any(
             that: predicate<Map<Object?, Object?>>(
-              (m) => m['ambulanceId'] == 'Unit 5' && m['isTransporting'] == false,
+              (m) => m['ambulanceId'] == 'Unit 5' && m['phoneNumber'] == '555-0123' && m['isTransporting'] == false,
             ),
           ),
         ),

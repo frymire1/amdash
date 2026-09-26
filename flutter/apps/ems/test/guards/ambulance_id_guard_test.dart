@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:amdash_core/amdash_core.dart';
 import 'package:ems/guards/ambulance_id_guard.dart';
 import 'package:ems/services/ambulance_id_service.dart';
+import 'package:ems/services/ambulance_phone_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -31,6 +32,8 @@ void main() {
     Organization? organization,
     bool ambulanceIdLoading = false,
     String? ambulanceId,
+    bool ambulancePhoneLoading = false,
+    String? ambulancePhone,
   }) async {
     container = ProviderContainer(
       overrides: [
@@ -40,6 +43,9 @@ void main() {
         ambulanceIdProvider.overrideWith(
           (ref) => ambulanceIdLoading ? Completer<String?>().future : Future.value(ambulanceId),
         ),
+        ambulancePhoneProvider.overrideWith(
+          (ref) => ambulancePhoneLoading ? Completer<String?>().future : Future.value(ambulancePhone),
+        ),
       ],
     );
     final refCaptureProvider = Provider<Ref>((ref) => ref);
@@ -47,6 +53,12 @@ void main() {
 
     if (!orgLoading) await container.read(ownOrganizationProvider.future);
     if (!ambulanceIdLoading) await container.read(ambulanceIdProvider.future);
+    // The guard only ever reads ambulancePhoneProvider once an ambulanceId
+    // is already confirmed set — awaiting it unconditionally here anyway
+    // (via a value future, never actually loading unless ambulanceId is
+    // also set and ambulancePhoneLoading was asked for) keeps this helper
+    // simple without changing what the guard itself touches.
+    if (!ambulancePhoneLoading) await container.read(ambulancePhoneProvider.future);
   }
 
   group('org tier', () {
@@ -104,6 +116,7 @@ void main() {
       await setUpContainer(
         organization: const Organization(id: 'org1', name: 'Org', enableMultipleAmbulanceView: true),
         ambulanceId: 'Unit 5',
+        ambulancePhone: '555-0123',
       );
       expect(AmbulanceIdGuard.redirect(ref: ref, state: _stateAt('/ambulance-id')), '/');
     });
@@ -112,8 +125,45 @@ void main() {
       await setUpContainer(
         organization: const Organization(id: 'org1', name: 'Org', enableMultipleAmbulanceView: true),
         ambulanceId: 'Unit 5',
+        ambulancePhone: '555-0123',
       );
       expect(AmbulanceIdGuard.redirect(ref: ref, state: _stateAt('/upload')), isNull);
+    });
+  });
+
+  group('ambulance phone tier (feature enabled, ambulance ID already set)', () {
+    test('no redirect while ambulance phone is still loading', () async {
+      await setUpContainer(
+        organization: const Organization(id: 'org1', name: 'Org', enableMultipleAmbulanceView: true),
+        ambulanceId: 'Unit 5',
+        ambulancePhoneLoading: true,
+      );
+      expect(AmbulanceIdGuard.redirect(ref: ref, state: _stateAt('/')), isNull);
+    });
+
+    test('unset (ID already set) redirects to /ambulance-id', () async {
+      await setUpContainer(
+        organization: const Organization(id: 'org1', name: 'Org', enableMultipleAmbulanceView: true),
+        ambulanceId: 'Unit 5',
+      );
+      expect(AmbulanceIdGuard.redirect(ref: ref, state: _stateAt('/')), '/ambulance-id');
+    });
+
+    test('empty string is treated as unset', () async {
+      await setUpContainer(
+        organization: const Organization(id: 'org1', name: 'Org', enableMultipleAmbulanceView: true),
+        ambulanceId: 'Unit 5',
+        ambulancePhone: '',
+      );
+      expect(AmbulanceIdGuard.redirect(ref: ref, state: _stateAt('/')), '/ambulance-id');
+    });
+
+    test('unset (ID already set) and already at /ambulance-id stays put', () async {
+      await setUpContainer(
+        organization: const Organization(id: 'org1', name: 'Org', enableMultipleAmbulanceView: true),
+        ambulanceId: 'Unit 5',
+      );
+      expect(AmbulanceIdGuard.redirect(ref: ref, state: _stateAt('/ambulance-id')), isNull);
     });
   });
 

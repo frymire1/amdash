@@ -12,6 +12,14 @@ import 'interaction_helpers.dart';
 /// first_login_test.dart, patient_upload_flow_test.dart) needs it
 /// identically.
 ///
+/// Fills the phone number field too — it became a second required field
+/// on this same form alongside the Ambulance ID. Without it, `_submit()`
+/// no-ops entirely (both fields must be valid to proceed), so the wait
+/// loop below would exhaust its iterations with the prompt still showing
+/// and every caller would then fail confusingly on whatever HomeScreen
+/// element it looks for next — exactly the failure shape this helper's
+/// own history (below) already describes for a different cause.
+///
 /// Every one of those must call this right after signing in (and, for a
 /// first-ever sign-in, right after MFA enrollment), before assuming the
 /// next screen is HomeScreen: AmbulanceIdGuard (ems/lib/router.dart)
@@ -35,18 +43,23 @@ import 'interaction_helpers.dart';
 /// different snapshots of the same race. Waiting here, before ever
 /// touching a HomeScreen-only element, closes that window instead of
 /// leaving each caller to rediscover it independently.
-Future<void> settleAmbulanceIdPrompt(PatrolIntegrationTester $, {String ambulanceId = 'Patrol Test Ambulance'}) async {
+Future<void> settleAmbulanceIdPrompt(
+  PatrolIntegrationTester $, {
+  String ambulanceId = 'Patrol Test Ambulance',
+  String phoneNumber = '555-0100',
+}) async {
   final field = find.byKey(const Key('ambulance_id_field'));
   // Bounded either way: the field either appears once
-  // ownOrganizationProvider/ambulanceIdProvider settle (a live Firestore
-  // read, so allow real network time) or never appears at all (the org's
-  // flag is off, or this device already has an ambulance ID saved) —
-  // there's no third, slower-but-still-coming case to wait even longer
-  // for.
+  // ownOrganizationProvider/ambulanceIdProvider/ambulancePhoneProvider
+  // settle (a live Firestore read, so allow real network time) or never
+  // appears at all (the org's flag is off, or this device already has
+  // both an ambulance ID and phone number saved) — there's no third,
+  // slower-but-still-coming case to wait even longer for.
   await pumpUntil($, () => field.evaluate().isNotEmpty, maxIterations: 30);
   if (field.evaluate().isEmpty) return;
 
   await enterTextAt($, 0, ambulanceId);
+  await enterTextAt($, 1, phoneNumber);
   await tapKey($, 'ambulance_id_submit');
   await pumpUntil($, () => field.evaluate().isEmpty, maxIterations: 30);
 }

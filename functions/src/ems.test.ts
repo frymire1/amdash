@@ -260,11 +260,47 @@ describe('publishAmbulanceLocation', () => {
     ).rejects.toThrow('ambulanceId is required and must be 100 characters or fewer.');
   });
 
+  it('throws invalid-argument when phoneNumber is empty or only whitespace', async () => {
+    mockGetCallerProfile.mockResolvedValue(EMS_PROFILE);
+    await expect(
+      publishAmbulanceLocation.run(
+        fakeCallableRequest(
+          { ambulanceId: 'Unit 5', phoneNumber: '   ', latitude: 1, longitude: 2, isTransporting: false },
+          'uid-1',
+        ),
+      ),
+    ).rejects.toThrow('phoneNumber is required and must be 30 characters or fewer.');
+  });
+
+  it('throws invalid-argument when phoneNumber is missing entirely (not even the wrong type)', async () => {
+    mockGetCallerProfile.mockResolvedValue(EMS_PROFILE);
+    await expect(
+      publishAmbulanceLocation.run(
+        fakeCallableRequest({ ambulanceId: 'Unit 5', latitude: 1, longitude: 2, isTransporting: false } as never, 'uid-1'),
+      ),
+    ).rejects.toThrow('phoneNumber is required and must be 30 characters or fewer.');
+  });
+
+  it('throws invalid-argument when phoneNumber is longer than 30 characters', async () => {
+    mockGetCallerProfile.mockResolvedValue(EMS_PROFILE);
+    await expect(
+      publishAmbulanceLocation.run(
+        fakeCallableRequest(
+          { ambulanceId: 'Unit 5', phoneNumber: 'x'.repeat(31), latitude: 1, longitude: 2, isTransporting: false },
+          'uid-1',
+        ),
+      ),
+    ).rejects.toThrow('phoneNumber is required and must be 30 characters or fewer.');
+  });
+
   it('throws invalid-argument when latitude/longitude/isTransporting are missing or the wrong type', async () => {
     mockGetCallerProfile.mockResolvedValue(EMS_PROFILE);
     await expect(
       publishAmbulanceLocation.run(
-        fakeCallableRequest({ ambulanceId: 'Unit 5', latitude: 1, longitude: 2, isTransporting: 'no' as never }, 'uid-1'),
+        fakeCallableRequest(
+          { ambulanceId: 'Unit 5', phoneNumber: '555-0123', latitude: 1, longitude: 2, isTransporting: 'no' as never },
+          'uid-1',
+        ),
       ),
     ).rejects.toThrow('latitude, longitude, and isTransporting are required.');
   });
@@ -274,7 +310,10 @@ describe('publishAmbulanceLocation', () => {
     mockOrgGet.mockResolvedValue({ data: () => ({ enableMultipleAmbulanceView: false }) });
     await expect(
       publishAmbulanceLocation.run(
-        fakeCallableRequest({ ambulanceId: 'Unit 5', latitude: 1, longitude: 2, isTransporting: false }, 'uid-1'),
+        fakeCallableRequest(
+          { ambulanceId: 'Unit 5', phoneNumber: '555-0123', latitude: 1, longitude: 2, isTransporting: false },
+          'uid-1',
+        ),
       ),
     ).rejects.toThrow('Multiple ambulance view is not enabled for this organization.');
   });
@@ -283,7 +322,10 @@ describe('publishAmbulanceLocation', () => {
     mockGetCallerProfile.mockResolvedValue(EMS_PROFILE);
 
     const result = await publishAmbulanceLocation.run(
-      fakeCallableRequest({ ambulanceId: '  Unit 5  ', latitude: 43.65, longitude: -79.38, isTransporting: true }, 'uid-1'),
+      fakeCallableRequest(
+        { ambulanceId: '  Unit 5  ', phoneNumber: '  555-0123  ', latitude: 43.65, longitude: -79.38, isTransporting: true },
+        'uid-1',
+      ),
     );
 
     const expectedDocId = crypto.createHash('sha256').update('org-1:Unit 5').digest('hex');
@@ -291,6 +333,7 @@ describe('publishAmbulanceLocation', () => {
     expect(mockAmbulanceLocationSet).toHaveBeenCalledWith(
       {
         ambulanceId: 'Unit 5',
+        phoneNumber: '555-0123',
         organizationId: 'org-1',
         latitude: 43.65,
         longitude: -79.38,

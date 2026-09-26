@@ -20,6 +20,7 @@ class ActiveAmbulanceLocation {
     required this.longitude,
     required this.isTransporting,
     required this.updatedAtMs,
+    this.phoneNumber = '',
   });
 
   final String ambulanceId;
@@ -27,4 +28,10 @@ class ActiveAmbulanceLocation {
   final double longitude;
   final bool isTransporting;
   final int updatedAtMs;
+
+  /// The best phone number to reach this ambulance's crew, as entered on
+  /// the EMS device at sign-in (see ems/lib/screens/ambulance_id_screen.dart)
+  /// — empty string, not null, for a doc written before this field
+  /// existed (see AmbulanceLocationController._onSnapshot's own fallback).
+  final String phoneNumber;
 }

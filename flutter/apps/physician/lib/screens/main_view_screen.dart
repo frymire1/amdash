@@ -2,6 +2,7 @@ import 'package:amdash_core/amdash_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../services/ambulance_highlight_service.dart';
 import '../services/patient_service.dart';
 import '../widgets/ambulance_list.dart';
 import '../widgets/multiple_ambulance_view.dart';
@@ -71,6 +72,19 @@ class _MainViewScreenState extends ConsumerState<MainViewScreen> {
     final multipleAmbulanceViewEnabled =
         ref.watch(ownOrganizationProvider).valueOrNull?.enableMultipleAmbulanceView ?? false;
     final effectiveViewMode = multipleAmbulanceViewEnabled ? _viewMode : _ViewMode.patients;
+
+    // Safe to register unconditionally: .select()/.hover() are only ever
+    // called from ambulance-mode widgets (AmbulanceCard, AmbulanceList,
+    // MultipleAmbulanceView's own markers) — this never fires while in
+    // Patients mode. On mobile, the ambulance list and the map are
+    // mutually exclusive views (see _buildAmbulanceBody below); without
+    // this, tapping a card while looking at the list highlights/focuses a
+    // map the user can't currently see.
+    ref.listen<AmbulanceHighlightState>(ambulanceHighlightProvider, (previous, next) {
+      if (next.selectedId != null && next.selectedId != previous?.selectedId) {
+        setState(() => _showAmbulanceListOnMobile = false);
+      }
+    });
 
     final body = switch (effectiveViewMode) {
       _ViewMode.allAmbulances => _buildAmbulanceBody(AmbulanceViewFilter.all),

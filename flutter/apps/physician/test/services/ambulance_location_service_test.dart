@@ -33,6 +33,7 @@ QueryDocumentSnapshot<Map<String, dynamic>> _ambulanceDoc(
   required double longitude,
   bool isTransporting = false,
   Timestamp? updatedAt,
+  String phoneNumber = '',
 }) {
   final doc = _MockQueryDocSnapshot();
   when(() => doc.data()).thenReturn({
@@ -42,6 +43,7 @@ QueryDocumentSnapshot<Map<String, dynamic>> _ambulanceDoc(
     'longitude': longitude,
     'isTransporting': isTransporting,
     'updatedAt': updatedAt ?? Timestamp.now(),
+    'phoneNumber': phoneNumber,
   });
   return doc;
 }
@@ -134,6 +136,7 @@ void main() {
         'longitude': -75.7,
         'isTransporting': true,
         'updatedAt': Timestamp.now(),
+        'phoneNumber': '555-0123',
       });
 
       final container = await containerFor(
@@ -147,6 +150,27 @@ void main() {
       expect(info.location.latitude, 45.4);
       expect(info.location.longitude, -75.7);
       expect(info.location.isTransporting, true);
+      expect(info.location.phoneNumber, '555-0123');
+    });
+
+    test('a doc written before phoneNumber existed falls back to an empty string, not a crash', () async {
+      await firestore.collection('ambulanceLocations').doc('doc-1').set({
+        'organizationId': 'org-1',
+        'ambulanceId': 'Unit 5',
+        'latitude': 45.4,
+        'longitude': -75.7,
+        'isTransporting': true,
+        'updatedAt': Timestamp.now(),
+        // No 'phoneNumber' key at all.
+      });
+
+      final container = await containerFor(
+        const Organization(id: 'org-1', name: 'Org', enableMultipleAmbulanceView: true),
+      );
+      addTearDown(container.dispose);
+
+      final state = await _waitUntil(container, (s) => s.hasLoadedOnce);
+      expect(state.info['Unit 5']!.location.phoneNumber, '');
     });
 
     test('a fix already older than the staleness threshold maps to AmbulanceStatus.stale', () async {

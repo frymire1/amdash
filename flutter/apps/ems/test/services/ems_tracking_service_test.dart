@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:amdash_core/amdash_core.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:ems/services/ambulance_id_service.dart';
+import 'package:ems/services/ambulance_phone_service.dart';
 import 'package:ems/services/ems_tracking_service.dart';
 import 'package:ems/services/ems_tracking_task_handler.dart';
 import 'package:flutter/foundation.dart';
@@ -131,11 +132,12 @@ void main() {
     when(() => foregroundTask.requestNotificationPermission()).thenAnswer((_) async => NotificationPermission.granted);
   }
 
-  ProviderContainer containerFor({String? ambulanceId, Organization? organization}) {
+  ProviderContainer containerFor({String? ambulanceId, String? ambulancePhone, Organization? organization}) {
     final container = ProviderContainer(
       overrides: [
         firebaseFunctionsProvider.overrideWithValue(functions),
         ambulanceIdProvider.overrideWith((ref) => Future.value(ambulanceId)),
+        ambulancePhoneProvider.overrideWith((ref) => Future.value(ambulancePhone)),
         ownOrganizationProvider.overrideWith((ref) => Stream.value(organization)),
       ],
     );
@@ -967,6 +969,54 @@ void main() {
 
           verify(() => foregroundTask.sendDataToTask(any(that: contains('"action":"clearAmbulanceId"')))).called(1);
           verify(() => foregroundTask.stopService()).called(1);
+        },
+      );
+
+      test(
+        'a phone number that resolves AFTER ambulanceId already triggered a send is not silently dropped',
+        () async {
+          // Reproduces the exact race the identityChanged guard exists to
+          // close: ambulanceIdProvider and ambulancePhoneProvider are two
+          // independent FutureProviders with no guaranteed resolution
+          // order. Completers (rather than containerFor's Future.value)
+          // let this test control that order explicitly instead of hoping
+          // for it.
+          stubForegroundServiceLifecycle();
+          when(() => foregroundTask.sendDataToTask(any())).thenReturn(null);
+
+          final idCompleter = Completer<String?>();
+          final phoneCompleter = Completer<String?>();
+          final container = ProviderContainer(
+            overrides: [
+              firebaseFunctionsProvider.overrideWithValue(functions),
+              ambulanceIdProvider.overrideWith((ref) => idCompleter.future),
+              ambulancePhoneProvider.overrideWith((ref) => phoneCompleter.future),
+              ownOrganizationProvider.overrideWith(
+                (ref) => Stream.value(const Organization(id: 'org1', name: 'Org', enableMultipleAmbulanceView: true)),
+              ),
+            ],
+          );
+          addTearDown(container.dispose);
+          container.read(emsTrackingProvider.notifier);
+          await pumpEventQueue();
+
+          idCompleter.complete('Unit 5');
+          await pumpEventQueue();
+
+          verify(
+            () => foregroundTask.sendDataToTask(
+              any(that: allOf(contains('"ambulanceId":"Unit 5"'), contains('"phoneNumber":null'))),
+            ),
+          ).called(1);
+
+          phoneCompleter.complete('555-0123');
+          await pumpEventQueue();
+
+          verify(
+            () => foregroundTask.sendDataToTask(
+              any(that: allOf(contains('"ambulanceId":"Unit 5"'), contains('"phoneNumber":"555-0123"'))),
+            ),
+          ).called(1);
         },
       );
 
